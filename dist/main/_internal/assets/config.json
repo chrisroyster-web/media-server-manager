@@ -1,0 +1,83 @@
+{
+    "sidebar_collapsed": false,
+    "sidebar_auto_collapse": true,
+    "last_host": "192.168.4.252",
+    "last_username": "mediasvr",
+    "sabnzbd_apikey": "0473b9b2f1d2a3b62eb6c2f85263d458",
+    "sabnzbd_port": "8080",
+    "services": {
+        "Emby": {
+            "service": "emby-server",
+            "port": 8096
+        },
+        "Sonarr": {
+            "service": "sonarr",
+            "port": 8989
+        },
+        "Radarr": {
+            "service": "radarr",
+            "port": 7878
+        },
+        "Prowlarr": {
+            "service": "prowlarr",
+            "port": 9797
+        },
+        "Bazarr": {
+            "service": "bazarr",
+            "port": 6767
+        },
+        "SABnzbd": {
+            "service": "sabnzbdplus",
+            "port": 8080
+        }
+    },
+    "docker": {
+        "Tracearr": {
+            "container": "tracearr",
+            "port": 3000
+        },
+        "Homarr": {
+            "container": "homarr",
+            "port": 7575
+        },
+        "Uptime Kuma": {
+            "container": "uptime-kuma",
+            "port": 3001
+        },
+        "Watchtower": {
+            "container": "watchtower",
+            "port": null
+        }
+    },
+    "storage_mounts": [
+        "/",
+        "/opt/media/downloads",
+        "/mnt/nas/wsbackup"
+    ],
+    "thresholds": {
+        "cpu": 80,
+        "ram": 85,
+        "disk": 90,
+        "temp": 85
+    },
+    "dashboard_refresh_interval": 30,
+    "sonarr_host": "192.168.4.252",
+    "sonarr_port": "8989",
+    "sonarr_apikey": "3c963770c559488ab111ab65afd37723",
+    "radarr_host": "192.168.4.252",
+    "radarr_port": "7878",
+    "radarr_apikey": "0fdd231ea22a40fd90c4329f9223598d",
+    "notify_ntfy_enabled": false,
+    "notify_ntfy_topic": "",
+    "notify_ntfy_server": "https://ntfy.sh",
+    "notify_ntfy_token": "",
+    "notify_email_enabled": false,
+    "notify_email_to": "",
+    "notify_smtp_host": "",
+    "notify_smtp_port": "587",
+    "notify_smtp_user": "",
+    "notify_smtp_pass": "",
+    "emby_host": "192.168.4.252",
+    "emby_port": "8096",
+    "emby_apikey": "8d99144a0fda4f13b79ae0964bf77c67"
+}

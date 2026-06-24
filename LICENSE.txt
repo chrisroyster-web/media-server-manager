@@ -1,0 +1,114 @@
+ALL CLEAR SERVER SERVICES™ SOFTWARE LICENSE AGREEMENT
+======================================================
+Version 1.0.0 | Effective Date: June 23, 2026
+Copyright (C) 2026 All Clear Server Services LLC. All rights reserved.
+
+PLEASE READ THIS LICENSE AGREEMENT CAREFULLY BEFORE INSTALLING OR USING
+THIS SOFTWARE. BY CLICKING "I AGREE", INSTALLING, COPYING, OR OTHERWISE
+USING THE SOFTWARE, YOU AGREE TO BE BOUND BY THE TERMS OF THIS AGREEMENT.
+IF YOU DO NOT AGREE, DO NOT INSTALL OR USE THE SOFTWARE.
+
+------------------------------------------------------------------------
+1. GRANT OF LICENSE
+------------------------------------------------------------------------
+All Clear Server Services LLC ("Licensor") grants you ("Licensee") a
+non-exclusive, non-transferable, limited license to install and use one
+(1) copy of All Clear Server Services™ (the "Software") solely for your
+internal business or personal purposes on a single computer or device
+owned or controlled by you.
+
+------------------------------------------------------------------------
+2. RESTRICTIONS
+------------------------------------------------------------------------
+You may NOT:
+  a) Copy, modify, adapt, translate, or create derivative works based on
+     the Software, in whole or in part, without prior written consent
+     from the Licensor.
+  b) Reverse engineer, decompile, disassemble, or otherwise attempt to
+     derive the source code of the Software.
+  c) Rent, lease, sublicense, sell, resell, transfer, assign, or
+     otherwise commercially exploit or make available to any third party
+     the Software or any part thereof.
+  d) Remove or alter any proprietary notices, labels, or marks on the
+     Software.
+  e) Use the Software for any unlawful purpose or in violation of any
+     applicable local, state, national, or international law or regulation.
+
+------------------------------------------------------------------------
+3. INTELLECTUAL PROPERTY
+------------------------------------------------------------------------
+The Software, including all copies and derivative works thereof, is and
+shall remain the exclusive property of All Clear Server Services LLC.
+This Agreement does not convey to you any interest in or to the Software
+but only a limited right of use revocable in accordance with the terms
+of this Agreement. All rights not expressly granted are reserved by
+All Clear Server Services LLC.
+
+------------------------------------------------------------------------
+4. UPDATES AND UPGRADES
+------------------------------------------------------------------------
+Licensor may, at its sole discretion, provide updates, patches, or
+upgrades to the Software. Such updates may be subject to additional or
+different terms. Licensor has no obligation to provide any updates,
+support, or new versions of the Software.
+
+------------------------------------------------------------------------
+5. DISCLAIMER OF WARRANTIES
+------------------------------------------------------------------------
+THE SOFTWARE IS PROVIDED "AS IS" AND "AS AVAILABLE" WITHOUT WARRANTY
+OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE,
+TITLE, AND NON-INFRINGEMENT. LICENSOR DOES NOT WARRANT THAT THE
+SOFTWARE WILL MEET YOUR REQUIREMENTS, OPERATE WITHOUT INTERRUPTION,
+OR BE FREE OF ERRORS OR DEFECTS.
+
+------------------------------------------------------------------------
+6. LIMITATION OF LIABILITY
+------------------------------------------------------------------------
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL
+ALL CLEAR SERVER SERVICES LLC, ITS OFFICERS, DIRECTORS, EMPLOYEES, OR
+AGENTS BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL,
+PUNITIVE, OR EXEMPLARY DAMAGES WHATSOEVER (INCLUDING, WITHOUT LIMITATION,
+DAMAGES FOR LOSS OF PROFITS, BUSINESS INTERRUPTION, LOSS OF DATA, OR
+LOSS OF GOODWILL) ARISING OUT OF OR IN CONNECTION WITH THIS AGREEMENT
+OR THE USE OF OR INABILITY TO USE THE SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGES. IN NO EVENT SHALL LICENSOR'S TOTAL
+CUMULATIVE LIABILITY EXCEED THE AMOUNT PAID BY YOU FOR THE SOFTWARE IN
+THE TWELVE (12) MONTHS PRECEDING THE CLAIM.
+
+------------------------------------------------------------------------
+7. TERMINATION
+------------------------------------------------------------------------
+This Agreement is effective until terminated. Your rights under this
+Agreement will terminate automatically without notice if you fail to
+comply with any term of this Agreement. Upon termination you must
+destroy all copies of the Software in your possession or control.
+Sections 3, 5, 6, and 8 shall survive any termination of this Agreement.
+
+------------------------------------------------------------------------
+8. GOVERNING LAW
+------------------------------------------------------------------------
+This Agreement shall be governed by and construed in accordance with the
+laws of the State of Texas, United States of America, without regard to
+its conflict of law provisions. Any disputes arising under this Agreement
+shall be subject to the exclusive jurisdiction of the courts located in
+Collin County, Texas.
+
+------------------------------------------------------------------------
+9. ENTIRE AGREEMENT
+------------------------------------------------------------------------
+This Agreement constitutes the entire agreement between you and
+All Clear Server Services LLC with respect to the Software and supersedes
+all prior or contemporaneous understandings, communications, or agreements,
+written or oral, regarding such subject matter.
+
+------------------------------------------------------------------------
+10. CONTACT
+------------------------------------------------------------------------
+All Clear Server Services LLC
+Website : https://www.allclearserverservices.com
+Support : https://www.allclearserverservices.com/support
+
+------------------------------------------------------------------------
+All Clear Server Services™ is a trademark of All Clear Server Services LLC.
+========================================================================

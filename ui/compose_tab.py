@@ -1,0 +1,353 @@
+# ui/compose_tab.py
+"""
+Docker Compose tab.
+Lists all compose stacks found on the server, shows per-service status,
+and lets you run up/down/pull/restart per stack.
+"""
+
+import tkinter as tk
+from tkinter import ttk
+import threading
+import time
+
+
+class ComposeTab(tk.Frame):
+
+    def __init__(self, parent, controller):
+        t = controller.theme
+        super().__init__(parent, bg=t.bg)
+        self.controller = controller
+        self.theme      = t
+        self._stack_frames = []
+        self._build_ui()
+        self.after(600, self.refresh)
+
+    # ------------------------------------------------------------------
+    # BUILD
+    # ------------------------------------------------------------------
+    def _build_ui(self):
+        t = self.theme
+
+        # Header
+        hdr = tk.Frame(self, bg=t.surface_dark)
+        hdr.pack(fill="x")
+
+        tk.Label(
+            hdr, text="🐙  Docker Compose",
+            bg=t.surface_dark, fg=t.text,
+            font=t.font_title, anchor="w",
+        ).pack(side="left", padx=18, pady=14)
+
+        self._status_lbl = tk.Label(
+            hdr, text="",
+            bg=t.surface_dark, fg=t.text_muted,
+            font=t.font_small,
+        )
+        self._status_lbl.pack(side="right", padx=18)
+
+        tk.Button(
+            hdr, text="⟳  Refresh",
+            command=self.refresh,
+            bg=t.blue, fg="#ffffff",
+            bd=0, relief="flat",
+            font=t.font_small, padx=12, pady=4,
+        ).pack(side="right", padx=(0, 10), pady=10)
+
+        tk.Frame(self, bg=t.card_border, height=1).pack(fill="x")
+
+        # Scrollable area
+        outer = tk.Frame(self, bg=t.bg)
+        outer.pack(fill="both", expand=True, padx=16, pady=12)
+
+        canvas = tk.Canvas(outer, bg=t.bg, highlightthickness=0)
+        sb = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=sb.set)
+        sb.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+
+        self._body = tk.Frame(canvas, bg=t.bg)
+        self._win  = canvas.create_window((0, 0), window=self._body, anchor="nw")
+
+        canvas.bind("<Configure>",
+            lambda e: canvas.itemconfig(self._win, width=e.width))
+        self._body.bind("<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind_all("<MouseWheel>",
+            lambda e: canvas.yview_scroll(int(-1*(e.delta/120)), "units"))
+
+        self._canvas = canvas
+
+    # ------------------------------------------------------------------
+    # REFRESH
+    # ------------------------------------------------------------------
+    def refresh(self):
+        self._status_lbl.config(text="Scanning…")
+        for f in self._stack_frames:
+            f.destroy()
+        self._stack_frames.clear()
+        threading.Thread(target=self._fetch, daemon=True).start()
+
+    def _fetch(self):
+        ssh = self.controller.ssh
+        if not ssh.connected:
+            self.after(0, lambda: self._show_msg("Not connected to server.", error=False))
+            return
+
+        # Find compose stacks via docker compose ls
+        out, err, code = ssh.run("docker compose ls --format json 2>/dev/null || docker compose ls 2>/dev/null")
+        if code != 0 or not out.strip():
+            self.after(0, lambda: self._show_msg(
+                "No compose stacks found.\n\nMake sure Docker Compose v2 is installed\nand stacks are running or stopped."))
+            return
+
+        stacks = self._parse_stacks(out.strip())
+        if not stacks:
+            self.after(0, lambda: self._show_msg("No compose stacks found."))
+            return
+
+        # For each stack, get per-service status
+        stack_data = []
+        for name, config_file, status in stacks:
+            services = self._fetch_services(ssh, name, config_file)
+            stack_data.append((name, config_file, status, services))
+
+        self.after(0, lambda d=stack_data: self._render(d))
+
+    def _parse_stacks(self, raw):
+        """Parse `docker compose ls` output (JSON or table)."""
+        import json as _json
+        stacks = []
+        # Try JSON first
+        try:
+            data = _json.loads(raw)
+            for item in data:
+                name   = item.get("Name", "")
+                cfg    = item.get("ConfigFiles", "")
+                status = item.get("Status", "")
+                if name:
+                    stacks.append((name, cfg, status))
+            return stacks
+        except Exception:
+            pass
+
+        # Table fallback: NAME   STATUS   CONFIG FILES
+        for line in raw.splitlines():
+            parts = line.split()
+            if len(parts) >= 2 and parts[0].lower() != "name":
+                stacks.append((parts[0], parts[-1] if len(parts) >= 3 else "", parts[1]))
+        return stacks
+
+    def _fetch_services(self, ssh, stack_name, config_file):
+        """Return list of (service_name, status, image) for a stack."""
+        # Use -p (project name) to scope to the stack
+        cmd = "docker compose -p {} ps --format json 2>/dev/null || docker compose -p {} ps 2>/dev/null".format(
+            stack_name, stack_name)
+        out, _, code = ssh.run(cmd)
+        services = []
+        if code != 0 or not out.strip():
+            return services
+
+        import json as _json
+        # JSON output (compose v2.17+)
+        try:
+            # May be one JSON object per line
+            for line in out.strip().splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    item = _json.loads(line)
+                    services.append((
+                        item.get("Service", item.get("Name", "?")),
+                        item.get("State", item.get("Status", "?")),
+                        item.get("Image", ""),
+                    ))
+                except Exception:
+                    pass
+            if services:
+                return services
+        except Exception:
+            pass
+
+        # Table fallback
+        for line in out.splitlines():
+            parts = line.split()
+            if len(parts) >= 3 and parts[0].lower() not in ("name", "service"):
+                services.append((parts[0], parts[3] if len(parts) > 3 else parts[1], ""))
+        return services
+
+    # ------------------------------------------------------------------
+    # RENDER
+    # ------------------------------------------------------------------
+    def _render(self, stack_data):
+        for f in self._stack_frames:
+            f.destroy()
+        self._stack_frames.clear()
+
+        ts = time.strftime("%H:%M:%S")
+        self._status_lbl.config(text="Updated {}".format(ts))
+
+        for name, config_file, status, services in stack_data:
+            frame = self._build_stack_card(name, config_file, status, services)
+            self._stack_frames.append(frame)
+
+    def _build_stack_card(self, name, config_file, status, services):
+        t = self.theme
+
+        card = tk.Frame(self._body, bg=t.surface,
+                        highlightbackground=t.card_border, highlightthickness=1)
+        card.pack(fill="x", pady=(0, 10))
+
+        # ── Stack header ─────────────────────────────────────────────
+        hdr = tk.Frame(card, bg=t.surface_dark, padx=14, pady=10)
+        hdr.pack(fill="x")
+
+        # Status dot
+        is_up = "running" in status.lower() or "up" in status.lower()
+        dot_color = t.status_running if is_up else t.status_stopped
+        dot = tk.Canvas(hdr, width=10, height=10,
+                        bg=t.surface_dark, highlightthickness=0)
+        dot.create_oval(1, 1, 9, 9, fill=dot_color, outline="")
+        dot.pack(side="left", padx=(0, 8), pady=5)
+
+        tk.Label(hdr, text=name,
+                 bg=t.surface_dark, fg=t.text,
+                 font=("Segoe UI", 11, "bold")).pack(side="left")
+
+        tk.Label(hdr, text=status,
+                 bg=t.surface_dark, fg=t.text_muted,
+                 font=t.font_small).pack(side="left", padx=12)
+
+        if config_file:
+            tk.Label(hdr, text=config_file,
+                     bg=t.surface_dark, fg=t.text_muted,
+                     font=t.font_small).pack(side="left")
+
+        # Action buttons
+        btn_cfg = [
+            ("▲ Up",      t.status_running,   lambda n=name: self._run_action(n, "up -d")),
+            ("▼ Down",    t.status_stopped,     lambda n=name: self._run_action(n, "down")),
+            ("⟳ Restart", t.yellow,  lambda n=name: self._run_action(n, "restart")),
+            ("⬇ Pull",    t.blue,    lambda n=name: self._run_action(n, "pull")),
+        ]
+        for btn_txt, btn_col, cmd in reversed(btn_cfg):
+            fg = "#000000" if btn_col == t.yellow else "#ffffff"
+            tk.Button(
+                hdr, text=btn_txt,
+                command=cmd,
+                bg=btn_col, fg=fg,
+                bd=0, relief="flat",
+                font=t.font_small, padx=10, pady=3,
+            ).pack(side="right", padx=(0, 6))
+
+        # ── Service list ─────────────────────────────────────────────
+        if services:
+            svc_frame = tk.Frame(card, bg=t.surface, padx=14, pady=8)
+            svc_frame.pack(fill="x")
+
+            # Column headers
+            cols = [("Service", 200), ("Status", 120), ("Image", 0)]
+            for col_i, (col_lbl, col_w) in enumerate(cols):
+                anchor = "w"
+                tk.Label(svc_frame, text=col_lbl,
+                         bg=t.surface, fg=t.text_muted,
+                         font=t.font_small, width=col_w//8, anchor=anchor,
+                         ).grid(row=0, column=col_i, sticky="w", padx=(0, 20), pady=(0, 4))
+
+            tk.Frame(svc_frame, bg=t.card_border, height=1).grid(
+                row=1, column=0, columnspan=3, sticky="ew", pady=(0, 6))
+
+            for row_i, (svc_name, svc_status, image) in enumerate(services):
+                row = row_i + 2
+                svc_up = "running" in svc_status.lower() or "up" in svc_status.lower()
+                svc_col = t.status_running if svc_up else t.status_stopped
+
+                tk.Label(svc_frame, text=svc_name,
+                         bg=t.surface, fg=t.text,
+                         font=t.font_regular, anchor="w",
+                         ).grid(row=row, column=0, sticky="w", padx=(0, 20))
+                tk.Label(svc_frame, text=svc_status,
+                         bg=t.surface, fg=svc_col,
+                         font=t.font_small, anchor="w",
+                         ).grid(row=row, column=1, sticky="w", padx=(0, 20))
+                tk.Label(svc_frame, text=image,
+                         bg=t.surface, fg=t.text_muted,
+                         font=t.font_small, anchor="w",
+                         ).grid(row=row, column=2, sticky="w")
+        else:
+            tk.Label(card, text="No service info available",
+                     bg=t.surface, fg=t.text_muted,
+                     font=t.font_small).pack(anchor="w", padx=14, pady=6)
+
+        # ── Action output console ────────────────────────────────────
+        console_frame = tk.Frame(card, bg=t.surface)
+        console_frame.pack(fill="x")
+        console = tk.Text(
+            console_frame,
+            height=0,   # hidden until an action runs
+            bg=t.surface_dark, fg=t.text_muted,
+            font=("Consolas", 10), bd=0, relief="flat",
+            state="disabled", wrap="word",
+        )
+        console.pack(fill="x", padx=14, pady=(0, 10))
+        card._console = console
+
+        return card
+
+    # ------------------------------------------------------------------
+    # ACTIONS
+    # ------------------------------------------------------------------
+    def _run_action(self, stack_name, action):
+        # Find the card for this stack
+        card = None
+        for f in self._stack_frames:
+            # identify by stack name stored in its header label
+            for child in f.winfo_children():
+                for lbl in child.winfo_children():
+                    if isinstance(lbl, tk.Label) and lbl.cget("text") == stack_name:
+                        card = f
+                        break
+
+        def _stream():
+            ssh = self.controller.ssh
+            if not ssh.connected:
+                self._append_console(card, "Not connected.\n")
+                return
+
+            cmd = "docker compose -p {} {} 2>&1".format(stack_name, action)
+            self._append_console(card, "$ {}\n".format(cmd))
+            out, _, _ = ssh.run(cmd)
+            self._append_console(card, out + "\n")
+            self.after(1000, self.refresh)
+
+        threading.Thread(target=_stream, daemon=True).start()
+
+    def _append_console(self, card, text):
+        if card is None:
+            return
+        console = getattr(card, "_console", None)
+        if console is None:
+            return
+        def _do():
+            console.configure(state="normal", height=8)
+            console.insert("end", text)
+            console.see("end")
+            console.configure(state="disabled")
+        self.after(0, _do)
+
+    # ------------------------------------------------------------------
+    # HELPERS
+    # ------------------------------------------------------------------
+    def _show_msg(self, msg, error=True):
+        for f in self._stack_frames:
+            f.destroy()
+        self._stack_frames.clear()
+        lbl = tk.Label(
+            self._body, text=msg,
+            bg=self.theme.bg,
+            fg=self.theme.status_stopped if error else self.theme.text_muted,
+            font=self.theme.font_regular, justify="center",
+        )
+        lbl.pack(pady=40)
+        self._stack_frames.append(lbl)
+        self._status_lbl.config(text="")
