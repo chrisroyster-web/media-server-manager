@@ -27,7 +27,9 @@ class Sidebar(tk.Frame):
         ("\U0001f3b5", "Emby",            14,  "MEDIA"),
         ("\U0001f7e1", "Plex",           17,  None),
         ("\U0001f9ca", "Jellyfin",       18,  None),
+        ("\U0001f4fa", "Play History",   21,  None),
         ("\U0001f3ac", "Arr",            11,  None),
+        ("\U0001f50d", "Prowlarr",       30,  None),
         ("\U0001f4e5", "SABnzbd",         7,  None),
 
         ("\U0001f9e9", "Services",        3,  "INFRA"),
@@ -35,10 +37,19 @@ class Sidebar(tk.Frame):
         ("\U0001f40b", "Compose",        15,  None),
         ("⏰",         "Cron Jobs",      16,  None),
         ("\U0001f4bf", "Disk Health",    10,  None),
+        ("\U0001f5c4", "Storage Health", 25,  None),
+        ("\U0001f6e1", "VPN",            22,  None),
+        ("\U0001f310", "Reverse Proxy",  23,  None),
+        ("\U0001f4a0", "Tailscale",      27,  None),
 
         ("\U0001f4c2", "Files",           9,  "TOOLS"),
         ("\U0001f4cb", "Log Viewer",      6,  None),
         (">_",         "Custom Commands", 5,  None),
+        ("\U0001f4f6", "Speedtest",      24,  None),
+        ("\U0001f4ca", "Bandwidth",      28,  None),
+        ("\U0001f510", "SSL Certs",      26,  None),
+        ("\U0001f4be", "Backups",        29,  None),
+        ("\U0001f514", "Notifications",  19,  None),
         ("\U0001f504", "Updates",        12,  None),
         ("\U0001f465", "Sessions",       13,  None),
 
@@ -109,6 +120,26 @@ class Sidebar(tk.Frame):
             lambda e: self._toggle_btn.configure(fg=t.sidebar_icon,
                                                   bg=t.sidebar_bg))
 
+        # Theme toggle ☀️ / 🌙
+        _is_dark = (self.controller.config_manager.theme_mode == "dark")
+        self._theme_btn = tk.Button(
+            logo_frame,
+            text="☀" if _is_dark else "🌙",
+            command=self.controller.toggle_theme,
+            bg=t.sidebar_bg, fg=t.sidebar_icon,
+            bd=0, relief="flat",
+            font=("Segoe UI", 12),
+            cursor="hand2",
+            padx=6,
+        )
+        self._theme_btn.pack(side="right")
+        self._theme_btn.bind("<Enter>",
+            lambda e: self._theme_btn.configure(fg=t.sidebar_icon_hover,
+                                                 bg=t.surface_light))
+        self._theme_btn.bind("<Leave>",
+            lambda e: self._theme_btn.configure(fg=t.sidebar_icon,
+                                                 bg=t.sidebar_bg))
+
         # Thin separator under header
         tk.Frame(self, bg="#1a1a1a", height=1).pack(fill="x", side="top")
 
@@ -135,6 +166,11 @@ class Sidebar(tk.Frame):
         self._nav_frame = tk.Frame(self._nav_canvas, bg=t.sidebar_bg)
         self._canvas_win = self._nav_canvas.create_window(
             (0, 0), window=self._nav_frame, anchor="nw")
+
+        # Dedicated frame for dynamic SERVERS section (always at top, initially hidden)
+        self._server_section_frame = tk.Frame(self._nav_frame, bg=t.sidebar_bg)
+        self._server_section_frame.pack(fill="x")   # pack first = always on top
+        self._server_section_frame.pack_forget()     # hidden until servers are added
 
         self._nav_canvas.bind("<Configure>", self._on_canvas_resize)
         self._nav_frame.bind("<Configure>", self._on_frame_resize)
@@ -220,11 +256,28 @@ class Sidebar(tk.Frame):
                 btn.configure(bg=t.sidebar_bg, fg=t.sidebar_icon)
 
     def show_item(self, idx):
-        """Make a hidden nav item visible (re-pack its row)."""
-        for btn, icon, label, btn_idx, row in self._buttons:
-            if btn_idx == idx:
-                row.pack(fill="x", padx=6, pady=1)
+        """Make a hidden nav item visible, restoring its original position."""
+        pos = next((i for i, (_, __, ___, bi, ____) in enumerate(self._buttons)
+                    if bi == idx), None)
+        if pos is None:
+            return
+
+        row = self._buttons[pos][4]
+
+        # Insert AFTER the closest preceding sibling that is still packed.
+        # Using after= avoids crossing section-header labels that sit between
+        # rows as separate widgets in the pack order.
+        prev_row = None
+        for entry in reversed(self._buttons[:pos]):
+            sibling_row = entry[4]
+            if sibling_row.winfo_manager():   # non-empty = currently managed
+                prev_row = sibling_row
                 break
+
+        if prev_row:
+            row.pack(fill="x", padx=6, pady=1, after=prev_row)
+        else:
+            row.pack(fill="x", padx=6, pady=1)
 
     def hide_item(self, idx):
         """Hide a nav item (pack_forget its row)."""
@@ -304,6 +357,87 @@ class Sidebar(tk.Frame):
         widget.bind("<Enter>", show, add="+")
         widget.bind("<Leave>", hide, add="+")
 
+
+    # ------------------------------------------------------------------
+    # DYNAMIC SERVER SECTION
+    # ------------------------------------------------------------------
+    def rebuild_servers(self, cfg):
+        """
+        Rebuild the SERVERS sidebar section from the server profiles in cfg.
+        Uses a dedicated _server_section_frame that is always at the top of
+        the nav — avoids any pack(before=...) complexity.
+        Server buttons use virtual indices 1000+ and call switch_server()
+        instead of selecting a tab.
+        """
+        t = self.theme
+
+        # Clear existing content
+        for w in self._server_section_frame.winfo_children():
+            w.destroy()
+
+        servers    = cfg.get_servers()
+        active_idx = cfg.get_active_server_index()
+
+        if not servers:
+            self._server_section_frame.pack_forget()
+            return
+
+        # Section label + spacer
+        spacer = tk.Frame(self._server_section_frame, bg=t.sidebar_bg, height=4)
+        spacer.pack(fill="x")
+        spacer.bind("<MouseWheel>", self._on_mousewheel)
+
+        sec_lbl = tk.Label(
+            self._server_section_frame,
+            text="SERVERS",
+            bg=t.sidebar_bg, fg=t.sidebar_section_text,
+            font=("Segoe UI", 8, "bold"),
+            anchor="w", padx=16,
+        )
+        sec_lbl.pack(fill="x", pady=(4, 2))
+        sec_lbl.bind("<MouseWheel>", self._on_mousewheel)
+
+        for i, srv in enumerate(servers):
+            virtual_idx = 1000 + i
+            is_active   = (i == active_idx)
+            name        = srv.get("name") or srv.get("host", "Server {}".format(i + 1))
+            icon        = "\u2713" if is_active else "\U0001f5a5"
+
+            row = tk.Frame(self._server_section_frame, bg=t.sidebar_bg)
+            row.pack(fill="x", padx=6, pady=1)
+            row.bind("<MouseWheel>", self._on_mousewheel)
+
+            btn = tk.Button(
+                row,
+                text="{0}  {1}".format(icon, name),
+                anchor="w",
+                command=lambda s=srv, ii=i: self._server_click(s, ii),
+                bg=t.sidebar_active_bg if is_active else t.sidebar_bg,
+                fg=t.sidebar_icon_active if is_active else t.sidebar_icon,
+                bd=0, relief="flat",
+                font=("Segoe UI", 11),
+                padx=10, pady=6,
+                cursor="hand2",
+            )
+            btn.pack(fill="x", expand=True)
+            btn.bind("<Enter>",
+                lambda e, b=btn, r=row, ii=virtual_idx: self._on_hover(b, r, ii, True))
+            btn.bind("<Leave>",
+                lambda e, b=btn, r=row, ii=virtual_idx: self._on_hover(b, r, ii, False))
+            btn.bind("<MouseWheel>", self._on_mousewheel)
+            self._create_tooltip(btn, name)
+
+        # Show the frame (was hidden if no servers before)
+        self._server_section_frame.pack(fill="x")
+
+    def _server_click(self, profile, idx):
+        try:
+            self.controller.config_manager.set_active_server_index(idx)
+            self.rebuild_servers(self.controller.config_manager)
+            self.controller.switch_server(profile)
+        except Exception:
+            pass
+
     # ------------------------------------------------------------------
     # TOGGLE / ANIMATION
     # ------------------------------------------------------------------
@@ -311,48 +445,68 @@ class Sidebar(tk.Frame):
         if self._animating:
             return
         self._collapsed = not self._collapsed
-        start = self.winfo_width()
-        end   = self.COLLAPSED_WIDTH if self._collapsed else self.EXPANDED_WIDTH
-        if not self._collapsed:
-            self._update_labels()
-        self._animate(start, end, 0)
-
-    def _animate(self, start, end, step):
+        start_w = self.EXPANDED_WIDTH if self._collapsed else self.COLLAPSED_WIDTH
+        end_w   = self.COLLAPSED_WIDTH if self._collapsed else self.EXPANDED_WIDTH
         self._animating = True
-        t = step / self.ANIM_STEPS
-        t = t * t * (3 - 2 * t)   # smooth-step
-        self.configure(width=int(start + (end - start) * t))
+        self._animate(start_w, end_w, 0)
+
+    def _animate(self, start_w, end_w, step):
+        frac  = step / self.ANIM_STEPS
+        # Ease-in-out cubic
+        frac  = frac * frac * (3 - 2 * frac)
+        w     = int(start_w + (end_w - start_w) * frac)
+        self.configure(width=w)
         if step < self.ANIM_STEPS:
-            self.after(self.ANIM_MS, self._animate, start, end, step + 1)
+            self.after(self.ANIM_MS,
+                       lambda: self._animate(start_w, end_w, step + 1))
         else:
-            self.configure(width=end)
             self._animating = False
-            if self._collapsed:
-                self._update_labels()
+            self.configure(width=end_w)
+            self._apply_collapsed_state()
 
-    def _update_labels(self):
-        for btn, icon, label, idx, row in self._buttons:
-            if self._collapsed:
-                btn.configure(text=icon, anchor="center", padx=0)
-            else:
-                btn.configure(text="{0}  {1}".format(icon, label),
-                              anchor="w", padx=10)
+    def _apply_collapsed_state(self):
+        """Show/hide labels and section headers after animation completes."""
+        collapsed = self._collapsed
+        t = self.theme
 
+        # Header: collapsed = only the toggle button, centered
+        if collapsed:
+            self._icon_lbl.pack_forget()
+            self._app_lbl.pack_forget()
+            self._theme_btn.pack_forget()
+            self._toggle_btn.pack_forget()
+            # Re-pack toggle centered so it's always reachable
+            self._toggle_btn.pack(expand=True)
+            self._ver_lbl.config(text="")
+        else:
+            self._toggle_btn.pack_forget()
+            self._icon_lbl.pack(side="left", padx=(14, 4), pady=14)
+            self._app_lbl.pack(side="left")
+            self._theme_btn.pack(side="right")
+            self._toggle_btn.pack(side="right", padx=4)
+            self._ver_lbl.config(text="Media Server Manager")
+
+        # Section header labels
         for sec_lbl, spacer in self._section_widgets:
-            if self._collapsed:
+            if collapsed:
                 sec_lbl.pack_forget()
                 spacer.pack_forget()
             else:
                 spacer.pack(fill="x")
                 sec_lbl.pack(fill="x", pady=(4, 2))
 
-        if self._collapsed:
-            self._icon_lbl.pack_forget()
-            self._app_lbl.pack_forget()
-            self._ver_lbl.pack_forget()
-            self._toggle_btn.configure(anchor="center", padx=0, width=3)
-        else:
-            self._icon_lbl.pack(side="left", padx=(14, 4), pady=14)
-            self._app_lbl.pack(side="left")
-            self._ver_lbl.pack(side="bottom", pady=10)
-            self._toggle_btn.configure(anchor="e", padx=10, width=0)
+        # Nav button text: icon only vs icon + label
+        for btn, icon, label, idx, row in self._buttons:
+            is_active = (idx == self._active_idx)
+            if collapsed:
+                btn.configure(text=icon, width=3, anchor="center",
+                               padx=0, pady=10)
+            else:
+                btn.configure(text="{} {}".format(icon, label),
+                               width=0, anchor="w", padx=16, pady=8)
+                if is_active:
+                    btn.configure(bg=self.theme.sidebar_active_bg,
+                                   fg=self.theme.sidebar_icon_active)
+                else:
+                    btn.configure(bg=self.theme.sidebar_bg,
+                                   fg=self.theme.sidebar_icon)

@@ -13,6 +13,8 @@ import urllib.error
 import json
 import time
 
+from ui.refresh_control import RefreshControl
+
 
 def _emby_get(host, port, apikey, path):
     """GET /emby/<path> and return parsed JSON."""
@@ -71,14 +73,11 @@ def _fmt_bitrate(bps):
 
 class EmbyTab(tk.Frame):
 
-    POLL_MS = 15_000   # refresh every 15 s
-
     def __init__(self, parent, controller):
         t = controller.theme
         super().__init__(parent, bg=t.bg)
         self.controller      = controller
         self.theme           = t
-        self._poll_job       = None
         self._session_frames = []
         self._active_sessions = []   # raw session dicts for Message All
 
@@ -107,6 +106,10 @@ class EmbyTab(tk.Frame):
             font=t.font_small,
         )
         self._status_lbl.pack(side="right", padx=18)
+
+        self._rc = RefreshControl(hdr, self.controller, "emby",
+                                  default=15, on_refresh=self._fetch)
+        self._rc.pack(side="right", padx=(0, 10))
 
         tk.Button(
             hdr, text="Refresh",
@@ -184,8 +187,7 @@ class EmbyTab(tk.Frame):
     # FETCH
     # ------------------------------------------------------------------
     def _fetch(self):
-        if self._poll_job:
-            self.after_cancel(self._poll_job)
+        self._rc.cancel()
         self._status_lbl.config(text="Refreshing...")
         threading.Thread(target=self._do_fetch, daemon=True).start()
 
@@ -213,10 +215,7 @@ class EmbyTab(tk.Frame):
     # RENDER
     # ------------------------------------------------------------------
     def _update_ui(self, sessions):
-        if self._poll_job:
-            self.after_cancel(self._poll_job)
-        self._poll_job = self.after(self.POLL_MS, self._fetch)
-
+        self._rc.schedule()
         self._active_sessions = sessions
 
         for child in list(self._session_area.winfo_children()):

@@ -5,6 +5,7 @@ import tkinter as tk
 from tkinter import ttk
 import threading
 import time
+from ui.refresh_control import RefreshControl
 
 
 class DashboardTab(tk.Frame):
@@ -19,7 +20,6 @@ class DashboardTab(tk.Frame):
         super().__init__(parent, bg=controller.theme.bg)
         self.controller = controller
         self.theme      = controller.theme
-        self._refresh_job = None
         self._net_prev    = None   # (rx_bytes, tx_bytes, timestamp)
         self._history     = collections.deque(maxlen=30)  # {cpu, ram} dicts
         self._net_history = collections.deque(maxlen=30)  # {rx_bps, tx_bps} dicts
@@ -36,9 +36,14 @@ class DashboardTab(tk.Frame):
         tk.Label(header, text="DASHBOARD", bg=self.theme.bg,
                  fg=self.theme.text, font=self.theme.font_title).pack(side="left")
 
-        self.refresh_btn = tk.Button(header, text="Refresh", command=self.refresh)
+        self.refresh_btn = tk.Button(header, text="⟳ Refresh", command=self.refresh)
         self.theme.style_button(self.refresh_btn)
         self.refresh_btn.pack(side="right")
+
+        cfg_default = self.controller.config_manager.dashboard_refresh_interval
+        self._rc = RefreshControl(header, self.controller, "dashboard",
+                                  default=cfg_default, on_refresh=self.refresh)
+        self._rc.pack(side="right", padx=(0, 12))
 
         self.last_updated_lbl = tk.Label(header, text="", bg=self.theme.bg,
                                           fg=self.theme.text_secondary, font=self.theme.font_small)
@@ -116,6 +121,14 @@ class DashboardTab(tk.Frame):
         self.card_ups_battery = self._stat_card(rups, "Battery",      "--", self.theme.status_running)
         self.card_ups_load    = self._stat_card(rups, "Load",         "--", self.theme.yellow)
         self.card_ups_runtime = self._stat_card(rups, "Runtime Left", "--", self.theme.cyan)
+
+        # ---- GPU ----
+        self._section("GPU")
+        rgpu = tk.Frame(self.body, bg=self.theme.bg)
+        rgpu.pack(fill="x", padx=16, pady=6)
+        self.card_gpu_util  = self._stat_card(rgpu, "GPU Util",  "--", self.theme.purple)
+        self.card_gpu_vram  = self._stat_card(rgpu, "VRAM",      "--", self.theme.cyan)
+        self.card_gpu_temp  = self._stat_card(rgpu, "GPU Temp",  "--", self.theme.orange)
 
         # ---- Downloads ----
         self._section("Downloads")
@@ -704,6 +717,75 @@ class DashboardTab(tk.Frame):
         self.after(0, lambda t=load_text:                 self.card_ups_load.config(text=t))
         self.after(0, lambda t=runtime_text:              self.card_ups_runtime.config(text=t))
 
+        # -- GPU (nvidia-smi, then rocm-smi, then lm-sensors fallback) --
+        gpu_util = gpu_vram = gpu_temp = "--"
+        out, _, _ = ssh.run(
+            "nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu "
+            "--format=csv,noheader,nounits 2>/dev/null | head -1")
+        if out and out.strip():
+            parts = [p.strip() for p in out.strip().split(",")]
+            if len(parts) == 4:
+                try:
+                    gpu_util = parts[0] + "%"
+                    vram_used_mb  = int(parts[1])
+                    vram_total_mb = int(parts[2])
+                    gpu_vram = "{}/{}G".format(
+                        round(vram_used_mb  / 1024, 1),
+                        round(vram_total_mb / 1024, 1))
+                    gpu_temp = parts[3] + "°C"
+                except Exception:
+                    pass
+        if gpu_util == "--":
+            # Try AMD via rocm-smi
+            out, _, _ = ssh.run(
+                "rocm-smi --showuse --showmemuse --showtemp 2>/dev/null | "
+                "awk '/GPU use/{u=$NF} /GTT use/{v=$NF} /Temperature/{t=$NF} "
+                "END{print u\" \"v\" \"t}'")
+            if out and out.strip() and out.strip() != "  ":
+                parts = out.strip().split()
+                if len(parts) >= 1 and parts[0] not in ("", "N/A"):
+                    gpu_util = parts[0] + "%"
+                if len(parts) >= 2 and parts[1] not in ("", "N/A"):
+                    gpu_vram = parts[1] + "% VRAM"
+                if len(parts) >= 3 and parts[2] not in ("", "N/A"):
+                    gpu_temp = parts[2] + "°C"
+        if gpu_util == "--":
+            # lm-sensors — try to find a GPU chip
+            out, _, _ = ssh.run(
+                "sensors 2>/dev/null | grep -A5 -i 'amdgpu\\|nouveau\\|nvidia' | "
+                "grep -i 'temp\\|junction\\|edge' | head -1 | "
+                "awk '{for(i=1;i<=NF;i++) if($i~/\\+[0-9]/) {print $i; exit}}'")
+            if out and out.strip():
+                gpu_temp = out.strip().lstrip("+")
+                gpu_util = "n/a"
+                gpu_vram = "n/a"
+        def _update_gpu(u=gpu_util, v=gpu_vram, t=gpu_temp):
+            t_color = (self.theme.status_running if gpu_temp == "--" or gpu_temp in ("n/a",) else
+                       self.theme.status_running if int(''.join(c for c in gpu_temp if c.isdigit()) or 0) < 75 else
+                       self.theme.yellow         if int(''.join(c for c in gpu_temp if c.isdigit()) or 0) < 90 else
+                       self.theme.status_stopped)
+            self.card_gpu_util.config(text=u)
+            self.card_gpu_vram.config(text=v)
+            self.card_gpu_temp.config(text=t, fg=t_color)
+        self.after(0, _update_gpu)
+
+        # -- CPU Temperature (enhanced: prefer lm-sensors package temp) --
+        out, _, _ = ssh.run(
+            "sensors 2>/dev/null | grep -E 'Package id|Tdie|Tctl|k10temp' | "
+            "head -1 | grep -oP '\\+[0-9.]+°C' | head -1 || "
+            "awk '{print int($1/1000)}' /sys/class/thermal/thermal_zone0/temp 2>/dev/null")
+        if out and out.strip():
+            raw = out.strip().lstrip("+").replace("°C", "").strip()
+            try:
+                temp_c     = float(raw)
+                temp_text  = "{:.0f}°C".format(temp_c)
+                temp_color = (self.theme.status_running if temp_c < 70 else
+                              self.theme.yellow         if temp_c < 85 else
+                              self.theme.status_stopped)
+                self.after(0, lambda t=temp_text, c=temp_color: self.card_temp.config(text=t, fg=c))
+            except Exception:
+                pass
+
         # -- SABnzbd --
         out, _, _ = ssh.run("systemctl is-active sabnzbdplus 2>/dev/null")
         sab_state = out.strip() or "unknown"
@@ -900,7 +982,4 @@ class DashboardTab(tk.Frame):
         return "{:.1f} MB/s".format(bps / (1024 * 1024))
 
     def _schedule_refresh(self):
-        if self._refresh_job:
-            self.after_cancel(self._refresh_job)
-        interval = self.controller.config_manager.dashboard_refresh_interval * 1000
-        self._refresh_job = self.after(interval, self.refresh)
+        self._rc.schedule()

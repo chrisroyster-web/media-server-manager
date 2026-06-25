@@ -46,6 +46,8 @@ class ConfigManager:
         "sidebar_auto_collapse":      True,
         "last_host":                  "",
         "last_username":              "",
+        "wol_mac":                    "",
+        "wol_broadcast":              "255.255.255.255",
         "sabnzbd_apikey":             "",
         "sabnzbd_port":               "8080",
         "dashboard_refresh_interval": 30,
@@ -148,6 +150,40 @@ class ConfigManager:
         self.save()
 
     # ---------------------------------------------------------
+    # SERVER PROFILES
+    # Each profile: {name, host, port, username, password, key_path, notes}
+    # ---------------------------------------------------------
+    def get_servers(self):
+        servers = self.config.get("servers", [])
+        if not servers:
+            # Seed from legacy last_host / last_username if present
+            host = self.config.get("last_host", "")
+            user = self.config.get("last_username", "")
+            if host:
+                servers = [{"name": host, "host": host, "port": "22",
+                            "username": user, "password": "", "key_path": "",
+                            "notes": ""}]
+        return servers
+
+    def set_servers(self, servers):
+        self.config["servers"] = servers
+        self.save()
+
+    def get_active_server_index(self):
+        return self.config.get("active_server_index", 0)
+
+    def set_active_server_index(self, idx):
+        self.config["active_server_index"] = idx
+        self.save()
+
+    def get_active_server(self):
+        servers = self.get_servers()
+        idx = self.get_active_server_index()
+        if servers and 0 <= idx < len(servers):
+            return servers[idx]
+        return None
+
+    # ---------------------------------------------------------
     # PROPERTIES
     # ---------------------------------------------------------
     @property
@@ -175,6 +211,24 @@ class ConfigManager:
     @last_host.setter
     def last_host(self, value):
         self.config["last_host"] = value
+
+    @property
+    def wol_mac(self):
+        return self.config.get("wol_mac", "")
+
+    @wol_mac.setter
+    def wol_mac(self, value):
+        self.config["wol_mac"] = value
+        self.save()
+
+    @property
+    def wol_broadcast(self):
+        return self.config.get("wol_broadcast", "255.255.255.255")
+
+    @wol_broadcast.setter
+    def wol_broadcast(self, value):
+        self.config["wol_broadcast"] = value
+        self.save()
         self.save()
 
     @property
@@ -243,6 +297,22 @@ class ConfigManager:
     @radarr_apikey.setter
     def radarr_apikey(self, v): self.config["radarr_apikey"] = v; self.save()
 
+    # --- Prowlarr properties ---
+    @property
+    def prowlarr_host(self):   return self.config.get("prowlarr_host", "localhost")
+    @prowlarr_host.setter
+    def prowlarr_host(self, v): self.config["prowlarr_host"] = v; self.save()
+
+    @property
+    def prowlarr_port(self):   return self.config.get("prowlarr_port", "9797")
+    @prowlarr_port.setter
+    def prowlarr_port(self, v): self.config["prowlarr_port"] = str(v); self.save()
+
+    @property
+    def prowlarr_apikey(self):   return self.config.get("prowlarr_apikey", "")
+    @prowlarr_apikey.setter
+    def prowlarr_apikey(self, v): self.config["prowlarr_apikey"] = v; self.save()
+
     # --- Notification properties ---
     # --- Emby properties ---
     @property
@@ -292,6 +362,44 @@ class ConfigManager:
     @jellyfin_apikey.setter
     def jellyfin_apikey(self, v): self.config["jellyfin_apikey"] = v; self.save()
 
+    # --- Theme ---
+    @property
+    def theme_mode(self): return self.config.get("theme_mode", "dark")
+    @theme_mode.setter
+    def theme_mode(self, v): self.config["theme_mode"] = v; self.save()
+
+    # --- Per-tab refresh ---
+    def get_tab_refresh(self, tab_name):
+        return self.config.get("tab_refresh_{}".format(tab_name),
+                               {"enabled": True, "interval_s": 30})
+
+    def set_tab_refresh(self, tab_name, enabled, interval_s):
+        self.config["tab_refresh_{}".format(tab_name)] = {
+            "enabled": bool(enabled), "interval_s": int(interval_s)}
+        self.save()
+
+    # --- VPN properties ---
+    @property
+    def vpn_enabled(self): return bool(self.config.get("vpn_enabled", False))
+    @vpn_enabled.setter
+    def vpn_enabled(self, v): self.config["vpn_enabled"] = bool(v); self.save()
+
+    @property
+    def vpn_type(self): return self.config.get("vpn_type", "ProtonVPN")
+    @vpn_type.setter
+    def vpn_type(self, v): self.config["vpn_type"] = v; self.save()
+
+    # --- Reverse Proxy properties ---
+    @property
+    def proxy_enabled(self): return bool(self.config.get("proxy_enabled", False))
+    @proxy_enabled.setter
+    def proxy_enabled(self, v): self.config["proxy_enabled"] = bool(v); self.save()
+
+    @property
+    def proxy_type(self): return self.config.get("proxy_type", "Auto-detect")
+    @proxy_type.setter
+    def proxy_type(self, v): self.config["proxy_type"] = v; self.save()
+
     # --- Notification properties ---
     @property
     def notify_ntfy_enabled(self): return bool(self.config.get("notify_ntfy_enabled", False))
@@ -316,6 +424,7 @@ class ConfigManager:
     @property
     def notify_email_enabled(self): return bool(self.config.get("notify_email_enabled", False))
     @notify_email_enabled.setter
+    def notify_email_enabled(self, v): self.config["notify_email_enabled"] = bool(v); self.save()
 
     @property
     def notify_email_to(self): return self.config.get("notify_email_to", "")

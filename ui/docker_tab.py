@@ -5,6 +5,8 @@ import threading
 import webbrowser
 
 from ui.base_tab import CardConsoleTab
+from ui.refresh_control import RefreshControl
+from ui.log_tail_window import LogTailWindow
 
 
 class DockerTab(CardConsoleTab):
@@ -30,6 +32,11 @@ class DockerTab(CardConsoleTab):
         DockerTab.DOCKER_CONTAINERS = self.docker_containers  # keep class var in sync
         super().__init__(parent, controller)
 
+    def _populate_header(self, hdr_row):
+        self._rc = RefreshControl(hdr_row, self.controller, "docker",
+                                  default=15, on_refresh=self.refresh_all)
+        self._rc.pack(side="right")
+
     def _host(self):
         return self.controller.config_manager.last_host or "localhost"
 
@@ -37,20 +44,25 @@ class DockerTab(CardConsoleTab):
         return "http://{0}:{1}".format(self._host(), port) if port else None
 
     # ---------------------------------------------------------
-    # POPULATE CARDS
+    # POPULATE CARDS  (2-column grid)
     # ---------------------------------------------------------
-    def _populate_cards(self):
-        for name, data in self.docker_containers.items():
-            self.cards[name] = self._create_card(name, data)
+    COLS = 2
 
-    def _create_card(self, name, data):
+    def _populate_cards(self):
+        for c in range(self.COLS):
+            self.inner.columnconfigure(c, weight=1, uniform="dock")
+        for i, (name, data) in enumerate(self.docker_containers.items()):
+            row, col = divmod(i, self.COLS)
+            self.cards[name] = self._create_card(name, data, row, col)
+
+    def _create_card(self, name, data, grid_row=0, grid_col=0):
         frame = tk.Frame(
             self.inner,
             bg=self.theme.card_bg,
             highlightbackground=self.theme.card_border,
             highlightthickness=1,
         )
-        frame.pack(fill="x", padx=10, pady=6)
+        frame.grid(row=grid_row, column=grid_col, padx=8, pady=6, sticky="nsew")
         self._bind_mousewheel(frame)
 
         header = tk.Frame(frame, bg=self.theme.card_bg)
@@ -87,7 +99,7 @@ class DockerTab(CardConsoleTab):
 
         for label, action in [
             ("Start", "start"), ("Stop", "stop"), ("Restart", "restart"),
-            ("Logs", "logs"), ("Inspect", "inspect"),
+            ("Logs", "logs"), ("Tail", "tail"), ("Inspect", "inspect"),
         ]:
             btn = tk.Button(btn_row, text=label,
                             command=lambda a=action, n=name: self._action(n, a))
@@ -113,6 +125,14 @@ class DockerTab(CardConsoleTab):
 
         def worker():
             dm = self.controller.docker_manager
+            if action == "tail":
+                cmd = "docker logs -f --tail=200 {}".format(container)
+                self.after(0, lambda: LogTailWindow(
+                    self.controller,
+                    title="docker logs -f {}".format(container),
+                    cmd=cmd,
+                ))
+                return
             if   action == "start":   result = dm.start(container)
             elif action == "stop":    result = dm.stop(container)
             elif action == "restart": result = dm.restart(container)
@@ -162,6 +182,7 @@ class DockerTab(CardConsoleTab):
                 self.after(0, lambda n=name, s=status, st=st: self._update_card(n, s, st))
 
         threading.Thread(target=worker, daemon=True).start()
+        self._rc.schedule()
 
     def _update_card(self, name, status, stats=None):
         card = self.cards[name]

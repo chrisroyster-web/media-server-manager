@@ -11,6 +11,8 @@ import urllib.request
 import json
 import time
 
+from ui.refresh_control import RefreshControl
+
 
 def _fmt_ms(ms):
     """Format milliseconds as H:MM:SS or MM:SS."""
@@ -42,13 +44,11 @@ class PlexTab(tk.Frame):
     """Plex Now Playing — active sessions with progress and kick support."""
 
     PLAYER_COLOR = "#e5a00d"   # Plex gold
-    REFRESH_MS   = 15_000
 
     def __init__(self, parent, controller):
         super().__init__(parent, bg=controller.theme.bg)
         self.controller      = controller
         self.theme           = controller.theme
-        self._refresh_job    = None
         self._active_sessions = []
         self._build_ui()
 
@@ -67,9 +67,13 @@ class PlexTab(tk.Frame):
         tk.Label(hdr, text="PLEX  —  NOW PLAYING",
                  bg=t.bg, fg=t.text, font=t.font_title).pack(side="left")
 
+        self._rc = RefreshControl(hdr, self.controller, "plex",
+                                  default=15, on_refresh=self._fetch)
+        self._rc.pack(side="right")
+
         self._refresh_btn = tk.Button(hdr, text="⟳ Refresh", command=self._fetch)
         t.style_button(self._refresh_btn)
-        self._refresh_btn.pack(side="right")
+        self._refresh_btn.pack(side="right", padx=(0, 8))
 
         # Summary cards
         cards_row = tk.Frame(self, bg=t.bg)
@@ -120,9 +124,7 @@ class PlexTab(tk.Frame):
     # FETCH
     # ---------------------------------------------------------
     def _fetch(self):
-        if self._refresh_job:
-            self.after_cancel(self._refresh_job)
-            self._refresh_job = None
+        self._rc.cancel()
         self._refresh_btn.config(state="disabled", text="Loading…")
         threading.Thread(target=self._do_fetch, daemon=True).start()
 
@@ -150,7 +152,7 @@ class PlexTab(tk.Frame):
             self.after(0, lambda err=str(e): self._show_error("Fetch failed: " + err[:80]))
         finally:
             self.after(0, lambda: self._refresh_btn.config(state="normal", text="⟳ Refresh"))
-            self._refresh_job = self.after(self.REFRESH_MS, self._fetch)
+            self.after(0, self._rc.schedule)
 
     # ---------------------------------------------------------
     # UI UPDATE
@@ -331,4 +333,4 @@ class PlexTab(tk.Frame):
             w.destroy()
         tk.Label(self._session_frame, text=msg,
                  bg=self.theme.bg, fg=self.theme.status_stopped,
-                 font=self.theme.font_small, wraplength=500).pack(pady=30)
+                 font=self.theme.font_regular).pack(pady=40)

@@ -85,5 +85,11 @@
     "plex_token": "",
     "jellyfin_host": "localhost",
     "jellyfin_port": "8096",
-    "jellyfin_apikey": ""
+    "jellyfin_apikey": "",
+    "active_server_index": 0,
+    "vpn_enabled": false,
+    "vpn_type": "ProtonVPN",
+    "proxy_enabled": false,
+    "proxy_type": "Auto-detect",
+    "theme_mode": "dark"
 }

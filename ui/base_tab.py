@@ -35,13 +35,16 @@ class CardConsoleTab(tk.Frame):
     # BUILD UI
     # ---------------------------------------------------------
     def _build_ui(self):
+        hdr_row = tk.Frame(self, bg=self.theme.bg)
+        hdr_row.pack(fill="x", padx=10, pady=(10, 6))
         tk.Label(
-            self,
+            hdr_row,
             text=self.TITLE,
             bg=self.theme.bg,
             fg=self.theme.text,
             font=self.theme.font_title,
-        ).pack(anchor="w", padx=10, pady=(10, 6))
+        ).pack(side="left")
+        self._populate_header(hdr_row)
 
         pane = tk.PanedWindow(
             self, orient="vertical",
@@ -61,10 +64,15 @@ class CardConsoleTab(tk.Frame):
         self._canvas.pack(side="left", fill="both", expand=True)
 
         self.inner = tk.Frame(self._canvas, bg=self.theme.bg)
-        self._canvas.create_window((0, 0), window=self.inner, anchor="nw")
+        self._canvas_win = self._canvas.create_window((0, 0), window=self.inner, anchor="nw")
         self.inner.bind(
             "<Configure>",
             lambda e: self._canvas.configure(scrollregion=self._canvas.bbox("all")),
+        )
+        # Keep inner frame width in sync with canvas so grid columns fill correctly
+        self._canvas.bind(
+            "<Configure>",
+            lambda e: self._canvas.itemconfig(self._canvas_win, width=e.width),
         )
 
         self._bind_mousewheel(self._canvas)
@@ -107,6 +115,10 @@ class CardConsoleTab(tk.Frame):
         self.output.configure(yscrollcommand=sb2.set)
 
         self._configure_tags()
+
+    def _populate_header(self, hdr_row):
+        """Override in subclasses to add controls (e.g. RefreshControl) to the header row."""
+        pass
 
     # ---------------------------------------------------------
     # MOUSEWHEEL

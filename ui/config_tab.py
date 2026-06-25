@@ -290,6 +290,81 @@ class ConfigTab(tk.Frame):
         self._radarr_test_lbl = self._test_button(radarr_frame, 3,
             lambda: self._test_arr("radarr"))
 
+        # ---- Prowlarr ----
+        self._section_header("Prowlarr", "API connection for the Prowlarr indexer tab")
+        prowlarr_frame = tk.Frame(self.body, bg=t.surface, padx=12, pady=10)
+        prowlarr_frame.pack(fill="x", padx=16, pady=(0, 8))
+        prowlarr_frame.columnconfigure(1, weight=1)
+
+        for row_i, (label, attr) in enumerate([
+            ("Host:",    "prowlarr_host_var"),
+            ("Port:",    "prowlarr_port_var"),
+            ("API Key:", "prowlarr_key_var"),
+        ]):
+            tk.Label(prowlarr_frame, text=label, bg=t.surface, fg=t.text,
+                     font=t.font_regular).grid(row=row_i, column=0, sticky="w", pady=4)
+            var = tk.StringVar()
+            setattr(self, attr, var)
+            show = "*" if attr == "prowlarr_key_var" else ""
+            e = tk.Entry(prowlarr_frame, textvariable=var, font=t.font_regular, show=show)
+            t.style_entry(e)
+            e.grid(row=row_i, column=1, sticky="ew", padx=12, pady=4)
+
+        self._prowlarr_test_lbl = self._test_button(prowlarr_frame, 3,
+            lambda: self._test_arr("prowlarr"))
+
+        # ---- VPN ----
+        self._section_header("VPN",
+                             "Enable to show the VPN Status tab in the sidebar")
+        vpn_frame = tk.Frame(self.body, bg=t.surface, padx=12, pady=10)
+        vpn_frame.pack(fill="x", padx=16, pady=(0, 8))
+        vpn_frame.columnconfigure(1, weight=1)
+
+        self.vpn_enabled_var = tk.BooleanVar()
+        tk.Checkbutton(vpn_frame, text="I have a VPN on this server",
+                       variable=self.vpn_enabled_var,
+                       bg=t.surface, fg=t.text, selectcolor=t.surface_dark,
+                       activebackground=t.surface,
+                       font=t.font_regular).grid(
+            row=0, column=0, columnspan=2, sticky="w", pady=(0, 6))
+
+        tk.Label(vpn_frame, text="VPN Type:", bg=t.surface, fg=t.text,
+                 font=t.font_regular).grid(row=1, column=0, sticky="w", pady=4)
+        self.vpn_type_var = tk.StringVar(value="ProtonVPN")
+        vpn_menu = tk.OptionMenu(vpn_frame, self.vpn_type_var,
+                                 "ProtonVPN", "WireGuard", "OpenVPN")
+        vpn_menu.configure(bg=t.surface, fg=t.text, relief="flat",
+                           font=t.font_regular, highlightthickness=0,
+                           activebackground=t.surface_light)
+        vpn_menu["menu"].configure(bg=t.surface, fg=t.text)
+        vpn_menu.grid(row=1, column=1, sticky="w", padx=12, pady=4)
+
+        # ---- Reverse Proxy ----
+        self._section_header("Reverse Proxy",
+                             "Enable to show the Reverse Proxy tab in the sidebar")
+        proxy_frame = tk.Frame(self.body, bg=t.surface, padx=12, pady=10)
+        proxy_frame.pack(fill="x", padx=16, pady=(0, 8))
+        proxy_frame.columnconfigure(1, weight=1)
+
+        self.proxy_enabled_var = tk.BooleanVar()
+        tk.Checkbutton(proxy_frame, text="I have a reverse proxy on this server",
+                       variable=self.proxy_enabled_var,
+                       bg=t.surface, fg=t.text, selectcolor=t.surface_dark,
+                       activebackground=t.surface,
+                       font=t.font_regular).grid(
+            row=0, column=0, columnspan=2, sticky="w", pady=(0, 6))
+
+        tk.Label(proxy_frame, text="Proxy Type:", bg=t.surface, fg=t.text,
+                 font=t.font_regular).grid(row=1, column=0, sticky="w", pady=4)
+        self.proxy_type_var = tk.StringVar(value="Auto-detect")
+        proxy_menu = tk.OptionMenu(proxy_frame, self.proxy_type_var,
+                                   "Auto-detect", "Nginx", "Caddy", "Traefik")
+        proxy_menu.configure(bg=t.surface, fg=t.text, relief="flat",
+                             font=t.font_regular, highlightthickness=0,
+                             activebackground=t.surface_light)
+        proxy_menu["menu"].configure(bg=t.surface, fg=t.text)
+        proxy_menu.grid(row=1, column=1, sticky="w", padx=12, pady=4)
+
         # ---- Notifications ----
         self._section_header("Notifications", "Alert delivery via ntfy.sh push or SMTP email")
         notif_frame = tk.Frame(self.body, bg=t.surface, padx=12, pady=10)
@@ -445,6 +520,19 @@ class ConfigTab(tk.Frame):
         self.radarr_host_var.set(cfg.radarr_host)
         self.radarr_port_var.set(cfg.radarr_port)
         self.radarr_key_var.set(cfg.radarr_apikey)
+
+        # Prowlarr
+        self.prowlarr_host_var.set(cfg.prowlarr_host)
+        self.prowlarr_port_var.set(cfg.prowlarr_port)
+        self.prowlarr_key_var.set(cfg.prowlarr_apikey)
+
+        # VPN
+        self.vpn_enabled_var.set(cfg.vpn_enabled)
+        self.vpn_type_var.set(cfg.vpn_type)
+
+        # Reverse Proxy
+        self.proxy_enabled_var.set(cfg.proxy_enabled)
+        self.proxy_type_var.set(cfg.proxy_type)
 
         # Notifications
         self.ntfy_enabled_var.set(cfg.notify_ntfy_enabled)
@@ -664,6 +752,19 @@ class ConfigTab(tk.Frame):
         radarr_port = self.radarr_port_var.get().strip() or "7878"
         radarr_key  = self.radarr_key_var.get().strip()
 
+        # --- Prowlarr ---
+        prowlarr_host = self.prowlarr_host_var.get().strip() or "localhost"
+        prowlarr_port = self.prowlarr_port_var.get().strip() or "9797"
+        prowlarr_key  = self.prowlarr_key_var.get().strip()
+
+        # --- VPN ---
+        vpn_enabled = self.vpn_enabled_var.get()
+        vpn_type    = self.vpn_type_var.get()
+
+        # --- Reverse Proxy ---
+        proxy_enabled = self.proxy_enabled_var.get()
+        proxy_type    = self.proxy_type_var.get()
+
         # --- Notifications ---
         notify_ntfy_enabled  = self.ntfy_enabled_var.get()
         notify_ntfy_topic    = self.ntfy_topic_var.get().strip()
@@ -701,6 +802,13 @@ class ConfigTab(tk.Frame):
         cfg.config["radarr_host"]               = radarr_host
         cfg.config["radarr_port"]               = radarr_port
         cfg.config["radarr_apikey"]             = radarr_key
+        cfg.config["prowlarr_host"]             = prowlarr_host
+        cfg.config["prowlarr_port"]             = prowlarr_port
+        cfg.config["prowlarr_apikey"]           = prowlarr_key
+        cfg.config["vpn_enabled"]               = vpn_enabled
+        cfg.config["vpn_type"]                  = vpn_type
+        cfg.config["proxy_enabled"]             = proxy_enabled
+        cfg.config["proxy_type"]                = proxy_type
         cfg.config["notify_ntfy_enabled"]       = notify_ntfy_enabled
         cfg.config["notify_ntfy_topic"]         = notify_ntfy_topic
         cfg.config["notify_ntfy_server"]        = notify_ntfy_server
@@ -763,16 +871,29 @@ class ConfigTab(tk.Frame):
 
     def _test_arr(self, app):
         import threading, urllib.request, urllib.error, json as _json
-        lbl = self._sonarr_test_lbl if app == "sonarr" else self._radarr_test_lbl
+        if app == "sonarr":
+            lbl = self._sonarr_test_lbl
+            host = self.sonarr_host_var.get().strip()
+            port = self.sonarr_port_var.get().strip()
+            key  = self.sonarr_key_var.get().strip()
+        elif app == "radarr":
+            lbl = self._radarr_test_lbl
+            host = self.radarr_host_var.get().strip()
+            port = self.radarr_port_var.get().strip()
+            key  = self.radarr_key_var.get().strip()
+        else:  # prowlarr
+            lbl = self._prowlarr_test_lbl
+            host = self.prowlarr_host_var.get().strip()
+            port = self.prowlarr_port_var.get().strip()
+            key  = self.prowlarr_key_var.get().strip()
+
         lbl.configure(text="Testing…", fg=self.controller.theme.text_muted)
-        host = (self.sonarr_host_var if app == "sonarr" else self.radarr_host_var).get().strip()
-        port = (self.sonarr_port_var if app == "sonarr" else self.radarr_port_var).get().strip()
-        key  = (self.sonarr_key_var  if app == "sonarr" else self.radarr_key_var).get().strip()
         host = host.removeprefix("https://").removeprefix("http://").strip("/")
+        api_ver = "v1" if app == "prowlarr" else "v3"
 
         def _run():
             try:
-                url = "http://{}:{}/api/v3/system/status".format(host, port)
+                url = "http://{}:{}/api/{}/system/status".format(host, port, api_ver)
                 req = urllib.request.Request(url, headers={"X-Api-Key": key})
                 with urllib.request.urlopen(req, timeout=6) as r:
                     data = _json.loads(r.read())

@@ -8,6 +8,7 @@ from core.notification_manager import NotificationManager
 from core.ssh_manager import SSHManager
 from core.service_manager import ServiceManager
 from core.docker_manager import DockerManager
+from core.tray_manager import TrayManager
 
 from ui.sidebar import Sidebar
 from ui.connection_panel import ConnectionPanel
@@ -29,6 +30,18 @@ from ui.plex_tab import PlexTab
 from ui.jellyfin_tab import JellyfinTab
 from ui.compose_tab import ComposeTab
 from ui.cron_tab import CronTab
+from ui.notification_history_tab import NotificationHistoryTab
+from ui.server_manager_tab import ServerManagerTab
+from ui.play_history_tab import PlayHistoryTab
+from ui.vpn_tab import VPNTab
+from ui.reverse_proxy_tab import ReverseProxyTab
+from ui.speedtest_tab import SpeedtestTab
+from ui.storage_health_tab import StorageHealthTab
+from ui.ssl_tab import SSLTab
+from ui.tailscale_tab import TailscaleTab
+from ui.bandwidth_tab import BandwidthTab
+from ui.backup_tab import BackupTab
+from ui.prowlarr_tab import ProwlarrTab
 
 from ui.theme import Theme
 
@@ -46,15 +59,19 @@ class MediaServerManager(tk.Tk):
         self.geometry("1500x1000")
         self.minsize(1200, 850)
 
-        # Core components
-        self.theme = Theme()
-        self.theme.apply_ttk_styles(self)   # global ttk contrast pass
+        # Core components — theme_mode read before Theme() so colors are right
         self.config_manager = ConfigManager()
+        self.theme = Theme(mode=self.config_manager.theme_mode)
+        self.theme.apply_ttk_styles(self)   # global ttk contrast pass
         self.notification_manager = NotificationManager(self.config_manager)
         self.ssh = SSHManager()
         self.service_manager = ServiceManager(self.ssh)
         self.docker_manager = DockerManager(self.ssh)
         self._watchdog_stop = None
+
+        # System tray
+        self.tray = TrayManager(self)
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
 
         # Build layout while hidden (no flicker)
         self._build_layout()
@@ -115,6 +132,18 @@ class MediaServerManager(tk.Tk):
         self.cron_tab         = CronTab(self.tabs, self)            # 16
         self.plex_tab         = PlexTab(self.tabs, self)            # 17
         self.jellyfin_tab     = JellyfinTab(self.tabs, self)        # 18
+        self.notif_tab        = NotificationHistoryTab(self.tabs, self)  # 19
+        self.server_tab       = ServerManagerTab(self.tabs, self)        # 20
+        self.play_history_tab = PlayHistoryTab(self.tabs, self)          # 21
+        self.vpn_tab          = VPNTab(self.tabs, self)                  # 22
+        self.proxy_tab        = ReverseProxyTab(self.tabs, self)         # 23
+        self.speedtest_tab    = SpeedtestTab(self.tabs, self)            # 24
+        self.storage_health_tab = StorageHealthTab(self.tabs, self)     # 25
+        self.ssl_tab          = SSLTab(self.tabs, self)                 # 26
+        self.tailscale_tab    = TailscaleTab(self.tabs, self)           # 27
+        self.bandwidth_tab    = BandwidthTab(self.tabs, self)           # 28
+        self.backup_tab       = BackupTab(self.tabs, self)              # 29
+        self.prowlarr_tab     = ProwlarrTab(self.tabs, self)            # 30
 
         for tab in [
             self.connection_panel, self.quick_commands, self.dashboard_tab,
@@ -124,6 +153,10 @@ class MediaServerManager(tk.Tk):
             self.updates_tab, self.sessions_tab, self.emby_tab,
             self.compose_tab, self.cron_tab,
             self.plex_tab, self.jellyfin_tab,
+            self.notif_tab, self.server_tab, self.play_history_tab,
+            self.vpn_tab, self.proxy_tab, self.speedtest_tab,
+            self.storage_health_tab, self.ssl_tab, self.tailscale_tab,
+            self.bandwidth_tab, self.backup_tab, self.prowlarr_tab,
         ]:
             self.tabs.add(tab)
 
@@ -305,13 +338,25 @@ class MediaServerManager(tk.Tk):
                 splash.destroy()
                 self.deiconify()
                 self._update_player_sidebar()
+                self._update_server_sidebar()
                 self.log_viewer._rebuild_sources()
+                self.tray.start()
                 self.after(3000, self.start_service_watchdog)
                 self.after(5000, self.start_sab_toast_watcher)
         except tk.TclError:
             self.deiconify()
             self._update_player_sidebar()
+            self._update_server_sidebar()
             self.log_viewer._rebuild_sources()
+            self.tray.start()
+
+    def _on_close(self):
+        """Minimize to tray instead of closing (if tray is active)."""
+        if self.tray._icon is not None:
+            self.withdraw()
+        else:
+            self.tray.stop()
+            self.destroy()
 
     # ---------------------------------------------------------
     # GLOBAL MOUSEWHEEL ROUTING
@@ -330,8 +375,16 @@ class MediaServerManager(tk.Tk):
         units = int(-1 * (event.delta / 120))
         w = event.widget
 
+        # In Python 3.14+, event.widget may be a path string if the widget
+        # was destroyed before the event fires. Guard against that.
+        if isinstance(w, str):
+            return
+
         # If the widget under the cursor is already scrollable, leave it alone.
-        cls = w.winfo_class()
+        try:
+            cls = w.winfo_class()
+        except Exception:
+            return
         if cls == "Text":
             return
         if cls == "Canvas":
@@ -465,7 +518,10 @@ class MediaServerManager(tk.Tk):
         self.bind("<F5>", lambda e: self._shortcut_refresh())
         self.bind("<Control-f>", self._open_search)
         self.bind("<Control-F>", self._open_search)
+        self.bind("<Control-slash>", self._show_shortcut_help)
+        self.bind("<Control-question>", self._show_shortcut_help)
         self._search_overlay = None
+        self._shortcut_help_win = None
 
     def _shortcut_refresh(self):
         if self._focused_on_input():
@@ -505,6 +561,8 @@ class MediaServerManager(tk.Tk):
             16: lambda: self.cron_tab.refresh(),
             17: lambda: self.plex_tab._fetch(),
             18: lambda: self.jellyfin_tab._fetch(),
+            19: lambda: None,   # notification history — no fetch needed
+            20: lambda: self.server_tab._load(),
         }
         fn = _refresh_map.get(idx)
         if fn:
@@ -533,13 +591,24 @@ class MediaServerManager(tk.Tk):
             self._watchdog_stop.set()
             self._watchdog_stop = None
 
+    def toggle_theme(self):
+        """Flip dark <-> light, save to config, restart to apply."""
+        import sys, os
+        cfg = self.config_manager
+        new_mode = "light" if cfg.theme_mode == "dark" else "dark"
+        cfg.theme_mode = new_mode
+        # Restart the process so the new theme is applied cleanly
+        self.destroy()
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+
     def apply_config(self):
         """Re-apply config changes that affect live widgets."""
         self._update_player_sidebar()
+        self._update_server_sidebar()
         self.log_viewer._rebuild_sources()
 
     def _update_player_sidebar(self):
-        """Show/hide Plex and Jellyfin sidebar entries based on whether they are configured."""
+        """Show/hide Plex, Jellyfin, VPN sidebar entries based on config."""
         cfg = self.config_manager
         if cfg.plex_token:
             self.sidebar.show_item(17)
@@ -549,6 +618,57 @@ class MediaServerManager(tk.Tk):
             self.sidebar.show_item(18)
         else:
             self.sidebar.hide_item(18)
+        if cfg.vpn_enabled:
+            self.sidebar.show_item(22)
+        else:
+            self.sidebar.hide_item(22)
+        if cfg.proxy_enabled:
+            self.sidebar.show_item(23)
+        else:
+            self.sidebar.hide_item(23)
+
+    def _update_server_sidebar(self):
+        """Rebuild the SERVERS section in the sidebar from current profiles."""
+        self.sidebar.rebuild_servers(self.config_manager)
+
+    def switch_server(self, profile):
+        """Disconnect current SSH session and connect to a new server profile."""
+        import threading
+        self.show_toast("Switching Server",
+                        "Connecting to {}…".format(profile.get("host", "")),
+                        level="info")
+        # Navigate to Connection tab so the user sees progress
+        self.tabs.select(0)
+
+        def _do():
+            try:
+                if self.ssh.connected:
+                    self.ssh.disconnect()
+            except Exception:
+                pass
+            host     = profile.get("host", "")
+            port     = int(profile.get("port") or 22)
+            username = profile.get("username", "")
+            password = profile.get("password", "")
+            key_path = profile.get("key_path", "").strip() or None
+            try:
+                ok, msg = self.ssh.connect(host, username, password,
+                                           port=port, key_path=key_path)
+                if ok:
+                    # Persist as last_host / last_username for legacy compat
+                    self.config_manager.last_host     = host
+                    self.config_manager.last_username = username
+                    self.after(0, lambda: self.show_toast(
+                        "Connected", profile.get("name") or host, level="ok"))
+                    self.after(0, self.dashboard_tab.refresh)
+                else:
+                    self.after(0, lambda m=msg: self.show_toast(
+                        "Connection Failed", m, level="error"))
+            except Exception as e:
+                self.after(0, lambda m=str(e): self.show_toast(
+                    "Connection Error", m, level="error"))
+
+        threading.Thread(target=_do, daemon=True).start()
 
     # ---------------------------------------------------------
     # SIDEBAR BADGE  (called by ArrTab after each refresh)
@@ -561,6 +681,11 @@ class MediaServerManager(tk.Tk):
     # IN-APP TOAST NOTIFICATIONS
     # ---------------------------------------------------------
     def show_toast(self, title, message, duration_ms=5000, level="info"):
+        # Log to notification history
+        try:
+            self.notif_tab.add_entry(title, message, level)
+        except Exception:
+            pass
         t = self.theme
         color_map = {"info": t.blue, "ok": t.status_running,
                      "warn": t.yellow, "error": t.status_stopped}
@@ -651,14 +776,11 @@ class MediaServerManager(tk.Tk):
                             self._sab_seen_ids.add(nzo_id)
                             if len(self._sab_seen_ids) > 1:
                                 self.after(0, lambda n=name: self.show_toast(
-                                    "Download complete", n, level="ok"))
+                                    "Download Complete", n, level="ok"))
                 except Exception:
                     pass
         threading.Thread(target=_loop, daemon=True).start()
 
-    # ---------------------------------------------------------
-    # GLOBAL SEARCH  (Ctrl+F)
-    # ---------------------------------------------------------
     def _open_search(self, event=None):
         if hasattr(self, "_search_overlay") and self._search_overlay:
             try:
@@ -715,7 +837,66 @@ class MediaServerManager(tk.Tk):
         var.trace_add("write", _update)
         entry.bind("<KeyPress>", _on_key)
 
+    def _show_shortcut_help(self, event=None):
+        if self._shortcut_help_win and self._shortcut_help_win.winfo_exists():
+            self._shortcut_help_win.lift()
+            return
+        t = self.theme
+        win = tk.Toplevel(self)
+        win.title("Keyboard Shortcuts")
+        win.configure(bg=t.bg)
+        win.resizable(False, False)
+        win.attributes("-topmost", True)
+        self._shortcut_help_win = win
 
+        hdr = tk.Frame(win, bg=t.surface, padx=20, pady=14)
+        hdr.pack(fill="x")
+        tk.Label(hdr, text="\u2328  Keyboard Shortcuts",
+                 bg=t.surface, fg=t.text, font=t.font_title).pack(side="left")
+        tk.Button(hdr, text="\u2715", command=win.destroy,
+                  bg=t.surface, fg=t.text_muted, bd=0, relief="flat",
+                  font=("Segoe UI", 14), cursor="hand2").pack(side="right")
+
+        body = tk.Frame(win, bg=t.bg, padx=24, pady=16)
+        body.pack(fill="both")
+
+        SHORTCUTS = [
+            ("NAVIGATION", [
+                ("1 \u2013 9",    "Jump to tab by number"),
+                ("Escape",         "Go to Connection tab"),
+                ("Ctrl + F",       "Open global search"),
+                ("Ctrl + ?",       "Show this help overlay"),
+            ]),
+            ("ACTIONS", [
+                ("R  /  F5",       "Refresh current tab"),
+            ]),
+        ]
+
+        row_i = 0
+        for section, items in SHORTCUTS:
+            tk.Label(body, text=section,
+                     bg=t.bg, fg=t.text_muted,
+                     font=("Segoe UI", 8, "bold")).grid(
+                         row=row_i, column=0, columnspan=2,
+                         sticky="w", pady=(10 if row_i > 0 else 0, 4))
+            row_i += 1
+            for key, desc in items:
+                key_lbl = tk.Label(body, text=key,
+                                   bg=t.surface, fg=t.blue,
+                                   font=t.font_mono, padx=8, pady=3,
+                                   relief="flat",
+                                   highlightbackground=t.card_border,
+                                   highlightthickness=1)
+                key_lbl.grid(row=row_i, column=0, sticky="w", padx=(0, 16), pady=3)
+                tk.Label(body, text=desc,
+                         bg=t.bg, fg=t.text,
+                         font=t.font_small).grid(
+                             row=row_i, column=1, sticky="w", pady=3)
+                row_i += 1
+
+        win.bind("<Escape>", lambda e: win.destroy())
+
+    # --------------------------------------------------
 if __name__ == "__main__":
     app = MediaServerManager()
     app.mainloop()

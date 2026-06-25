@@ -1,0 +1,16 @@
+Traceback (most recent call last):
+  File "C:\media-server-manager\main.py", line 890, in <module>
+    app = MediaServerManager()
+  File "C:\media-server-manager\main.py", line 71, in __init__
+    self._build_layout()
+    ~~~~~~~~~~~~~~~~~~^^
+  File "C:\media-server-manager\main.py", line 91, in _build_layout
+    self.sidebar = Sidebar(body, self)
+                   ~~~~~~~^^^^^^^^^^^^
+  File "C:\media-server-manager\ui\sidebar.py", line 69, in __init__
+    self._build_sidebar()
+    ~~~~~~~~~~~~~~~~~~~^^
+  File "C:\media-server-manager\ui\sidebar.py", line 118, in _build_sidebar
+    _is_dark = (controller.config_manager.theme_mode == "dark")
+                ^^^^^^^^^^
+NameError: name 'controller' is not defined. Did you mean: 'self.controller'?

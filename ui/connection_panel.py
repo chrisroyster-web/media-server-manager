@@ -5,6 +5,9 @@ from tkinter import messagebox
 import threading
 import os
 import time
+import socket
+import struct
+import re
 
 
 class ConnectionPanel(tk.Frame):
@@ -75,6 +78,23 @@ class ConnectionPanel(tk.Frame):
                                        command=self._shutdown_confirm)
         self.theme.style_button(self.shutdown_btn)
         self.shutdown_btn.pack(fill="x", pady=4)
+
+        # ── Wake-on-LAN ───────────────────────────────────────
+        tk.Frame(left, bg=self.theme.card_border, height=1).pack(
+            fill="x", pady=(14, 10))
+        tk.Label(left, text="WAKE-ON-LAN", bg=self.theme.surface,
+                 fg=self.theme.text_muted, font=("Segoe UI", 8, "bold")).pack(anchor="w")
+
+        self.wol_mac_var = tk.StringVar(value=self.config_mgr.wol_mac)
+        self._field(left, "MAC Address", self.wol_mac_var)
+
+        self.wol_bcast_var = tk.StringVar(value=self.config_mgr.wol_broadcast)
+        self._field(left, "Broadcast IP", self.wol_bcast_var)
+
+        wol_btn = tk.Button(btn_frame, text="\U0001f4a4 Wake Server",
+                            command=self._send_wol)
+        self.theme.style_button(wol_btn)
+        wol_btn.pack(fill="x", pady=4)
 
         # Right panel: mini console
         right = tk.Frame(self, bg=self.theme.bg)
@@ -198,6 +218,42 @@ class ConnectionPanel(tk.Frame):
             self.after(0, lambda: self.controller.update_status(False))
 
         threading.Thread(target=worker, daemon=True).start()
+
+    # ---------------------------------------------------------
+    # WAKE-ON-LAN
+    # ---------------------------------------------------------
+    def _send_wol(self):
+        mac = self.wol_mac_var.get().strip()
+        bcast = self.wol_bcast_var.get().strip() or "255.255.255.255"
+        # Save for next time
+        self.config_mgr.wol_mac = mac
+        self.config_mgr.wol_broadcast = bcast
+
+        if not mac:
+            self._log("Enter a MAC address first", "error")
+            return
+
+        # Normalise: accept XX:XX:XX:XX:XX:XX or XX-XX-XX-XX-XX-XX or no separator
+        clean = re.sub(r'[:\-\s]', '', mac).upper()
+        if not re.fullmatch(r'[0-9A-F]{12}', clean):
+            self._log("Invalid MAC address: {}".format(mac), "error")
+            return
+
+        def worker():
+            try:
+                # Build magic packet: 6× 0xFF + 16× MAC bytes
+                mac_bytes = bytes.fromhex(clean)
+                packet = b'\xff' * 6 + mac_bytes * 16
+                with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                    s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+                    s.connect((bcast, 9))
+                    s.send(packet)
+                self._log("Magic packet sent to {} via {}".format(mac, bcast), "success")
+            except Exception as exc:
+                self._log("WoL error: {}".format(exc), "error")
+
+        threading.Thread(target=worker, daemon=True).start()
+        self._log("Sending magic packet to {}…".format(mac), "info")
 
     # ---------------------------------------------------------
     # OUTPUT TAGS

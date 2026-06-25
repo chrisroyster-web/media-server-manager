@@ -5,6 +5,7 @@ import threading
 import webbrowser
 
 from ui.base_tab import CardConsoleTab
+from ui.log_tail_window import LogTailWindow
 
 
 class ServicesTab(CardConsoleTab):
@@ -39,20 +40,25 @@ class ServicesTab(CardConsoleTab):
         return "http://{0}:{1}".format(self._host(), port)
 
     # ---------------------------------------------------------
-    # POPULATE CARDS
+    # POPULATE CARDS  (2-column grid)
     # ---------------------------------------------------------
-    def _populate_cards(self):
-        for name, data in self.services.items():
-            self.cards[name] = self._create_card(name, data)
+    COLS = 2
 
-    def _create_card(self, name, data):
+    def _populate_cards(self):
+        for c in range(self.COLS):
+            self.inner.columnconfigure(c, weight=1, uniform="svc")
+        for i, (name, data) in enumerate(self.services.items()):
+            row, col = divmod(i, self.COLS)
+            self.cards[name] = self._create_card(name, data, row, col)
+
+    def _create_card(self, name, data, grid_row=0, grid_col=0):
         frame = tk.Frame(
             self.inner,
             bg=self.theme.card_bg,
             highlightbackground=self.theme.card_border,
             highlightthickness=1,
         )
-        frame.pack(fill="x", padx=10, pady=6)
+        frame.grid(row=grid_row, column=grid_col, padx=8, pady=6, sticky="nsew")
         self._bind_mousewheel(frame)
 
         header = tk.Frame(frame, bg=self.theme.card_bg)
@@ -88,7 +94,7 @@ class ServicesTab(CardConsoleTab):
 
         for label, action in [
             ("Start", "start"), ("Stop", "stop"), ("Restart", "restart"),
-            ("Logs", "logs"), ("Status", "status"),
+            ("Logs", "logs"), ("Tail", "tail"), ("Status", "status"),
         ]:
             btn = tk.Button(btn_row, text=label,
                             command=lambda a=action, n=name: self._action(n, a))
@@ -107,6 +113,14 @@ class ServicesTab(CardConsoleTab):
 
         def worker():
             sm = self.controller.service_manager
+            if action == "tail":
+                cmd = "journalctl -fu {} --no-pager".format(svc)
+                self.after(0, lambda: LogTailWindow(
+                    self.controller,
+                    title="journalctl -fu {}".format(svc),
+                    cmd=cmd,
+                ))
+                return
             if   action == "start":   result = sm.start(svc)
             elif action == "stop":    result = sm.stop(svc)
             elif action == "restart": result = sm.restart(svc)

@@ -1,0 +1,399 @@
+# ui/backup_tab.py
+"""
+Backup status tab.
+Parses restic / rsync / duplicati logs to show last backup time,
+duration, size, and pass/fail status.
+"""
+
+import tkinter as tk
+from tkinter import ttk
+import threading
+import time
+import re
+import json
+
+from ui.refresh_control import RefreshControl
+
+
+class BackupTab(tk.Frame):
+
+    def __init__(self, parent, controller):
+        super().__init__(parent, bg=controller.theme.bg)
+        self.controller = controller
+        self.theme      = controller.theme
+        self._jobs      = []
+        self._build_ui()
+
+    # =========================================================
+    # BUILD UI
+    # =========================================================
+    def _build_ui(self):
+        t = self.theme
+
+        hdr = tk.Frame(self, bg=t.bg)
+        hdr.pack(fill="x", padx=16, pady=(14, 8))
+        tk.Label(hdr, text="BACKUP STATUS", bg=t.bg, fg=t.text,
+                 font=t.font_title).pack(side="left")
+        self._rc = RefreshControl(hdr, self.controller, "backup",
+                                  default=60, on_refresh=self.refresh)
+        self._rc.pack(side="right")
+        btn = tk.Button(hdr, text="⟳ Refresh", command=self.refresh)
+        t.style_button(btn)
+        btn.pack(side="right", padx=(0, 8))
+        self._last_lbl = tk.Label(hdr, text="", bg=t.bg, fg=t.text_muted,
+                                   font=t.font_small)
+        self._last_lbl.pack(side="right", padx=12)
+
+        # Summary cards
+        s_row = tk.Frame(self, bg=t.bg)
+        s_row.pack(fill="x", padx=16, pady=(0, 8))
+        self._card_ok   = self._stat_card(s_row, "OK",      "--", t.status_running)
+        self._card_warn = self._stat_card(s_row, "Stale",   "--", t.yellow)
+        self._card_fail = self._stat_card(s_row, "Failed",  "--", t.status_stopped)
+        self._card_size = self._stat_card(s_row, "Total",   "--", t.cyan)
+
+        # Jobs table
+        tbl_frame = tk.Frame(self, bg=t.bg)
+        tbl_frame.pack(fill="both", expand=True, padx=16, pady=(0, 4))
+
+        style = ttk.Style()
+        style.configure("BK.Treeview",
+                        background=t.card_bg, foreground=t.text,
+                        fieldbackground=t.card_bg, borderwidth=0,
+                        rowheight=26, font=t.font_mono)
+        style.configure("BK.Treeview.Heading",
+                        background=t.surface_dark, foreground=t.text_muted,
+                        font=t.font_small, relief="flat", borderwidth=0)
+        style.map("BK.Treeview",
+                  background=[("selected", t.surface_light)],
+                  foreground=[("selected", t.text)])
+
+        cols = ("tool", "name", "status", "last_run", "duration", "size", "files", "dest")
+        self._tree = ttk.Treeview(tbl_frame, columns=cols,
+                                   show="headings", style="BK.Treeview")
+        for col, w, lbl, anchor in [
+            ("tool",     70,  "Tool",      "w"),
+            ("name",    160,  "Job Name",  "w"),
+            ("status",   80,  "Status",    "w"),
+            ("last_run",140,  "Last Run",  "w"),
+            ("duration", 80,  "Duration",  "e"),
+            ("size",     80,  "Size",      "e"),
+            ("files",    70,  "Files",     "e"),
+            ("dest",    200,  "Dest/Repo", "w"),
+        ]:
+            self._tree.heading(col, text=lbl, anchor=anchor)
+            self._tree.column(col, width=w, minwidth=40,
+                              anchor=anchor, stretch=(col in ("name", "dest")))
+
+        self._tree.tag_configure("ok",   foreground=t.status_running)
+        self._tree.tag_configure("warn", foreground=t.yellow)
+        self._tree.tag_configure("fail", foreground=t.status_stopped)
+        self._tree.tag_configure("none", foreground=t.text_muted)
+
+        vsb = ttk.Scrollbar(tbl_frame, orient="vertical", command=self._tree.yview)
+        self._tree.configure(yscrollcommand=vsb.set)
+        vsb.pack(side="right", fill="y")
+        self._tree.pack(fill="both", expand=True)
+
+        # Log detail panel
+        det_frame = tk.Frame(self, bg=t.surface_dark,
+                             highlightbackground=t.card_border, highlightthickness=1)
+        det_frame.pack(fill="x", padx=16, pady=(4, 4))
+        det_hdr = tk.Frame(det_frame, bg=t.surface_dark)
+        det_hdr.pack(fill="x")
+        tk.Label(det_hdr, text="Last log excerpt", bg=t.surface_dark,
+                 fg=t.text_muted, font=t.font_small).pack(side="left", padx=8, pady=2)
+        self._detail = tk.Text(det_frame, bg=t.surface_dark, fg=t.text_dim,
+                               font=t.font_mono, height=5, state="disabled",
+                               relief="flat", wrap="word", pady=4, padx=8)
+        self._detail.pack(fill="x")
+
+        self._tree.bind("<<TreeviewSelect>>", self._on_select)
+
+        # Status bar
+        self._status = tk.Label(self, text="Press 'Refresh' to scan backup logs",
+                                bg=t.surface_dark, fg=t.text_muted,
+                                font=t.font_small, anchor="w")
+        self._status.pack(fill="x", padx=16, pady=(0, 8))
+
+    def _stat_card(self, parent, label, value, color):
+        t = self.theme
+        card = tk.Frame(parent, bg=t.card_bg,
+                        highlightbackground=t.card_border, highlightthickness=1)
+        card.pack(side="left", padx=(0, 8), pady=4, ipadx=16, ipady=8)
+        tk.Label(card, text=label, bg=t.card_bg, fg=t.text_muted,
+                 font=t.font_small).pack(anchor="w")
+        lbl = tk.Label(card, text=value, bg=t.card_bg, fg=color,
+                       font=("Segoe UI Semibold", 20))
+        lbl.pack(anchor="w")
+        return lbl
+
+    # =========================================================
+    # REFRESH
+    # =========================================================
+    def refresh(self):
+        self._rc.cancel()
+        if not self.controller.ssh.connected:
+            self._status.config(text="Not connected", fg=self.theme.status_stopped)
+            return
+        self._status.config(text="Scanning backup logs…", fg=self.theme.text_muted)
+        threading.Thread(target=self._fetch, daemon=True).start()
+
+    def _fetch(self):
+        ssh  = self.controller.ssh
+        jobs = []
+
+        # ── restic ──────────────────────────────────────────────────────
+        rout, _, rcode = ssh.run(
+            "command -v restic >/dev/null 2>&1 && echo FOUND || echo MISSING")
+        if "FOUND" in (rout or ""):
+            repos_out, _, _ = ssh.run(
+                "cat ~/.config/restic-repos 2>/dev/null || "
+                "grep -r 'RESTIC_REPOSITORY' /etc/cron* /etc/systemd/system "
+                "~/.local/share/systemd/user 2>/dev/null | "
+                "grep -o 'RESTIC_REPOSITORY=[^ ]*' | head -6")
+            repos = re.findall(r'RESTIC_REPOSITORY=(\S+)', repos_out or "")
+            for repo in repos or ["(default)"]:
+                env = "RESTIC_REPOSITORY={} RESTIC_PASSWORD_FILE=~/.restic-password".format(repo) if repo != "(default)" else ""
+                snap_out, _, snap_code = ssh.run(
+                    "{} restic snapshots --last --json 2>/dev/null".format(env))
+                if snap_code == 0 and snap_out.strip():
+                    try:
+                        snaps = json.loads(snap_out)
+                        last = snaps[-1] if snaps else {}
+                        ts   = last.get("time", "")
+                        if ts:
+                            import datetime
+                            dt   = datetime.datetime.fromisoformat(ts[:19])
+                            age  = (datetime.datetime.utcnow() - dt).total_seconds()
+                            days = age / 86400
+                            st   = "ok" if days < 2 else ("warn" if days < 7 else "fail")
+                            jobs.append({
+                                "tool": "restic", "name": repo.split("/")[-1] or "repo",
+                                "status": st, "last_run": dt.strftime("%Y-%m-%d %H:%M"),
+                                "duration": "--", "size": "--",
+                                "files": str(last.get("summary", {}).get("total_files_processed", "--")),
+                                "dest": repo, "log": str(last),
+                            })
+                    except Exception:
+                        pass
+
+        # ── rsync (via log files) ────────────────────────────────────────
+        # Only look in directories likely to contain real backup logs.
+        # Exclude /var/log/apt, /var/log/installer, /var/log/unattended-upgrades
+        # which contain system package logs that mention rsync incidentally.
+        log_dirs = ["/var/log/rsync", "/home", "/root", "/opt", "/srv"]
+        rsync_logs, _, _ = ssh.run(
+            "find {} -maxdepth 4 -name '*.log' 2>/dev/null "
+            "| xargs grep -l '^rsync:' 2>/dev/null | head -6".format(
+                " ".join(log_dirs)))
+        for log_path in (rsync_logs or "").splitlines():
+            log_path = log_path.strip()
+            if not log_path:
+                continue
+            # Skip system/package-manager log paths
+            skip_paths = ("/var/log/apt", "/var/log/installer",
+                          "/var/log/unattended", "/var/log/dpkg")
+            if any(log_path.startswith(s) for s in skip_paths):
+                continue
+            tail, _, _ = ssh.run("tail -40 '{}'".format(log_path))
+            job = self._parse_rsync_log(log_path, tail or "")
+            if job:
+                jobs.append(job)
+
+        # ── systemd backup units ─────────────────────────────────────────
+        svc_out, _, _ = ssh.run(
+            "systemctl list-units --type=service --all --no-pager --no-legend 2>/dev/null | "
+            "grep -iE 'backup|rsync|restic|borg|rclone|duplicati' | awk '{print $1}'")
+        for svc in (svc_out or "").splitlines():
+            svc = svc.strip()
+            if not svc:
+                continue
+            status_out, _, _ = ssh.run(
+                "systemctl show {} --property=ActiveState,ExecMainStatus,"
+                "InactiveEnterTimestamp 2>/dev/null".format(svc))
+            props = dict(re.findall(r'(\w+)=(.*)', status_out or ""))
+            active = props.get("ActiveState", "unknown")
+            code   = props.get("ExecMainStatus", "")
+            ts     = props.get("InactiveEnterTimestamp", "").strip()
+            st     = "ok" if (active in ("active", "inactive") and code == "0") else (
+                     "fail" if code not in ("0", "") else "none")
+            jobs.append({
+                "tool": "systemd", "name": svc.replace(".service", ""),
+                "status": st, "last_run": ts[:16] if ts else "--",
+                "duration": "--", "size": "--", "files": "--",
+                "dest": svc, "log": status_out or "",
+            })
+
+        # ── Cron backup scripts (structured log format) ──────────────────
+        # Finds any *backup*.log in /var/log that uses our timestamped format:
+        #   [YYYY-MM-DD HH:MM:SS] === Backup started ===
+        #   [YYYY-MM-DD HH:MM:SS] === Backup completed OK — SIZE written to PATH ===
+        cron_logs, _, _ = ssh.run(
+            "find /var/log -maxdepth 1 -name '*backup*.log' 2>/dev/null")
+        for log_path in (cron_logs or "").splitlines():
+            log_path = log_path.strip()
+            if not log_path:
+                continue
+            tail, _, _ = ssh.run(
+                "grep -a '=== Backup' '{}' 2>/dev/null | tail -20".format(log_path))
+            job = self._parse_cron_backup_log(log_path, tail or "")
+            if job:
+                jobs.append(job)
+
+        # ── Duplicati REST API ───────────────────────────────────────────
+        dup_out, _, dup_code = ssh.run(
+            "curl -sf http://localhost:8200/api/v1/backups 2>/dev/null")
+        if dup_code == 0 and dup_out.strip():
+            try:
+                dup_data = json.loads(dup_out)
+                for bk in (dup_data if isinstance(dup_data, list) else []):
+                    backup = bk.get("Backup", {})
+                    prog   = bk.get("Progress", {})
+                    name   = backup.get("Name", "--")
+                    dest   = backup.get("TargetURL", "--")
+                    last   = prog.get("LastEventID", "--")
+                    jobs.append({
+                        "tool": "duplicati", "name": name,
+                        "status": "ok", "last_run": "--",
+                        "duration": "--", "size": "--", "files": "--",
+                        "dest": dest, "log": json.dumps(prog, indent=2),
+                    })
+            except Exception:
+                pass
+
+        self.after(0, lambda: self._populate(jobs))
+        self.after(0, lambda: self._last_lbl.config(
+            text="Updated {}".format(time.strftime("%H:%M"))))
+        self.after(0, self._rc.schedule)
+
+    def _parse_rsync_log(self, path, text):
+        name = re.sub(r'\.log$', '', path.split("/")[-1])
+        # Look for rsync summary line
+        m = re.search(r'Number of files: ([\d,]+)', text)
+        files = m.group(1) if m else "--"
+        m = re.search(r'Total transferred file size: ([\d,]+ bytes)', text)
+        size = m.group(1) if m else "--"
+        # Success marker
+        ok = bool(re.search(r'sent \d+ bytes.*received \d+ bytes', text))
+        # Timestamp from last line
+        lines = [l for l in text.splitlines() if l.strip()]
+        last  = lines[-1] if lines else ""
+        ts_m  = re.search(r'\d{4}[-/]\d{2}[-/]\d{2}[ T]\d{2}:\d{2}', last)
+        ts    = ts_m.group(0) if ts_m else "--"
+        return {
+            "tool": "rsync", "name": name,
+            "status": "ok" if ok else "fail",
+            "last_run": ts, "duration": "--",
+            "size": size, "files": files,
+            "dest": path, "log": text[-800:],
+        }
+
+    def _parse_cron_backup_log(self, path, text):
+        """Parse logs written by our timestamped backup.sh format."""
+        if "=== Backup" not in text:
+            return None
+        import datetime
+        name = re.sub(r'[-_]backup.*\.log$', '', path.split("/")[-1]) or path.split("/")[-1]
+        # Find last start timestamp
+        starts = re.findall(r'\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\] === Backup started', text)
+        ts = starts[-1] if starts else "--"
+        # Determine status and size from last completion line
+        ok_m   = re.search(r'=== Backup completed OK.*?(\d+[\.\d]*[KMGTP]?) written to (\S+)', text)
+        fail_m = re.search(r'=== Backup completed with (\d+) error', text)
+        if ok_m:
+            st   = "ok"
+            size = ok_m.group(1)
+            dest = ok_m.group(2)
+        elif fail_m:
+            st   = "fail"
+            size = "--"
+            dest = path
+        else:
+            # Started but no completion line yet (currently running)
+            st   = "warn"
+            size = "--"
+            dest = path
+        # Compute staleness from last start time
+        if ts != "--":
+            try:
+                dt = datetime.datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
+                age = (datetime.datetime.now() - dt).total_seconds()
+                if st == "ok" and age > 8 * 86400:
+                    st = "warn"
+            except Exception:
+                pass
+        return {
+            "tool": "cron", "name": name,
+            "status": st, "last_run": ts,
+            "duration": "--", "size": size,
+            "files": "--", "dest": dest,
+            "log": text,
+        }
+
+    # =========================================================
+    # POPULATE
+    # =========================================================
+    def _populate(self, jobs):
+        self._jobs = jobs
+        t = self.theme
+
+        ok   = sum(1 for j in jobs if j["status"] == "ok")
+        warn = sum(1 for j in jobs if j["status"] == "warn")
+        fail = sum(1 for j in jobs if j["status"] == "fail")
+
+        self._card_ok.config(text=str(ok),
+                              fg=t.status_running if ok else t.text_muted)
+        self._card_warn.config(text=str(warn),
+                                fg=t.yellow if warn else t.text_muted)
+        self._card_fail.config(text=str(fail),
+                                fg=t.status_stopped if fail else t.text_muted)
+        self._card_size.config(text="{} jobs".format(len(jobs)))
+
+        self._tree.delete(*self._tree.get_children())
+        for j in sorted(jobs, key=lambda x: (
+                {"fail": 0, "warn": 1, "ok": 2, "none": 3}.get(x["status"], 4),
+                x.get("name", ""))):
+            tag = j["status"]
+            self._tree.insert("", "end", values=(
+                j["tool"], j["name"], j["status"],
+                j["last_run"], j["duration"],
+                j["size"], j["files"], j["dest"],
+            ), tags=(tag,))
+
+        if not jobs:
+            self._status.config(
+                text="No backup tools found (restic/rsync/duplicati/systemd backup units)",
+                fg=t.text_muted)
+        elif fail:
+            self._status.config(
+                text="{} backup job{} FAILED".format(fail, "s" if fail != 1 else ""),
+                fg=t.status_stopped)
+        elif warn:
+            self._status.config(
+                text="{} job{} may be stale".format(warn, "s" if warn != 1 else ""),
+                fg=t.yellow)
+        else:
+            self._status.config(
+                text="{} backup job{} OK".format(ok, "s" if ok != 1 else ""),
+                fg=t.status_running)
+
+    # =========================================================
+    # DETAIL PANEL
+    # =========================================================
+    def _on_select(self, _event=None):
+        sel = self._tree.selection()
+        if not sel:
+            return
+        iid = sel[0]
+        idx = self._tree.index(iid)
+        sorted_jobs = sorted(self._jobs, key=lambda x: (
+            {"fail": 0, "warn": 1, "ok": 2, "none": 3}.get(x["status"], 4),
+            x.get("name", "")))
+        if idx < len(sorted_jobs):
+            job = sorted_jobs[idx]
+            log_text = job.get("log", "(no log excerpt)")
+            self._detail.config(state="normal")
+            self._detail.delete("1.0", "end")
+            self._detail.insert("end", log_text)
+            self._detail.config(state="disabled")

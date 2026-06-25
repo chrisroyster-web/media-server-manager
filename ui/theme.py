@@ -15,39 +15,83 @@ from tkinter import ttk
 
 class Theme:
 
-    def __init__(self):
-        # ── Core backgrounds  (neutral dark gray, not blue-black) ─────
-        self.bg           = "#202020"
-        self.panel_bg     = "#202020"
-        self.sidebar_bg   = "#252525"
+    _DARK = dict(
+        bg="#202020", panel_bg="#202020", sidebar_bg="#252525",
+        surface="#2d2d2d", surface_dark="#1a1a1a", surface_light="#383838",
+        card_bg="#2d2d2d", card_border="#3d3d3d",
+        glass_accent="#2d2d2d", glass_shimmer="#383838",
+        text="#f3f3f3", text_secondary="#d0d0d0",
+        text_muted="#9e9e9e", text_dim="#6e6e6e",
+        sidebar_icon="#c8c8c8", sidebar_icon_hover="#ffffff",
+        sidebar_icon_active="#ffffff", sidebar_active_bg="#0078d4",
+        sidebar_active_bar="#0078d4", sidebar_section_text="#808080",
+        console_cmd="#9cdcfe", console_info="#d4d4d4",
+        console_success="#57a300", console_error="#f14c4c",
+        console_timestamp="#608b4e", console_output="#f3f3f3",
+        _button_default_bg="#383838", _button_default_hover="#4a4a4a",
+        _button_ghost_bg_ref="bg",   # resolved at runtime
+        _treeview_sel="#094771",
+    )
+
+    _LIGHT = dict(
+        bg="#f3f3f3", panel_bg="#f3f3f3", sidebar_bg="#2b2b2b",
+        surface="#ffffff", surface_dark="#e5e5e5", surface_light="#f9f9f9",
+        card_bg="#ffffff", card_border="#d8d8d8",
+        glass_accent="#ffffff", glass_shimmer="#f0f0f0",
+        text="#1a1a1a", text_secondary="#3d3d3d",
+        text_muted="#666666", text_dim="#999999",
+        sidebar_icon="#c8c8c8", sidebar_icon_hover="#ffffff",
+        sidebar_icon_active="#ffffff", sidebar_active_bg="#0078d4",
+        sidebar_active_bar="#0078d4", sidebar_section_text="#888888",
+        console_cmd="#0070c1", console_info="#1a1a1a",
+        console_success="#107c10", console_error="#c50f1f",
+        console_timestamp="#498205", console_output="#1a1a1a",
+        _button_default_bg="#e0e0e0", _button_default_hover="#c8c8c8",
+        _button_ghost_bg_ref="bg",
+        _treeview_sel="#cce4f7",
+    )
+
+    def __init__(self, mode="dark"):
+        self.mode = mode
+        palette   = self._LIGHT if mode == "light" else self._DARK
+
+        # ── Core backgrounds ──────────────────────────────────────────
+        self.bg           = palette["bg"]
+        self.panel_bg     = palette["panel_bg"]
+        self.sidebar_bg   = palette["sidebar_bg"]
 
         # ── Surfaces ──────────────────────────────────────────────────
-        self.surface       = "#2d2d2d"
-        self.surface_dark  = "#1a1a1a"
-        self.surface_light = "#383838"
+        self.surface       = palette["surface"]
+        self.surface_dark  = palette["surface_dark"]
+        self.surface_light = palette["surface_light"]
 
         # ── Cards ─────────────────────────────────────────────────────
-        self.card_bg          = "#2d2d2d"
-        self.card_border      = "#3d3d3d"
+        self.card_bg          = palette["card_bg"]
+        self.card_border      = palette["card_border"]
         self.card_border_glow = "#0078d4"
 
-        # (kept for compat — no longer used for "glass" effect)
-        self.glass_accent  = "#2d2d2d"
-        self.glass_shimmer = "#383838"
+        # (kept for compat)
+        self.glass_accent  = palette["glass_accent"]
+        self.glass_shimmer = palette["glass_shimmer"]
 
         # ── Text hierarchy ────────────────────────────────────────────
-        self.text           = "#f3f3f3"   # primary  — Office near-white
-        self.text_secondary = "#d0d0d0"   # body     — light gray
-        self.text_muted     = "#9e9e9e"   # captions
-        self.text_dim       = "#6e6e6e"   # timestamps / placeholders
+        self.text           = palette["text"]
+        self.text_secondary = palette["text_secondary"]
+        self.text_muted     = palette["text_muted"]
+        self.text_dim       = palette["text_dim"]
 
-        # ── Sidebar (Teams-style) ─────────────────────────────────────
-        self.sidebar_icon         = "#c8c8c8"
-        self.sidebar_icon_hover   = "#ffffff"
-        self.sidebar_icon_active  = "#ffffff"
-        self.sidebar_active_bg    = "#0078d4"   # full-width Office blue
-        self.sidebar_active_bar   = "#0078d4"
-        self.sidebar_section_text = "#808080"
+        # ── Sidebar (Teams-style, always dark) ────────────────────────
+        self.sidebar_icon         = palette["sidebar_icon"]
+        self.sidebar_icon_hover   = palette["sidebar_icon_hover"]
+        self.sidebar_icon_active  = palette["sidebar_icon_active"]
+        self.sidebar_active_bg    = palette["sidebar_active_bg"]
+        self.sidebar_active_bar   = palette["sidebar_active_bar"]
+        self.sidebar_section_text = palette["sidebar_section_text"]
+
+        # ── Internal button palette refs ──────────────────────────────
+        self._btn_def_bg    = palette["_button_default_bg"]
+        self._btn_def_hover = palette["_button_default_hover"]
+        self._treeview_sel  = palette["_treeview_sel"]
 
         # ── Accent / brand ────────────────────────────────────────────
         self.blue        = "#0078d4"   # Microsoft Fluent blue
@@ -69,12 +113,12 @@ class Theme:
         self.glow_red   = "#d13438"
 
         # ── Console ───────────────────────────────────────────────────
-        self.console_cmd       = "#9cdcfe"   # VS Code parameter blue
-        self.console_info      = "#d4d4d4"
-        self.console_success   = "#57a300"
-        self.console_error     = "#f14c4c"
-        self.console_timestamp = "#608b4e"   # VS Code comment green
-        self.console_output    = "#f3f3f3"
+        self.console_cmd       = palette["console_cmd"]
+        self.console_info      = palette["console_info"]
+        self.console_success   = palette["console_success"]
+        self.console_error     = palette["console_error"]
+        self.console_timestamp = palette["console_timestamp"]
+        self.console_output    = palette["console_output"]
 
         # ── Typography ────────────────────────────────────────────────
         self.font_display = ("Segoe UI Semibold", 20)
@@ -117,8 +161,8 @@ class Theme:
             font=self.font_heading,
         )
         s.map("Treeview",
-            background=[("selected", "#094771")],   # Office selection blue
-            foreground=[("selected", "#ffffff")],
+            background=[("selected", self._treeview_sel)],
+            foreground=[("selected", "#ffffff" if self.mode == "dark" else "#1a1a1a")],
         )
         s.map("Treeview.Heading",
             background=[("active", self.surface_light)],
@@ -204,10 +248,10 @@ class Theme:
         ghost    — text-only, no background
         """
         configs = {
-            "default": ("#383838", self.text,       "#4a4a4a", "#ffffff"),
-            "primary": (self.blue,  "#ffffff",       self.blue_bright, "#ffffff"),
-            "danger":  ("#c42b1c", "#ffffff",        "#d13438", "#ffffff"),
-            "ghost":   (self.bg,   self.text_secondary, self.surface_light, self.text),
+            "default": (self._btn_def_bg,  self.text,           self._btn_def_hover, "#ffffff" if self.mode == "dark" else self.text),
+            "primary": (self.blue,          "#ffffff",           self.blue_bright,    "#ffffff"),
+            "danger":  ("#c42b1c",          "#ffffff",           "#d13438",           "#ffffff"),
+            "ghost":   (self.bg,            self.text_secondary, self.surface_light,  self.text),
         }
         bg, fg, hover_bg, hover_fg = configs.get(variant, configs["default"])
         btn.configure(

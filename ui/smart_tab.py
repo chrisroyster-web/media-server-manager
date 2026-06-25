@@ -163,8 +163,44 @@ class SmartTab(tk.Frame):
             "raw_info": "", "raw_attrs": "",
         }
 
-        # -i: identity (model, serial)
-        info_out, _, _ = ssh.run(f"sudo smartctl -i {dev} 2>/dev/null")
+        # USB bridge auto-detection: some drives need an explicit -d flag.
+        _USB_MARKERS = (
+            "specify device type",
+            "Unknown USB bridge",
+            "Unknown device type",
+            "scsi error unsupported scsi opcode",
+            "mandatory SMART command failed",
+            "Read Device Identity failed",
+            "Unsupported USB bridge",
+        )
+        _USB_DTYPES = ("-d sat", "-d sat,12", "-d usbsunplus",
+                       "-d usbprolific", "-d usbjmicron")
+
+        def _needs_flag(text):
+            return any(m in (text or "") for m in _USB_MARKERS)
+
+        def _run_with_flag(flag, args, device):
+            """Run 'sudo smartctl [flag] args device', return (stdout, stderr)."""
+            cmd = "sudo smartctl {} {} {}".format(flag, args, device).strip()
+            o, e, _ = ssh.run(cmd)
+            return o or "", e or ""
+
+        # -i: identity — discover which (if any) device flag is needed
+        info_out, info_err = ssh.run("sudo smartctl -i {}".format(dev))[0:2]
+        info_out, info_err = info_out or "", info_err or ""
+        _dev_flag = ""
+        _usb_unsupported = False
+        if _needs_flag(info_out + info_err):
+            for dtype in _USB_DTYPES:
+                o2, e2 = _run_with_flag(dtype, "-i", dev)
+                if not _needs_flag(o2 + e2):
+                    _dev_flag = dtype
+                    info_out, info_err = o2, e2
+                    break
+            else:
+                # All USB device types exhausted — drive doesn't expose SMART
+                _usb_unsupported = True
+
         result["raw_info"] = info_out
         for line in info_out.splitlines():
             if line.startswith("Device Model") or line.startswith("Model Family"):
@@ -174,18 +210,35 @@ class SmartTab(tk.Frame):
                     result["model"] = line.split(":", 1)[-1].strip()[:30]
 
         # -H: overall health
-        health_out, _, _ = ssh.run(f"sudo smartctl -H {dev} 2>/dev/null")
-        if "PASSED" in health_out:
+        health_out, health_err = _run_with_flag(_dev_flag, "-H", dev)
+        combined_health = health_out + health_err
+        # Edge case: -i worked but -H still triggers (shouldn't happen, but guard it)
+        if not _dev_flag and _needs_flag(combined_health):
+            for dtype in _USB_DTYPES:
+                o2, e2 = _run_with_flag(dtype, "-H", dev)
+                c2 = o2 + e2
+                if not _needs_flag(c2):
+                    _dev_flag = dtype
+                    combined_health = c2
+                    break
+
+        if "PASSED" in combined_health:
             result["health"] = "PASSED"
-        elif "FAILED" in health_out:
+        elif "FAILED" in combined_health:
             result["health"] = "FAILED"
-        elif "OK" in health_out:      # NVMe uses "OK"
+        elif "OK" in combined_health:      # NVMe uses "OK"
             result["health"] = "OK"
+        elif _usb_unsupported or (_needs_flag(combined_health) and not _dev_flag):
+            result["health"] = "No SMART"   # USB flash / unsupported bridge
         else:
             result["health"] = "UNKNOWN"
 
+        if _dev_flag:
+            result["raw_info"] = "[Using {}]\n".format(_dev_flag) + result["raw_info"]
+        result["raw_info"] += "\n--- Health check output ---\n" + combined_health
+
         # -A: attributes
-        attrs_out, _, _ = ssh.run(f"sudo smartctl -A {dev} 2>/dev/null")
+        attrs_out, _ = _run_with_flag(_dev_flag, "-A", dev)
         result["raw_attrs"] = attrs_out
 
         attr_map = {
@@ -231,14 +284,16 @@ class SmartTab(tk.Frame):
         # Summary cards
         for w in self._summary_frame.winfo_children():
             w.destroy()
-        passed = sum(1 for r in rows if r["health"] in ("PASSED", "OK"))
-        failed = sum(1 for r in rows if r["health"] == "FAILED")
-        unknown = len(rows) - passed - failed
+        passed   = sum(1 for r in rows if r["health"] in ("PASSED", "OK"))
+        failed   = sum(1 for r in rows if r["health"] == "FAILED")
+        no_smart = sum(1 for r in rows if r["health"] == "No SMART")
+        unknown  = len(rows) - passed - failed - no_smart
 
         for label, val, color in [
             ("Drives Found", str(len(rows)),  t.text),
             ("Healthy",      str(passed),     t.status_running),
             ("Failed",       str(failed),     t.status_stopped if failed else t.text_muted),
+            ("No SMART",     str(no_smart),   t.text_muted),
             ("Unknown",      str(unknown),    t.text_muted),
         ]:
             card = tk.Frame(self._summary_frame, bg=t.card_bg,
@@ -249,12 +304,16 @@ class SmartTab(tk.Frame):
             tk.Label(card, text=val, bg=t.card_bg, fg=color,
                      font=("Segoe UI", 18, "bold")).pack()
 
+        self.tree.tag_configure("nosmart", foreground=t.text_dim if hasattr(t, "text_dim") else t.text_muted)
+
         for idx, row in enumerate(rows):
             health  = row["health"]
             if health in ("PASSED", "OK"):
                 htag = "good"
             elif health == "FAILED":
                 htag = "bad"
+            elif health == "No SMART":
+                htag = "nosmart"
             else:
                 htag = "unknown"
 
@@ -294,11 +353,49 @@ class SmartTab(tk.Frame):
         if not sel:
             return
         dev = sel[0]
+        ssh = self.controller.ssh
+        if not ssh.connected:
+            self._set_detail("Not connected to SSH.")
+            return
+        self._set_detail("Loading {}…".format(dev))
+
+        _USB_MARKERS = (
+            "Unknown USB bridge", "specify device type",
+            "Unknown device type",
+            "scsi error unsupported scsi opcode",
+            "mandatory SMART command failed",
+            "Read Device Identity failed",
+            "Unsupported USB bridge",
+        )
+
+        def _needs_flag(text):
+            return any(m in (text or "") for m in _USB_MARKERS)
 
         def worker():
-            ssh = self.controller.ssh
-            out, _, _ = ssh.run(f"sudo smartctl -a {dev} 2>/dev/null")
-            self.after(0, lambda o=out: self._set_detail(o))
+            # Try plain first
+            out, err, _ = ssh.run("sudo smartctl -a {}".format(dev))
+            combined = (out or "") + ("\n" + err if err and err.strip() else "")
+
+            # USB bridge auto-detection: try device types in order
+            if _needs_flag(combined):
+                for dtype in ("-d sat", "-d sat,12", "-d usbsunplus",
+                              "-d usbprolific", "-d usbjmicron"):
+                    o2, e2, _ = ssh.run(
+                        "sudo smartctl {} -a {}".format(dtype, dev))
+                    c2 = (o2 or "") + ("\n" + e2 if e2 and e2.strip() else "")
+                    if not _needs_flag(c2):
+                        combined = "[Retried with {}]\n\n".format(dtype) + c2
+                        break
+                else:
+                    # All attempts failed — annotate but still show last output
+                    combined = ("[Note: USB bridge not recognized by any device "
+                                "type. SMART data unavailable for this drive.]\n\n"
+                                + combined)
+
+            if not combined.strip():
+                combined = ("(no output — smartctl may not be installed "
+                            "or sudo may require a password)")
+            self.after(0, lambda o=combined: self._set_detail(o))
 
         threading.Thread(target=worker, daemon=True).start()
 
