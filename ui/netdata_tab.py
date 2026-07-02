@@ -22,45 +22,27 @@ def _get(host, port, path):
         return json.loads(r.read().decode())
 
 
-def _chart(host, port, chart, after=-60, points=60):
-    path = "data?chart={}&after={}&points={}&format=json&options=absolute".format(
-        chart, after, points)
-    return _get(host, port, path)
-
-
-def _chart_latest(host, port, chart):
-    """Return {dim: value} for the most recent reading using the chart metadata
-    endpoint, which always carries current latest_values without null rows."""
-    info = _get(host, port, "chart?chart={}".format(chart))
-    dims = info.get("dimension_names", [])
-    vals = info.get("latest_values", [])
-    return {d: (v if v is not None else 0) for d, v in zip(dims, vals)}
-
-
-def _latest(data):
-    """Return the most recent non-null data point from a Netdata data response.
-
-    /api/v1/chart has dimension_names + latest_values at the top level.
-    /api/v1/data only has labels (["time", dim1, dim2, ...]) + data rows.
-    Both formats are handled here.
+def _all_metrics(host, port):
     """
-    try:
-        dims = data.get("dimension_names")
-        lv   = data.get("latest_values")
-        if dims is None:
-            # /api/v1/data format — skip the leading "time" label
-            dims = [l for l in data.get("labels", []) if l != "time"]
-        if not dims:
-            return {}
-        if lv is not None:
-            return {d: (v if v is not None else 0) for d, v in zip(dims, lv)}
-        for row in reversed(data.get("data", [])):
-            vals = row[1:]
-            if any(v is not None for v in vals):
-                return {d: (v if v is not None else 0) for d, v in zip(dims, vals)}
-        return {}
-    except Exception:
-        return {}
+    One request for the latest value of EVERY chart on the server — replaces
+    what used to be 50+ separate /api/v1/data and /api/v1/chart round trips
+    every single refresh (one probe each for CPU/RAM, plus up to a dozen
+    each of disk-space, disk-io, and network charts, discovered via a
+    separate /api/v1/charts call). allmetrics already includes every chart
+    ID as a top-level key, so chart discovery comes for free too.
+    """
+    return _get(host, port, "allmetrics?format=json")
+
+
+def _chart_dims(all_metrics, chart_id):
+    """{dim_name: value} for one chart, sliced out of an allmetrics response."""
+    dims = (all_metrics.get(chart_id) or {}).get("dimensions") or {}
+    return {name: (d.get("value") or 0) for name, d in dims.items()}
+
+
+# Docker creates a virtual net.* chart per bridge network/veth pair, which
+# drowns out the physical interfaces that actually matter on this tab.
+_VIRTUAL_IFACE_PREFIXES = ("net.docker", "net.br-", "net.veth", "net.lo")
 
 
 class MiniBar(tk.Canvas):
@@ -200,11 +182,9 @@ class NetdataTab(tk.Frame):
         f = self._tab_network
 
         cols = [
-            ("iface",   120, "Interface","w"),
-            ("rx",      120, "RX/s",     "e"),
-            ("tx",      120, "TX/s",     "e"),
-            ("rx_total",130, "RX Total", "e"),
-            ("tx_total",130, "TX Total", "e"),
+            ("iface",   160, "Interface","w"),
+            ("rx",      160, "RX/s",     "e"),
+            ("tx",      160, "TX/s",     "e"),
         ]
         self._net_tree = self._make_tree(f, cols, "ND.Net")
 
@@ -258,83 +238,48 @@ class NetdataTab(tk.Frame):
         port = cfg.netdata_port or "19999"
 
         try:
-            info = _get(host, port, "info")
+            info    = _get(host, port, "info")
+            metrics = _all_metrics(host, port)
 
             # CPU
-            cpu_data  = _chart(host, port, "system.cpu")
-            cpu_vals  = _latest(cpu_data)
-            cpu_pct   = 100.0 - cpu_vals.get("idle", 100.0)
+            cpu_vals = _chart_dims(metrics, "system.cpu")
+            cpu_pct  = 100.0 - cpu_vals.get("idle", 100.0)
 
             # RAM
-            ram_data  = _chart(host, port, "system.ram")
-            ram_vals  = _latest(ram_data)
+            ram_vals  = _chart_dims(metrics, "system.ram")
             ram_used  = ram_vals.get("used", 0) + ram_vals.get("buffers", 0) + ram_vals.get("cached", 0)
             ram_total = sum(v for v in ram_vals.values() if isinstance(v, (int, float)))
             ram_pct   = (ram_used / ram_total * 100) if ram_total else 0
 
-            # Disk I/O (aggregate)
-            try:
-                dio_data = _chart(host, port, "disk.sda")
-                dio_vals = _latest(dio_data)
+            # Every disk-space / disk-io / network chart, sliced straight out
+            # of the one allmetrics response instead of one request each.
+            disk_spaces = {k: _chart_dims(metrics, k) for k in metrics
+                           if k.startswith("disk_space.")}
+            disk_ios    = {k: _chart_dims(metrics, k) for k in metrics
+                           if k.startswith("disk.")}
+            net_ifaces  = {k: {"current": _chart_dims(metrics, k)} for k in metrics
+                           if k.startswith("net.")
+                           and not k.startswith(_VIRTUAL_IFACE_PREFIXES)}
+
+            # Disk I/O (aggregate summary card) — first physical disk found
+            if disk_ios:
+                dio_vals = next(iter(disk_ios.values()))
                 dio_str  = "R:{:.0f}  W:{:.0f} KiB/s".format(
-                    abs(dio_vals.get("reads", 0)),
-                    abs(dio_vals.get("writes", 0)))
-            except Exception:
+                    abs(dio_vals.get("reads", 0)), abs(dio_vals.get("writes", 0)))
+            else:
                 dio_str = "--"
 
-            # Network summary (eth0 fallback)
-            try:
-                net_vals = _chart_latest(host, port, "net.eth0")
-                rx = abs(net_vals.get("received", net_vals.get("InOctets", 0)) or 0)
-                tx = abs(net_vals.get("sent",     net_vals.get("OutOctets", 0)) or 0)
+            # Network summary card — prefer a real ethernet/wifi interface
+            net_key = next((k for k in net_ifaces
+                            if k.split(".", 1)[-1].startswith(("eth", "en", "wl"))),
+                           next(iter(net_ifaces), None))
+            if net_key:
+                nv = net_ifaces[net_key]["current"]
+                rx = abs(nv.get("received", nv.get("InOctets", 0)) or 0)
+                tx = abs(nv.get("sent",     nv.get("OutOctets", 0)) or 0)
                 net_str = "↓{:.0f}  ↑{:.0f} kb/s".format(rx, tx)
-            except Exception:
+            else:
                 net_str = "--"
-
-            # All disk space charts
-            try:
-                charts   = _get(host, port, "charts")
-                space_charts = [k for k in charts.get("charts", {})
-                                if k.startswith("disk_space.")]
-                disk_spaces = {}
-                for sc in space_charts[:12]:
-                    try:
-                        sd = _chart(host, port, sc)
-                        sv = _latest(sd)
-                        disk_spaces[sc] = sv
-                    except Exception:
-                        pass
-
-                disk_io_charts = [k for k in charts.get("charts", {})
-                                  if k.startswith("disk.")]
-                disk_ios = {}
-                for dc in disk_io_charts[:12]:
-                    try:
-                        dd = _chart(host, port, dc)
-                        dv = _latest(dd)
-                        disk_ios[dc] = dv
-                    except Exception:
-                        pass
-
-                net_charts = [k for k in charts.get("charts", {})
-                              if k.startswith("net.")]
-                net_ifaces = {}
-                for nc in net_charts[:12]:
-                    try:
-                        # Use chart metadata for latest_values — avoids null rows
-                        nv = _chart_latest(host, port, nc)
-                        # Fetch 24-hour totals (group=sum gives a single summed point)
-                        tot = _latest(_get(host, port,
-                            "data?chart={}&after=-86400&points=1"
-                            "&format=json&group=sum".format(nc)))
-                        net_ifaces[nc] = {"current": nv, "total": tot}
-                    except Exception:
-                        pass
-            except Exception:
-                charts       = {}
-                disk_spaces  = {}
-                disk_ios     = {}
-                net_ifaces   = {}
 
             payload = {
                 "info":        info,
@@ -345,9 +290,9 @@ class NetdataTab(tk.Frame):
                 "ram_total":   ram_total,
                 "dio_str":     dio_str,
                 "net_str":     net_str,
-                "disk_spaces": disk_spaces,
-                "disk_ios":    disk_ios,
-                "net_ifaces":  net_ifaces,
+                "disk_spaces": dict(list(disk_spaces.items())[:12]),
+                "disk_ios":    dict(list(disk_ios.items())[:12]),
+                "net_ifaces":  dict(list(net_ifaces.items())[:12]),
             }
         except Exception as e:
             self.after(0, lambda: self._status.config(
@@ -442,23 +387,14 @@ class NetdataTab(tk.Frame):
         for nc, entry in p["net_ifaces"].items():
             iface = nc.replace("net.", "")
             nv    = entry.get("current", {})
-            tot   = entry.get("total",   {})
 
             rx    = abs(nv.get("received", nv.get("InOctets",  0)) or 0)
             tx    = abs(nv.get("sent",     nv.get("OutOctets", 0)) or 0)
-
-            # 24 h totals are in kilobits; convert to MiB for readability
-            rx_t_kb = abs(tot.get("received", tot.get("InOctets",  0)) or 0)
-            tx_t_kb = abs(tot.get("sent",     tot.get("OutOctets", 0)) or 0)
-            rx_t_str = "{:.1f} MiB".format(rx_t_kb * 125 / 1_000_000) if rx_t_kb else "--"
-            tx_t_str = "{:.1f} MiB".format(tx_t_kb * 125 / 1_000_000) if tx_t_kb else "--"
 
             self._net_tree.insert("", "end", values=(
                 iface,
                 "{:.1f} kb/s".format(rx),
                 "{:.1f} kb/s".format(tx),
-                rx_t_str,
-                tx_t_str,
             ))
 
         ver_str = info.get("version", "?")
