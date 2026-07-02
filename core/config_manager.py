@@ -595,6 +595,22 @@ class ConfigManager:
     @watchstate_port.setter
     def watchstate_port(self, v): self._ss("watchstate_port", str(v))
 
+    # --- Cloudflare ---
+    @property
+    def cloudflare_api_token(self): return self._gs("cloudflare_api_token", "")
+    @cloudflare_api_token.setter
+    def cloudflare_api_token(self, v): self._ss("cloudflare_api_token", v)
+
+    @property
+    def cloudflare_zone_id(self): return self._gs("cloudflare_zone_id", "")
+    @cloudflare_zone_id.setter
+    def cloudflare_zone_id(self, v): self._ss("cloudflare_zone_id", v)
+
+    @property
+    def cloudflare_account_id(self): return self._gs("cloudflare_account_id", "")
+    @cloudflare_account_id.setter
+    def cloudflare_account_id(self, v): self._ss("cloudflare_account_id", v)
+
     @property
     def glances_username(self): return self._gs("glances_username", "")
     @glances_username.setter

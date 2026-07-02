@@ -629,6 +629,35 @@ class ConfigTab(tk.Frame):
         self._ws_test_lbl = self._test_button(ws_frame, 2,
             lambda: self._test_watchstate())
 
+        # ---- Cloudflare ----
+        self._section_header("Cloudflare",
+                             "DNS records, dynamic-IP sync, WAF events, cache purge, and Tunnel status")
+        cf_frame = tk.Frame(self.body, bg=t.surface, padx=12, pady=10)
+        cf_frame.pack(fill="x", padx=16, pady=(0, 8))
+        cf_frame.columnconfigure(1, weight=1)
+
+        for row_i, (label, attr) in enumerate([
+            ("API Token:", "cf_token_var"),
+            ("Zone ID:",   "cf_zone_var"),
+            ("Account ID:", "cf_account_var"),
+        ]):
+            tk.Label(cf_frame, text=label, bg=t.surface, fg=t.text,
+                     font=t.font_regular).grid(row=row_i, column=0, sticky="w", pady=4)
+            var = tk.StringVar()
+            setattr(self, attr, var)
+            show = "*" if attr == "cf_token_var" else ""
+            e = tk.Entry(cf_frame, textvariable=var, font=t.font_regular, show=show)
+            t.style_entry(e)
+            e.grid(row=row_i, column=1, sticky="ew", padx=12, pady=4)
+            if show == "*":
+                self._eye_btn(cf_frame, e, row_i)
+        tk.Label(cf_frame, text="Account ID is only needed for Tunnel status — leave blank otherwise.",
+                 bg=t.surface, fg=t.text_muted, font=t.font_small).grid(
+            row=3, column=0, columnspan=3, sticky="w", pady=(0, 4))
+
+        self._cf_test_lbl = self._test_button(cf_frame, 4,
+            lambda: self._test_cloudflare())
+
         # ---- VPN ----
         self._section_header("VPN",
                              "Enable to show the VPN Status tab in the sidebar")
@@ -1146,7 +1175,7 @@ class ConfigTab(tk.Frame):
             self._prowlarr_test_lbl, self._overseerr_test_lbl,
             self._jellyseerr_test_lbl, self._tautulli_test_lbl,
             self._uk_test_lbl, self._nd_test_lbl, self._gl_test_lbl,
-            self._wud_test_lbl,
+            self._wud_test_lbl, self._cf_test_lbl,
         ):
             lbl.config(text="", fg=self.theme.text_muted)
 
@@ -1264,6 +1293,11 @@ class ConfigTab(tk.Frame):
         # Watchstate
         self.watchstate_host_var.set(cfg.watchstate_host)
         self.watchstate_port_var.set(cfg.watchstate_port)
+
+        # Cloudflare
+        self.cf_token_var.set(cfg.cloudflare_api_token)
+        self.cf_zone_var.set(cfg.cloudflare_zone_id)
+        self.cf_account_var.set(cfg.cloudflare_account_id)
 
         # VPN
         self.vpn_enabled_var.set(cfg.vpn_enabled)
@@ -1631,6 +1665,9 @@ class ConfigTab(tk.Frame):
             "wud_port":                  self.wud_port_var.get().strip() or "3002",
             "watchstate_host":           self.watchstate_host_var.get().strip(),
             "watchstate_port":           self.watchstate_port_var.get().strip() or "8090",
+            "cloudflare_api_token":      self.cf_token_var.get().strip(),
+            "cloudflare_zone_id":        self.cf_zone_var.get().strip(),
+            "cloudflare_account_id":     self.cf_account_var.get().strip(),
             "vpn_enabled":               vpn_enabled,
             "vpn_type":                  vpn_type,
             "proxy_enabled":             proxy_enabled,
@@ -1980,6 +2017,30 @@ class ConfigTab(tk.Frame):
                     lbl, False, "No Watchstate here — HTTP {}".format(err.code)))
             except Exception as e:
                 self.after(0, lambda err=str(e): self._set_test_result(lbl, False, err[:60]))
+        threading.Thread(target=_run, daemon=True).start()
+
+    def _test_cloudflare(self):
+        import threading
+        from core import cloudflare_manager as cf
+        lbl   = self._cf_test_lbl
+        lbl.configure(text="Testing…", fg=self.controller.theme.text_muted)
+        token = self.cf_token_var.get().strip()
+        zone  = self.cf_zone_var.get().strip()
+
+        def _run():
+            if not token or not zone:
+                self.after(0, lambda: self._set_test_result(
+                    lbl, False, "API Token and Zone ID are required"))
+                return
+            try:
+                zone_info = cf.test_connection(token, zone)
+                self.after(0, lambda: self._set_test_result(
+                    lbl, True, "Connected  ·  {}  ·  {}".format(
+                        zone_info["name"], zone_info["status"])))
+            except cf.CloudflareError as e:
+                self.after(0, lambda err=str(e): self._set_test_result(lbl, False, err[:80]))
+            except Exception as e:
+                self.after(0, lambda err=str(e): self._set_test_result(lbl, False, err[:80]))
         threading.Thread(target=_run, daemon=True).start()
 
     def _test_netdata(self):

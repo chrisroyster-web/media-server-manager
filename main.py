@@ -66,6 +66,7 @@ from ui.network_toolkit_tab import NetworkToolkitTab
 from ui.docker_volumes_tab import DockerVolumesTab
 from ui.systemd_timers_tab import SystemdTimersTab
 from ui.watchstate_tab import WatchstateTab
+from ui.cloudflare_tab import CloudflareTab
 from core.metrics_store import MetricsStore
 from core.scheduler import TaskScheduler
 
@@ -97,6 +98,7 @@ _TAB_NAMES = {
     54: "Sensors",     55: "Pi-hole",
     56: "Net Toolkit", 57: "Docker Volumes",
     58: "Timers",     59: "Watchstate",
+    60: "Cloudflare",
 }
 
 
@@ -234,6 +236,7 @@ class MediaServerManager(tk.Tk):
         self.docker_volumes_tab    = DockerVolumesTab(self.tabs, self)     # 57
         self.systemd_timers_tab    = SystemdTimersTab(self.tabs, self)     # 58
         self.watchstate_tab        = WatchstateTab(self.tabs, self)        # 59
+        self.cloudflare_tab        = CloudflareTab(self.tabs, self)        # 60
 
         for tab in [
             self.connection_panel, self.quick_commands, self.dashboard_tab,
@@ -260,7 +263,7 @@ class MediaServerManager(tk.Tk):
             self.ports_tab, self.sensors_tab,
             self.pihole_tab, self.network_toolkit_tab,
             self.docker_volumes_tab, self.systemd_timers_tab,
-            self.watchstate_tab,
+            self.watchstate_tab, self.cloudflare_tab,
         ]:
             self.tabs.add(tab)
 
@@ -811,6 +814,7 @@ class MediaServerManager(tk.Tk):
             57: lambda: self.docker_volumes_tab.on_show(),
             58: lambda: self.systemd_timers_tab.on_show(),
             59: lambda: self.watchstate_tab.refresh(),
+            60: lambda: self.cloudflare_tab.on_show(),
         }
         fn = m.get(idx)
         if fn:
@@ -918,6 +922,10 @@ class MediaServerManager(tk.Tk):
             sb.undim_item(59)
         else:
             sb.dim_item(59, "Set the Watchstate host in Config → Monitoring")
+        if cfg.cloudflare_api_token and cfg.cloudflare_zone_id:
+            sb.undim_item(60)
+        else:
+            sb.dim_item(60, "Set your Cloudflare API Token and Zone ID in Config → Monitoring")
 
         # ── INFRA ──────────────────────────────────────────────────────
         if cfg.vpn_enabled:

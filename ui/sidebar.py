@@ -74,6 +74,7 @@ class Sidebar(tk.Frame):
         ("\U0001f5c4", "Storage Health", 25,  None),
         ("\U0001f6e1", "VPN",            22,  None),
         ("\U0001f310", "Reverse Proxy",  23,  None),
+        ("☁",          "Cloudflare",     60,  None),
         ("\U0001f4a0", "Tailscale",      27,  None),
         ("\U0001f6e1", "UFW Firewall",   51,  None),
         ("\U0001f50c", "Ports",          53,  None),
