@@ -5,12 +5,14 @@ Parses restic / rsync / duplicati logs to show last backup time,
 duration, size, and pass/fail status.
 """
 
+import datetime
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox
 import threading
 import time
 import re
 import json
+import os
 
 from ui.refresh_control import RefreshControl
 
@@ -40,6 +42,14 @@ class BackupTab(tk.Frame):
         btn = tk.Button(hdr, text="⟳ Refresh", command=self.refresh)
         t.style_button(btn)
         btn.pack(side="right", padx=(0, 8))
+
+        run_btn = tk.Button(hdr, text="▶ Run Now", command=self._run_backup)
+        t.style_button(run_btn)
+        run_btn.pack(side="right", padx=(0, 8))
+
+        deploy_btn = tk.Button(hdr, text="⬆ Deploy Script", command=self._deploy_script)
+        t.style_button(deploy_btn)
+        deploy_btn.pack(side="right", padx=(0, 8))
         self._last_lbl = tk.Label(hdr, text="", bg=t.bg, fg=t.text_muted,
                                    font=t.font_small)
         self._last_lbl.pack(side="right", padx=12)
@@ -136,7 +146,7 @@ class BackupTab(tk.Frame):
         if not self.controller.ssh.connected:
             self._status.config(text="Not connected", fg=self.theme.status_stopped)
             return
-        self._status.config(text="Scanning backup logs…", fg=self.theme.text_muted)
+        self._status.config(text="Scanning backup logs…", bg=self.theme.blue, fg="#ffffff")
         threading.Thread(target=self._fetch, daemon=True).start()
 
     def _fetch(self):
@@ -163,7 +173,6 @@ class BackupTab(tk.Frame):
                         last = snaps[-1] if snaps else {}
                         ts   = last.get("time", "")
                         if ts:
-                            import datetime
                             dt   = datetime.datetime.fromisoformat(ts[:19])
                             age  = (datetime.datetime.utcnow() - dt).total_seconds()
                             days = age / 86400
@@ -293,7 +302,6 @@ class BackupTab(tk.Frame):
         """Parse logs written by our timestamped backup.sh format."""
         if "=== Backup" not in text:
             return None
-        import datetime
         name = re.sub(r'[-_]backup.*\.log$', '', path.split("/")[-1]) or path.split("/")[-1]
         # Find last start timestamp
         starts = re.findall(r'\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\] === Backup started', text)
@@ -364,19 +372,80 @@ class BackupTab(tk.Frame):
         if not jobs:
             self._status.config(
                 text="No backup tools found (restic/rsync/duplicati/systemd backup units)",
-                fg=t.text_muted)
+                bg=t.surface_dark, fg=t.text_muted)
         elif fail:
             self._status.config(
                 text="{} backup job{} FAILED".format(fail, "s" if fail != 1 else ""),
-                fg=t.status_stopped)
+                bg=t.surface_dark, fg=t.status_stopped)
         elif warn:
             self._status.config(
                 text="{} job{} may be stale".format(warn, "s" if warn != 1 else ""),
-                fg=t.yellow)
+                bg=t.surface_dark, fg=t.yellow)
         else:
             self._status.config(
                 text="{} backup job{} OK".format(ok, "s" if ok != 1 else ""),
-                fg=t.status_running)
+                bg=t.surface_dark, fg=t.status_running)
+
+    # =========================================================
+    # DEPLOY SCRIPT
+    # =========================================================
+    def _deploy_script(self):
+        if not self.controller.ssh.connected:
+            messagebox.showerror("Not Connected", "Connect to a server first.")
+            return
+        local_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "backup.sh"
+        )
+        if not os.path.exists(local_path):
+            messagebox.showerror("File Not Found",
+                                 "backup.sh not found at:\n{}".format(local_path))
+            return
+
+        def worker():
+            out, err, code = self.controller.ssh.put_file(
+                local_path, "/opt/media/backup.sh")
+            if code == 0:
+                self.after(0, lambda: self._status.config(
+                    text="Script deployed to /opt/media/backup.sh",
+                    bg=self.theme.surface_dark, fg=self.theme.status_running))
+                self.after(0, lambda: messagebox.showinfo(
+                    "Deployed", "backup.sh uploaded to /opt/media/backup.sh"))
+            else:
+                msg = (err or "Unknown error").strip()
+                self.after(0, lambda: messagebox.showerror("Deploy Failed", msg))
+
+        self._status.config(text="Deploying script…", bg=self.theme.blue, fg="#ffffff")
+        threading.Thread(target=worker, daemon=True).start()
+
+    # =========================================================
+    # RUN BACKUP NOW
+    # =========================================================
+    def _run_backup(self):
+        if not self.controller.ssh.connected:
+            messagebox.showerror("Not Connected", "Connect to a server first.")
+            return
+        if not messagebox.askyesno("Run Backup",
+                                   "Run backup.sh on the server now?\n"
+                                   "This may take several minutes."):
+            return
+
+        def worker():
+            self.after(0, lambda: self._status.config(
+                text="Backup running…", bg=self.theme.blue, fg="#ffffff"))
+            _, err, code = self.controller.ssh.run("sudo /opt/media/backup.sh")
+            if code == 0:
+                self.after(0, lambda: self._status.config(
+                    text="Backup completed successfully",
+                    bg=self.theme.surface_dark, fg=self.theme.status_running))
+                self.after(500, self.refresh)
+            else:
+                msg = (err or "").strip()[:120]
+                self.after(0, lambda: self._status.config(
+                    text="Backup failed (exit {}): {}".format(code, msg),
+                    bg=self.theme.surface_dark, fg=self.theme.status_stopped))
+
+        threading.Thread(target=worker, daemon=True).start()
 
     # =========================================================
     # DETAIL PANEL

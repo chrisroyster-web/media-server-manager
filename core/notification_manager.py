@@ -1,6 +1,8 @@
 # core/notification_manager.py
 """
-Sends alert notifications via SMTP email or ntfy.sh push.
+Sends alert notifications via SMTP email, ntfy.sh push, or Apprise
+(fan-out to 100+ services — Discord, Slack, Telegram, Pushover, etc.
+via URLs configured in the Config tab).
 All sends happen in a background thread so they never block the UI.
 """
 
@@ -13,6 +15,11 @@ import json
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
+try:
+    import apprise
+except ImportError:
+    apprise = None
+
 
 class NotificationManager:
 
@@ -23,6 +30,31 @@ class NotificationManager:
     # =========================================================
     # PUBLIC
     # =========================================================
+    def send_alert(self, title: str, body: str):
+        """Send a one-off titled alert immediately, bypassing the dedup logic."""
+        threading.Thread(
+            target=self._send_titled, args=(title, body), daemon=True).start()
+
+    def send_rule_alert_sync(self, title: str, body: str, channels: list):
+        """
+        Send to specific channels only. Must be called from a background thread.
+        channels: list containing any of 'ntfy', 'email', 'apprise'
+        """
+        if "ntfy" in channels and self.cfg.notify_ntfy_enabled and self.cfg.notify_ntfy_topic:
+            self._send_ntfy(title, body)
+        if "email" in channels and self.cfg.notify_email_enabled and self.cfg.notify_email_to:
+            self._send_email(title, body)
+        if "apprise" in channels and self.cfg.notify_apprise_enabled:
+            self._send_apprise(title, body)
+
+    def _send_titled(self, title, body):
+        if self.cfg.notify_ntfy_enabled and self.cfg.notify_ntfy_topic:
+            self._send_ntfy(title, body)
+        if self.cfg.notify_email_enabled and self.cfg.notify_email_to:
+            self._send_email(title, body)
+        if self.cfg.notify_apprise_enabled:
+            self._send_apprise(title, body)
+
     def notify(self, alerts: list):
         """
         Call with the active alert strings from fire_alerts().
@@ -56,6 +88,9 @@ class NotificationManager:
 
         if self.cfg.notify_email_enabled and self.cfg.notify_email_to:
             self._send_email(subject, body)
+
+        if self.cfg.notify_apprise_enabled:
+            self._send_apprise(subject, body)
 
     # ---- ntfy.sh ------------------------------------------------
     def _send_ntfy(self, title, body):
@@ -116,3 +151,18 @@ class NotificationManager:
                     s.sendmail(frm, [to], msg.as_string())
         except Exception:
             pass
+
+    # ---- Apprise (fan-out to 100+ services) ----------------------
+    def _send_apprise(self, title, body):
+        if apprise is None:
+            return
+        urls = self.cfg.get_apprise_url_list()
+        if not urls:
+            return
+        try:
+            a = apprise.Apprise()
+            for url in urls:
+                a.add(url)
+            a.notify(title=title, body=body)
+        except Exception:
+            pass  # silent fail — don't crash the app over a notification

@@ -49,11 +49,17 @@ class TrayManager:
         try:
             import pystray
         except ImportError:
-            return   # pystray not installed — tray silently disabled
+            # pystray not available — keep window visible so app isn't lost
+            self._icon = None
+            self.controller.after(0, self.controller.deiconify)
+            return
 
         img = _make_icon_image()
         if img is None:
-            return   # Pillow not installed
+            # PIL unavailable — keep window visible so app isn't lost
+            self._icon = None
+            self.controller.after(0, self.controller.deiconify)
+            return
 
         import pystray
 
@@ -133,3 +139,5 @@ class TrayManager:
             self.controller.destroy()
         except Exception:
             pass
+        import os
+        os._exit(0)

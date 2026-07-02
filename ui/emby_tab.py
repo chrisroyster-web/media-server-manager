@@ -132,6 +132,19 @@ class EmbyTab(tk.Frame):
         self._msg_btn.bind("<Enter>", lambda e: self._msg_btn.configure(bg=t.card_border))
         self._msg_btn.bind("<Leave>", lambda e: self._msg_btn.configure(bg=t.surface_light))
 
+        # Scan Libraries button
+        self._scan_btn = tk.Button(
+            hdr, text="⟳ Scan Libraries",
+            command=self._scan_libraries,
+            bg=t.surface_light, fg=t.text,
+            bd=0, relief="flat",
+            font=t.font_small, padx=12, pady=4,
+            cursor="hand2",
+        )
+        self._scan_btn.pack(side="right", padx=(0, 6), pady=10)
+        self._scan_btn.bind("<Enter>", lambda e: self._scan_btn.configure(bg=t.card_border))
+        self._scan_btn.bind("<Leave>", lambda e: self._scan_btn.configure(bg=t.surface_light))
+
         tk.Frame(self, bg=t.card_border, height=1).pack(fill="x")
 
         # Summary cards row
@@ -159,7 +172,7 @@ class EmbyTab(tk.Frame):
         canvas.bind("<Configure>", lambda e: canvas.itemconfig(self._canvas_win, width=e.width))
         self._session_area.bind("<Configure>",
             lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.bind_all("<MouseWheel>",
+        canvas.bind("<MouseWheel>",
             lambda e: canvas.yview_scroll(int(-1 * (e.delta / 120)), "units"))
 
         self._canvas = canvas
@@ -187,8 +200,10 @@ class EmbyTab(tk.Frame):
     # FETCH
     # ------------------------------------------------------------------
     def _fetch(self):
+        if getattr(self, "_fetching", False): return
         self._rc.cancel()
-        self._status_lbl.config(text="Refreshing...")
+        self._status_lbl.config(text="Refreshing...", bg=self.theme.blue, fg="#ffffff")
+        self._fetching = True
         threading.Thread(target=self._do_fetch, daemon=True).start()
 
     def _do_fetch(self):
@@ -210,6 +225,8 @@ class EmbyTab(tk.Frame):
             self.after(0, lambda err=str(e): self._show_error("Connection error:\n{}".format(err)))
         except Exception as e:
             self.after(0, lambda err=str(e): self._show_error("Error: {}".format(err)))
+        finally:
+            self._fetching = False
 
     # ------------------------------------------------------------------
     # RENDER
@@ -242,7 +259,8 @@ class EmbyTab(tk.Frame):
         self._card_transcode.config(text=str(transcode))
         self._card_direct.config(text=str(direct))
         self._card_users.config(text=str(users))
-        self._status_lbl.config(text="Updated {}".format(time.strftime("%H:%M:%S")))
+        self._status_lbl.config(text="Updated {}".format(time.strftime("%H:%M:%S")),
+                               bg=self.theme.surface_dark, fg=self.theme.text_muted)
 
         if not sessions:
             self._idle_lbl.pack(pady=40)
@@ -515,6 +533,25 @@ class EmbyTab(tk.Frame):
                   bg=t.surface_dark, fg=t.text, relief="flat",
                   bd=0, cursor="hand2").pack(side="left", padx=6)
 
+    def _scan_libraries(self):
+        self._scan_btn.config(state="disabled", text="Scanning…")
+        def worker():
+            try:
+                cfg    = self.controller.config_manager
+                host   = cfg.emby_host
+                port   = cfg.emby_port
+                apikey = cfg.emby_apikey
+                _emby_post(host, port, apikey, "Library/Refresh")
+                self.after(0, lambda: self._show_status(
+                    "Library scan queued — Emby is scanning now.", self.theme.status_running))
+            except Exception as e:
+                self.after(0, lambda err=str(e): self._show_status(
+                    "Scan failed: " + err[:60], self.theme.status_stopped))
+            finally:
+                self.after(0, lambda: self._scan_btn.config(state="normal", text="⟳ Scan Libraries"))
+        import threading as _t
+        _t.Thread(target=worker, daemon=True).start()
+
     def _kick_session(self, session_id, username):
         def worker():
             try:
@@ -545,8 +582,11 @@ class EmbyTab(tk.Frame):
 
     def _show_status(self, msg, color=None):
         t = self.theme
-        self._status_lbl.config(text=msg, fg=color or t.text_muted)
-        self.after(5000, lambda: self._status_lbl.config(text=""))
+        if msg.endswith("…") or msg.endswith("..."):
+            self._status_lbl.config(text=msg, bg=t.blue, fg="#ffffff")
+            return
+        self._status_lbl.config(text=msg, bg=t.surface_dark, fg=color or t.text_muted)
+        self.after(5000, lambda: self._status_lbl.config(text="", bg=t.surface_dark))
 
     def _show_error(self, msg):
         self._show_status(msg, self.theme.status_stopped)

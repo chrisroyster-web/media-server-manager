@@ -113,7 +113,60 @@ class SSHManager:
     # RUN AS SUDO
     # ---------------------------------------------------------
     def run_sudo(self, command):
-        return self.run("sudo " + command)
+        """Run a command with sudo, feeding the stored password via stdin.
+        Falls back to sudo -n (requires NOPASSWD) when no password is stored."""
+        if not self.connected:
+            return "", "Not connected", 1
+        with self.lock:
+            try:
+                password = (self._connect_args or {}).get("password") or ""
+                if password:
+                    stdin, stdout, stderr = self.client.exec_command(f"sudo -S {command}")
+                    stdin.write(password + "\n")
+                    stdin.flush()
+                else:
+                    stdin, stdout, stderr = self.client.exec_command(f"sudo -n {command}")
+                stdin.channel.shutdown_write()
+                out  = stdout.read().decode(errors="ignore")
+                err  = stderr.read().decode(errors="ignore")
+                code = stdout.channel.recv_exit_status()
+                # Strip sudo password-prompt lines from both streams
+                out = self._strip_sudo_prompts(out)
+                err = self._strip_sudo_prompts(err)
+                return out, err, code
+            except Exception as e:
+                return "", str(e), 1
+
+    @staticmethod
+    def _strip_sudo_prompts(text):
+        return "\n".join(
+            l for l in text.splitlines()
+            if not (l.strip().startswith("[sudo:") or
+                    l.strip().lower().startswith("password:") or
+                    l.strip().lower().startswith("sudo:"))
+        )
+
+    # ---------------------------------------------------------
+    # FILE UPLOAD (stdin pipe — no SFTP subsystem needed)
+    # ---------------------------------------------------------
+    def put_file(self, local_path, remote_path):
+        """Write a local file to the server by piping its content via sudo tee."""
+        if not self.connected:
+            return "", "Not connected", 1
+        try:
+            with open(local_path, "rb") as f:
+                content = f.read()
+            cmd = "sudo tee '{}' > /dev/null && sudo chmod +x '{}'".format(
+                remote_path, remote_path)
+            stdin, stdout, stderr = self.client.exec_command(cmd)
+            stdin.write(content)
+            stdin.channel.shutdown_write()
+            out  = stdout.read().decode(errors="ignore")
+            err  = stderr.read().decode(errors="ignore")
+            code = stdout.channel.recv_exit_status()
+            return out, err, code
+        except Exception as e:
+            return "", str(e), 1
 
     # ---------------------------------------------------------
     # SFTP

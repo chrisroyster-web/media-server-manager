@@ -76,6 +76,10 @@ class JellyfinTab(tk.Frame):
         t.style_button(msg_btn)
         msg_btn.pack(side="right", padx=(0, 8))
 
+        scan_btn = tk.Button(hdr, text="⟳ Scan Libraries", command=self._scan_libraries)
+        t.style_button(scan_btn)
+        scan_btn.pack(side="right", padx=(0, 8))
+
         cards_row = tk.Frame(self, bg=t.bg)
         cards_row.pack(fill="x", padx=16, pady=(0, 8))
         self._card_streams   = self._stat_card(cards_row, "Active Streams", "0")
@@ -121,8 +125,10 @@ class JellyfinTab(tk.Frame):
     # FETCH
     # ---------------------------------------------------------
     def _fetch(self):
+        if getattr(self, "_fetching", False): return
         self._rc.cancel()
         self._refresh_btn.config(state="disabled", text="Loading…")
+        self._fetching = True
         threading.Thread(target=self._do_fetch, daemon=True).start()
 
     def _do_fetch(self):
@@ -150,6 +156,7 @@ class JellyfinTab(tk.Frame):
         except Exception as e:
             self.after(0, lambda err=str(e): self._show_error("Fetch failed: " + err[:80]))
         finally:
+            self._fetching = False
             self.after(0, lambda: self._refresh_btn.config(state="normal", text="⟳ Refresh"))
             self.after(0, self._rc.schedule)
 
@@ -407,6 +414,21 @@ class JellyfinTab(tk.Frame):
                   bg=t.surface_dark, fg=t.text, relief="flat", bd=0).pack(side="left")
 
     # ---------------------------------------------------------
+    # LIBRARY SCAN
+    # ---------------------------------------------------------
+    def _scan_libraries(self):
+        def worker():
+            try:
+                self._jf_post("/Library/Refresh", {})
+                self.after(0, lambda: self._show_status(
+                    "Library scan queued — Jellyfin is scanning now."))
+            except Exception as e:
+                self.after(0, lambda err=str(e): self._show_status(
+                    "Scan failed: " + err[:60], self.theme.status_stopped))
+        import threading as _t
+        _t.Thread(target=worker, daemon=True).start()
+
+    # ---------------------------------------------------------
     # API HELPER
     # ---------------------------------------------------------
     def _jf_post(self, endpoint, payload):
@@ -426,7 +448,13 @@ class JellyfinTab(tk.Frame):
     # HELPERS
     # ---------------------------------------------------------
     def _show_status(self, msg, color=None):
-        self._status_lbl.config(text=msg, fg=color or self.theme.text_muted)
+        t = self.theme
+        if msg.endswith("…") or msg.endswith("..."):
+            self._status_lbl.config(text=msg, bg=t.blue, fg="#ffffff")
+            return
+        self._status_lbl.config(text=msg, bg=t.surface_dark, fg=color or t.text_muted)
+        if color:
+            self.after(6000, lambda: self._status_lbl.config(text="", bg=t.surface_dark, fg=t.text_muted))
 
     def _show_error(self, msg):
         self._show_status(msg, self.theme.status_stopped)

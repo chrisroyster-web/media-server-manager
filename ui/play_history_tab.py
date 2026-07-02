@@ -156,8 +156,8 @@ class PlayHistoryTab(tk.Frame):
             self.tree.column(col, width=width, minwidth=40,
                              anchor=anchor, stretch=(col == "title"))
 
-        self.tree.tag_configure("odd",      background=t.surface_dark)
-        self.tree.tag_configure("even",     background=t.card_bg)
+        self.tree.tag_configure("odd",      background=t.surface_dark, foreground=t.text)
+        self.tree.tag_configure("even",     background=t.card_bg,      foreground=t.text)
         self.tree.tag_configure("plex",     foreground="#e5a00d")
         self.tree.tag_configure("emby",     foreground="#52b54b")
         self.tree.tag_configure("jellyfin", foreground="#aa5cc3")
@@ -180,11 +180,13 @@ class PlayHistoryTab(tk.Frame):
     # PUBLIC
     # =========================================================
     def refresh(self):
+        if getattr(self, "_fetching", False): return
         if self._loading:
             return
         self._loading = True
         self._refresh_btn.config(state="disabled", text="Loading…")
         self._set_status("Fetching play history…")
+        self._fetching = True
         threading.Thread(target=self._fetch, daemon=True).start()
 
     # =========================================================
@@ -199,42 +201,45 @@ class PlayHistoryTab(tk.Frame):
             return None, str(e)
 
     def _fetch(self):
-        cfg     = self.controller.config_manager
-        entries = []
-        errors  = []
+        try:
+            cfg     = self.controller.config_manager
+            entries = []
+            errors  = []
 
-        if cfg.plex_token:
-            try:
-                entries += self._fetch_plex(cfg)
-            except Exception as e:
-                errors.append("Plex: {}".format(e))
+            if cfg.plex_token:
+                try:
+                    entries += self._fetch_plex(cfg)
+                except Exception as e:
+                    errors.append("Plex: {}".format(e))
 
-        if cfg.emby_apikey:
-            try:
-                entries += self._fetch_server("Emby",
-                                              cfg.emby_host, cfg.emby_port,
-                                              cfg.emby_apikey)
-            except Exception as e:
-                errors.append("Emby: {}".format(e))
+            if cfg.emby_apikey:
+                try:
+                    entries += self._fetch_server("Emby",
+                                                  cfg.emby_host, cfg.emby_port,
+                                                  cfg.emby_apikey)
+                except Exception as e:
+                    errors.append("Emby: {}".format(e))
 
-        if cfg.jellyfin_apikey:
-            try:
-                entries += self._fetch_server("Jellyfin",
-                                              cfg.jellyfin_host, cfg.jellyfin_port,
-                                              cfg.jellyfin_apikey)
-            except Exception as e:
-                errors.append("Jellyfin: {}".format(e))
+            if cfg.jellyfin_apikey:
+                try:
+                    entries += self._fetch_server("Jellyfin",
+                                                  cfg.jellyfin_host, cfg.jellyfin_port,
+                                                  cfg.jellyfin_apikey)
+                except Exception as e:
+                    errors.append("Jellyfin: {}".format(e))
 
-        # Sort newest first across all sources
-        entries.sort(key=lambda e: e["ts"], reverse=True)
+            # Sort newest first across all sources
+            entries.sort(key=lambda e: e["ts"], reverse=True)
 
-        status = "Loaded {} entr{}".format(
-            len(entries), "y" if len(entries) == 1 else "ies")
-        if errors:
-            status += "   ⚠ " + "  |  ".join(errors)
+            status = "Loaded {} entr{}".format(
+                len(entries), "y" if len(entries) == 1 else "ies")
+            if errors:
+                status += "   ⚠ " + "  |  ".join(errors)
 
-        self.after(0, lambda: self._done(entries, status,
-                                          level="ok" if entries else "info"))
+            self.after(0, lambda: self._done(entries, status,
+                                              level="ok" if entries else "info"))
+        finally:
+            self._fetching = False
 
     # ── Plex ──────────────────────────────────────────────────
     def _fetch_plex(self, cfg):
@@ -402,10 +407,9 @@ class PlayHistoryTab(tk.Frame):
     # HELPERS
     # =========================================================
     def _set_status(self, text, level="info"):
-        colors = {
-            "info":  self.theme.text_muted,
-            "ok":    self.theme.status_running,
-            "error": self.theme.status_stopped,
-        }
-        self._status.config(text=text,
-                             fg=colors.get(level, self.theme.text_muted))
+        t = self.theme
+        if text.endswith("…") or text.endswith("..."):
+            self._status.config(text=text, bg=t.blue, fg="#ffffff")
+            return
+        colors = {"info": t.text_muted, "ok": t.status_running, "error": t.status_stopped}
+        self._status.config(text=text, bg=t.surface_dark, fg=colors.get(level, t.text_muted))

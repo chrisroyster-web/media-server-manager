@@ -545,8 +545,9 @@ class SpeedtestTab(tk.Frame):
     # HELPERS
     # =========================================================
     def _set_bar(self, text, level="info"):
-        colors = {"info": self.theme.text_muted,
-                  "ok":   self.theme.status_running,
-                  "error": self.theme.status_stopped}
-        self._status_bar.config(text=text,
-                                fg=colors.get(level, self.theme.text_muted))
+        t = self.theme
+        if text.endswith("…") or text.endswith("..."):
+            self._status_bar.config(text=text, bg=t.blue, fg="#ffffff")
+            return
+        colors = {"info": t.text_muted, "ok": t.status_running, "error": t.status_stopped}
+        self._status_bar.config(text=text, bg=t.surface_dark, fg=colors.get(level, t.text_muted))

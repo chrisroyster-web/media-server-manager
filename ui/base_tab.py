@@ -179,13 +179,16 @@ class CardConsoleTab(tk.Frame):
         self._append(f"{timestamp}  {text}\n", tag, timestamp_prefix=True)
 
     def _log_output(self, label, stdout, stderr, code):
-        self._log(f"[{label}] exit code: {code}", "info")
-        if stdout.strip():
-            for line in stdout.splitlines():
-                self._append(f"{line}\n", "output")
-        if stderr.strip():
-            for line in stderr.splitlines():
-                self._append(f"{line}\n", "error")
+        tag = "info" if code == 0 else "error"
+        status = "OK" if code == 0 else f"FAILED (exit {code})"
+        self._log(f"[{label}] {status}", tag)
+        combined = "\n".join(
+            [l for l in (stdout or "").splitlines() if l.strip()] +
+            [l for l in (stderr or "").splitlines() if l.strip()]
+        )
+        if combined:
+            for line in combined.splitlines():
+                self._append(f"  {line}\n", "error" if code != 0 else "output")
         self._append("\n", None)
 
     def _append(self, text, tag, timestamp_prefix=False):

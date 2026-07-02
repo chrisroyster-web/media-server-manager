@@ -41,8 +41,9 @@ class ServiceManager:
     # ---------------------------------------------------------
     def start(self, service_name):
         if not self.ssh.connected:
-            return "Not connected"
-
+            return "", "Not connected", 1
+        # Kill any orphaned processes that would block the port before starting
+        self.ssh.run_sudo(f"pkill -if '{service_name}' 2>/dev/null; true")
         return self.ssh.run_sudo(f"systemctl start {service_name}")
 
     # ---------------------------------------------------------
@@ -50,18 +51,22 @@ class ServiceManager:
     # ---------------------------------------------------------
     def stop(self, service_name):
         if not self.ssh.connected:
-            return "Not connected"
-
-        return self.ssh.run_sudo(f"systemctl stop {service_name}")
+            return "", "Not connected", 1
+        out, err, code = self.ssh.run_sudo(f"systemctl stop {service_name}")
+        # Also kill processes not in the systemd cgroup (started outside systemd)
+        self.ssh.run_sudo(f"pkill -if '{service_name}' 2>/dev/null; true")
+        return out, err, code
 
     # ---------------------------------------------------------
     # RESTART
     # ---------------------------------------------------------
     def restart(self, service_name):
         if not self.ssh.connected:
-            return "Not connected"
-
-        return self.ssh.run_sudo(f"systemctl restart {service_name}")
+            return "", "Not connected", 1
+        self.ssh.run_sudo(f"systemctl stop {service_name}")
+        # Kill any orphaned processes before starting fresh
+        self.ssh.run_sudo(f"pkill -if '{service_name}' 2>/dev/null; true")
+        return self.ssh.run_sudo(f"systemctl start {service_name}")
 
     # ---------------------------------------------------------
     # LOGS

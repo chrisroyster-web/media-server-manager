@@ -5,6 +5,7 @@ Checks each configured service host:port via openssl s_client on the remote serv
 Shows days to expiry, issuer, and color-coded warning/critical thresholds.
 """
 
+import datetime
 import tkinter as tk
 from tkinter import ttk
 import threading
@@ -222,6 +223,7 @@ class SSLTab(tk.Frame):
     # REFRESH
     # =========================================================
     def refresh(self):
+        if getattr(self, "_fetching", False): return
         self._rc.cancel()
         if not self.controller.ssh.connected:
             self._set_status("Not connected to SSH", "error")
@@ -232,6 +234,7 @@ class SSLTab(tk.Frame):
         self._check_btn.config(state="disabled", text="Checking…")
         self._set_status("Checking {} certificate{}…".format(
             len(self._results), "s" if len(self._results) != 1 else ""))
+        self._fetching = True
         threading.Thread(target=self._fetch_all, daemon=True).start()
 
     def _add_host(self):
@@ -250,13 +253,16 @@ class SSLTab(tk.Frame):
     # FETCH
     # =========================================================
     def _fetch_all(self):
-        for r in self._results:
-            self._check_cert(r)
-        self.after(0, self._repopulate)
-        self.after(0, lambda: self._check_btn.config(state="normal", text="⟳ Check All"))
-        self.after(0, lambda: self._last_lbl.config(
-            text="Updated {}".format(time.strftime("%H:%M"))))
-        self.after(0, self._rc.schedule)
+        try:
+            for r in self._results:
+                self._check_cert(r)
+            self.after(0, self._repopulate)
+            self.after(0, lambda: self._check_btn.config(state="normal", text="⟳ Check All"))
+            self.after(0, lambda: self._last_lbl.config(
+                text="Updated {}".format(time.strftime("%H:%M"))))
+            self.after(0, self._rc.schedule)
+        finally:
+            self._fetching = False
 
     def _check_single(self, host, port):
         r = next((x for x in self._results if x["host"] == host and x["port"] == port), None)
@@ -265,7 +271,6 @@ class SSLTab(tk.Frame):
                              daemon=True).start()
 
     def _check_cert(self, r):
-        import datetime
         ssh   = self.controller.ssh
         host  = r["host"]
         port  = r["port"]
@@ -410,11 +415,12 @@ class SSLTab(tk.Frame):
     # HELPERS
     # =========================================================
     def _set_status(self, text, level="info"):
-        colors = {"info":  self.theme.text_muted,
-                  "ok":    self.theme.status_running,
-                  "warn":  self.theme.yellow,
-                  "error": self.theme.status_stopped}
-        self._status.config(text=text, fg=colors.get(level, self.theme.text_muted))
+        t = self.theme
+        if text.endswith("…") or text.endswith("..."):
+            self._status.config(text=text, bg=t.blue, fg="#ffffff")
+            return
+        colors = {"info": t.text_muted, "ok": t.status_running, "warn": t.yellow, "error": t.status_stopped}
+        self._status.config(text=text, bg=t.surface_dark, fg=colors.get(level, t.text_muted))
 
     # =========================================================
     # DIAGNOSE

@@ -90,8 +90,8 @@ class SmartTab(tk.Frame):
         self.tree.tag_configure("warn",    foreground=t.yellow)
         self.tree.tag_configure("bad",     foreground=t.status_stopped)
         self.tree.tag_configure("unknown", foreground=t.text_muted)
-        self.tree.tag_configure("odd",     background=t.surface_dark)
-        self.tree.tag_configure("even",    background=t.card_bg)
+        self.tree.tag_configure("odd",     background=t.surface_dark, foreground=t.text)
+        self.tree.tag_configure("even",    background=t.card_bg,      foreground=t.text)
 
         vsb = tk.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=vsb.set)
@@ -121,37 +121,42 @@ class SmartTab(tk.Frame):
     # REFRESH
     # =========================================================
     def _refresh(self):
+        if getattr(self, "_fetching", False): return
         if not self.controller.ssh.connected:
             self._set_status("Not connected", "error")
             return
         self._refresh_btn.config(state="disabled", text="Scanning…")
         self._set_status("Scanning drives…")
+        self._fetching = True
         threading.Thread(target=self._fetch, daemon=True).start()
 
     def _fetch(self):
-        ssh = self.controller.ssh
-        # 1. Find all block devices (physical disks, not partitions/loops)
-        out, _, code = ssh.run(
-            "lsblk -d -o NAME,SIZE,TYPE --noheadings 2>/dev/null | "
-            "awk '$3==\"disk\"{print \"/dev/\"$1\"|\"$2}'"
-        )
-        if code != 0 or not out.strip():
-            self.after(0, lambda: self._set_status("No disks found or lsblk unavailable", "error"))
-            self.after(0, lambda: self._refresh_btn.config(state="normal", text="⟳ Refresh"))
-            return
+        try:
+            ssh = self.controller.ssh
+            # 1. Find all block devices (physical disks, not partitions/loops)
+            out, _, code = ssh.run(
+                "lsblk -d -o NAME,SIZE,TYPE --noheadings 2>/dev/null | "
+                "awk '$3==\"disk\"{print \"/dev/\"$1\"|\"$2}'"
+            )
+            if code != 0 or not out.strip():
+                self.after(0, lambda: self._set_status("No disks found or lsblk unavailable", "error"))
+                self.after(0, lambda: self._refresh_btn.config(state="normal", text="⟳ Refresh"))
+                return
 
-        devices = []
-        for line in out.strip().splitlines():
-            parts = line.split("|")
-            if len(parts) == 2:
-                devices.append((parts[0].strip(), parts[1].strip()))
+            devices = []
+            for line in out.strip().splitlines():
+                parts = line.split("|")
+                if len(parts) == 2:
+                    devices.append((parts[0].strip(), parts[1].strip()))
 
-        rows = []
-        for dev, size in devices:
-            row = self._query_smart(ssh, dev, size)
-            rows.append(row)
+            rows = []
+            for dev, size in devices:
+                row = self._query_smart(ssh, dev, size)
+                rows.append(row)
 
-        self.after(0, lambda r=rows: self._populate(r))
+            self.after(0, lambda r=rows: self._populate(r))
+        finally:
+            self._fetching = False
 
     def _query_smart(self, ssh, dev, size):
         """Run smartctl -A and -i on one device, return a dict."""
@@ -406,7 +411,9 @@ class SmartTab(tk.Frame):
         self._detail.config(state="disabled")
 
     def _set_status(self, text, level="info"):
-        colors = {"info": self.theme.text_muted,
-                  "error": self.theme.status_stopped,
-                  "ok": self.theme.status_running}
-        self._status_lbl.config(text=text, fg=colors.get(level, self.theme.text_muted))
+        t = self.theme
+        if text.endswith("…") or text.endswith("..."):
+            self._status_lbl.config(text=text, bg=t.blue, fg="#ffffff")
+            return
+        colors = {"info": t.text_muted, "error": t.status_stopped, "ok": t.status_running}
+        self._status_lbl.config(text=text, bg=t.surface_dark, fg=colors.get(level, t.text_muted))

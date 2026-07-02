@@ -86,7 +86,7 @@ class LogTailWindow:
             self._append("[error] Not connected\n", "err")
             return
         try:
-            chan = ssh._client.get_transport().open_session()
+            chan = ssh.client.get_transport().open_session()
             chan.get_pty()
             chan.exec_command(self.cmd)
             chan.setblocking(False)

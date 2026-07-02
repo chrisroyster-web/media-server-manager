@@ -19,6 +19,7 @@ hidden = (
     collect_submodules("paramiko") +
     collect_submodules("cryptography") +
     collect_submodules("PIL") +
+    collect_submodules("apprise") +
     [
         "cryptography.hazmat.primitives.asymmetric.rsa",
         "cryptography.hazmat.primitives.asymmetric.ec",
@@ -31,21 +32,25 @@ hidden = (
         "PIL._tkinter_finder",
         "PIL.Image",
         "PIL.ImageTk",
+        "PIL.ImageDraw",
         "cffi",
         "_cffi_backend",
+        "pystray",
+        "pystray._win32",
     ]
 )
 
 # Collect PIL/Pillow binary hooks (handles platform DLLs)
 from PyInstaller.utils.hooks import collect_data_files as _cdf
-pil_datas = _cdf("PIL")
+pil_datas     = _cdf("PIL")
+apprise_datas = _cdf("apprise")   # apprise loads plugin/locale data at runtime
 
 # ── Data files bundled alongside the exe ─────────────────────────────────────
 datas = [
     # App config and assets — kept at root of install dir
     ("assets/config.json", "assets"),
     ("splash.png",         "."),
-] + pil_datas
+] + pil_datas + apprise_datas
 
 a = Analysis(
     ["main.py"],
@@ -58,8 +63,9 @@ a = Analysis(
     runtime_hooks=[],
     excludes=[
         # Exclude large scientific libs that sneak in via cryptography
+        # NOTE: do NOT exclude PIL — pystray and splash screen both require it
         "matplotlib", "numpy", "pandas", "scipy",
-        "PIL", "cv2", "sklearn",
+        "cv2", "sklearn",
         "IPython", "notebook", "jupyter",
     ],
     noarchive=False,

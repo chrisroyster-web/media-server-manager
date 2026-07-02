@@ -37,31 +37,13 @@ class SABnzbdTab(tk.Frame):
         tk.Label(hdr, text="SABNZBD QUEUE", bg=self.theme.bg, fg=self.theme.text,
                  font=self.theme.font_title).pack(side="left")
 
-        # ---- Config row ----
-        cfg = tk.Frame(self, bg=self.theme.surface, padx=12, pady=10)
-        cfg.pack(fill="x", padx=16, pady=(0, 8))
-
-        for label, var_name, width, show in [
-            ("Host",    "_host_var",   16, None),
-            ("Port",    "_port_var",    6, None),
-            ("API Key", "_apikey_var", 34, "*"),
-        ]:
-            tk.Label(cfg, text=label + ":", bg=self.theme.surface,
-                     fg=self.theme.text_muted, font=self.theme.font_small).pack(side="left")
-            var = tk.StringVar()
-            setattr(self, var_name, var)
-            e = tk.Entry(cfg, textvariable=var, font=self.theme.font_small,
-                         width=width, show=show or "")
-            self.theme.style_entry(e)
-            e.pack(side="left", padx=(4, 12))
-
-        self._host_var.set(self.controller.config_manager.last_host)
-        self._port_var.set(self.controller.config_manager.sabnzbd_port)
-        self._apikey_var.set(self.controller.config_manager.sabnzbd_apikey)
-
-        save_btn = tk.Button(cfg, text="Save & Connect", command=self._save_config)
-        self.theme.style_button(save_btn)
-        save_btn.pack(side="left")
+        # ---- Connection info (read-only — edit in Config → SABnzbd) ----
+        info = tk.Frame(self, bg=self.theme.surface, padx=12, pady=8)
+        info.pack(fill="x", padx=16, pady=(0, 8))
+        self._conn_lbl = tk.Label(info, text="--", bg=self.theme.surface,
+                                  fg=self.theme.text_muted, font=self.theme.font_small)
+        self._conn_lbl.pack(side="left")
+        self._update_conn_label()
 
         # ---- Status strip ----
         strip = tk.Frame(self, bg=self.theme.card_bg,
@@ -129,18 +111,26 @@ class SABnzbdTab(tk.Frame):
     # =========================================================
     # CONFIG
     # =========================================================
-    def _save_config(self):
-        self.controller.config_manager.sabnzbd_apikey = self._apikey_var.get().strip()
-        self.controller.config_manager.sabnzbd_port   = self._port_var.get().strip()
-        self.refresh()
+    def _update_conn_label(self):
+        cfg = self.controller.config_manager
+        host, port = cfg.sabnzbd_host, cfg.sabnzbd_port
+        if not host:
+            self._conn_lbl.config(
+                text="No host configured — add it in Config → SABnzbd",
+                fg=self.theme.yellow)
+        else:
+            self._conn_lbl.config(
+                text="Connected to {}:{}  ·  edit in Config → SABnzbd".format(host, port),
+                fg=self.theme.text_muted)
 
     # =========================================================
     # API
     # =========================================================
     def _build_url(self, mode, extra=""):
-        host   = self._host_var.get().strip() or self.controller.config_manager.last_host
-        port   = self._port_var.get().strip()
-        apikey = self._apikey_var.get().strip()
+        cfg    = self.controller.config_manager
+        host   = cfg.sabnzbd_host
+        port   = cfg.sabnzbd_port
+        apikey = cfg.sabnzbd_apikey
         url = ("http://{0}:{1}/sabnzbd/api"
                "?output=json&apikey={2}&mode={3}").format(host, port, apikey, mode)
         if extra:
@@ -170,6 +160,7 @@ class SABnzbdTab(tk.Frame):
     # REFRESH
     # =========================================================
     def refresh(self):
+        self._update_conn_label()
         threading.Thread(target=self._fetch, daemon=True).start()
 
     def _fetch(self):

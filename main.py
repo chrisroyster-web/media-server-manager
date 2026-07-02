@@ -5,6 +5,8 @@ from tkinter import ttk
 
 from core.config_manager import ConfigManager
 from core.notification_manager import NotificationManager
+from core.alert_engine import AlertEngine, METRIC_META
+from core import updater as _updater
 from core.ssh_manager import SSHManager
 from core.service_manager import ServiceManager
 from core.docker_manager import DockerManager
@@ -25,9 +27,6 @@ from ui.smart_tab import SmartTab
 from ui.arr_tab import ArrTab
 from ui.updates_tab import UpdatesTab
 from ui.sessions_tab import SessionsTab
-from ui.emby_tab import EmbyTab
-from ui.plex_tab import PlexTab
-from ui.jellyfin_tab import JellyfinTab
 from ui.compose_tab import ComposeTab
 from ui.cron_tab import CronTab
 from ui.notification_history_tab import NotificationHistoryTab
@@ -42,8 +41,63 @@ from ui.tailscale_tab import TailscaleTab
 from ui.bandwidth_tab import BandwidthTab
 from ui.backup_tab import BackupTab
 from ui.prowlarr_tab import ProwlarrTab
+from ui.tautulli_tab import TautulliTab
+from ui.uptime_kuma_tab import UptimeKumaTab
+from ui.netdata_tab import NetdataTab
+from ui.glances_tab import GlancesTab
+from ui.aggregate_tab import AggregateTab
+from ui.library_tab import LibraryTab
+from ui.now_playing_tab import NowPlayingTab
+from ui.media_requests_tab import MediaRequestsTab
+from ui.media_users_tab import MediaUsersTab
+from ui.scheduler_tab import SchedulerTab
+from ui.install_tab import InstallTab
+from ui.fail2ban_tab import Fail2banTab
+from ui.restart_sequence_tab import RestartSequenceTab
+from ui.qbittorrent_tab import QBittorrentTab
+from ui.disk_usage_tab import DiskUsageTab
+from ui.process_tab import ProcessTab
+from ui.ufw_tab import UFWTab
+from ui.docker_stats_tab import DockerStatsTab
+from ui.ports_tab import PortsTab
+from ui.sensors_tab import SensorsTab
+from ui.pihole_tab import PiholeTab
+from ui.network_toolkit_tab import NetworkToolkitTab
+from ui.docker_volumes_tab import DockerVolumesTab
+from ui.systemd_timers_tab import SystemdTimersTab
+from ui.watchstate_tab import WatchstateTab
+from core.metrics_store import MetricsStore
+from core.scheduler import TaskScheduler
 
 from ui.theme import Theme
+
+
+APP_VERSION = "2.0.0"
+
+_TAB_NAMES = {
+    0: "Connect", 1: "Quick Commands", 2: "Dashboard",
+    3: "Services", 4: "Docker", 5: "Custom Commands",
+    6: "Log Viewer", 7: "SABnzbd", 8: "Config",
+    9: "Files", 10: "Disk Health", 11: "Arr",
+    12: "Updates", 13: "Sessions", 14: "Emby",
+    15: "Compose", 16: "Cron Jobs", 17: "Plex",
+    18: "Jellyfin", 19: "Notifications", 20: "All Servers",
+    21: "Play History", 22: "VPN", 23: "Reverse Proxy",
+    24: "Speedtest", 25: "Storage Health", 26: "SSL Certs",
+    27: "Tailscale", 28: "Bandwidth", 29: "Backups",
+    30: "Prowlarr", 33: "Tautulli", 34: "Uptime Kuma",
+    35: "Netdata", 36: "Glances", 37: "All Servers",
+    40: "Media Library", 41: "Requests",
+    42: "Media Users", 43: "Now Playing",
+    44: "Automation",  45: "Install Apps",
+    46: "Fail2ban",   47: "Restart Sequence",
+    48: "qBittorrent", 49: "Disk Usage",
+    50: "Processes",   51: "UFW Firewall",
+    52: "Docker Stats", 53: "Ports",
+    54: "Sensors",     55: "Pi-hole",
+    56: "Net Toolkit", 57: "Docker Volumes",
+    58: "Timers",     59: "Watchstate",
+}
 
 
 class MediaServerManager(tk.Tk):
@@ -64,10 +118,16 @@ class MediaServerManager(tk.Tk):
         self.theme = Theme(mode=self.config_manager.theme_mode)
         self.theme.apply_ttk_styles(self)   # global ttk contrast pass
         self.notification_manager = NotificationManager(self.config_manager)
+        self.alert_engine         = AlertEngine(self.config_manager)
+        self.metrics_store = MetricsStore(self.config_manager.db_path)
+        self.metrics_store.prune_old(self.config_manager.metrics_retention_days)
         self.ssh = SSHManager()
         self.service_manager = ServiceManager(self.ssh)
         self.docker_manager = DockerManager(self.ssh)
-        self._watchdog_stop = None
+        self.scheduler = TaskScheduler(self.config_manager, self.ssh)
+        self._watchdog_stop    = None
+        self._connected        = False   # early init so _update_title is safe
+        self._current_tab_name = ""
 
         # System tray
         self.tray = TrayManager(self)
@@ -75,6 +135,7 @@ class MediaServerManager(tk.Tk):
 
         # Build layout while hidden (no flicker)
         self._build_layout()
+        self.scheduler.on_run_done = self._on_task_done
 
         # Global mousewheel handler — routes scroll events from any widget
         # (buttons, labels, frames) up to the nearest scrollable ancestor.
@@ -127,11 +188,11 @@ class MediaServerManager(tk.Tk):
         self.arr_tab          = ArrTab(self.tabs, self)             # 11
         self.updates_tab      = UpdatesTab(self.tabs, self)         # 12
         self.sessions_tab     = SessionsTab(self.tabs, self)        # 13
-        self.emby_tab         = EmbyTab(self.tabs, self)            # 14
+        self._stub_14         = tk.Frame(self.tabs)                 # 14 (retired - now_playing_tab)
         self.compose_tab      = ComposeTab(self.tabs, self)         # 15
         self.cron_tab         = CronTab(self.tabs, self)            # 16
-        self.plex_tab         = PlexTab(self.tabs, self)            # 17
-        self.jellyfin_tab     = JellyfinTab(self.tabs, self)        # 18
+        self._stub_17         = tk.Frame(self.tabs)                 # 17 (retired - now_playing_tab)
+        self._stub_18         = tk.Frame(self.tabs)                 # 18 (retired - now_playing_tab)
         self.notif_tab        = NotificationHistoryTab(self.tabs, self)  # 19
         self.server_tab       = ServerManagerTab(self.tabs, self)        # 20
         self.play_history_tab = PlayHistoryTab(self.tabs, self)          # 21
@@ -144,23 +205,67 @@ class MediaServerManager(tk.Tk):
         self.bandwidth_tab    = BandwidthTab(self.tabs, self)           # 28
         self.backup_tab       = BackupTab(self.tabs, self)              # 29
         self.prowlarr_tab     = ProwlarrTab(self.tabs, self)            # 30
+        self._stub_31         = tk.Frame(self.tabs)                      # 31 (retired - media_requests_tab)
+        self._stub_32         = tk.Frame(self.tabs)                      # 32 (retired - media_requests_tab)
+        self.tautulli_tab     = TautulliTab(self.tabs, self)            # 33
+        self.uptime_kuma_tab  = UptimeKumaTab(self.tabs, self)          # 34
+        self.netdata_tab      = NetdataTab(self.tabs, self)             # 35
+        self.glances_tab      = GlancesTab(self.tabs, self)             # 36
+        self.aggregate_tab       = AggregateTab(self.tabs, self)          # 37
+        self._stub_38         = tk.Frame(self.tabs)                      # 38 (retired - media_users_tab)
+        self._stub_39         = tk.Frame(self.tabs)                      # 39 (retired - media_users_tab)
+        self.library_tab         = LibraryTab(self.tabs, self)          # 40
+        self.media_requests_tab  = MediaRequestsTab(self.tabs, self)   # 41
+        self.media_users_tab     = MediaUsersTab(self.tabs, self)      # 42
+        self.now_playing_tab     = NowPlayingTab(self.tabs, self)      # 43
+        self.scheduler_tab         = SchedulerTab(self.tabs, self)          # 44
+        self.install_tab           = InstallTab(self.tabs, self)            # 45
+        self.fail2ban_tab          = Fail2banTab(self.tabs, self)           # 46
+        self.restart_sequence_tab  = RestartSequenceTab(self.tabs, self)    # 47
+        self.qbittorrent_tab       = QBittorrentTab(self.tabs, self)        # 48
+        self.disk_usage_tab        = DiskUsageTab(self.tabs, self)          # 49
+        self.process_tab           = ProcessTab(self.tabs, self)            # 50
+        self.ufw_tab               = UFWTab(self.tabs, self)                # 51
+        self.docker_stats_tab      = DockerStatsTab(self.tabs, self)        # 52
+        self.ports_tab             = PortsTab(self.tabs, self)              # 53
+        self.sensors_tab           = SensorsTab(self.tabs, self)            # 54
+        self.pihole_tab            = PiholeTab(self.tabs, self)             # 55
+        self.network_toolkit_tab   = NetworkToolkitTab(self.tabs, self)    # 56
+        self.docker_volumes_tab    = DockerVolumesTab(self.tabs, self)     # 57
+        self.systemd_timers_tab    = SystemdTimersTab(self.tabs, self)     # 58
+        self.watchstate_tab        = WatchstateTab(self.tabs, self)        # 59
 
         for tab in [
             self.connection_panel, self.quick_commands, self.dashboard_tab,
             self.services_tab, self.docker_tab, self.custom_tab,
             self.log_viewer, self.sabnzbd_tab, self.config_tab,
             self.sftp_tab, self.smart_tab, self.arr_tab,
-            self.updates_tab, self.sessions_tab, self.emby_tab,
+            self.updates_tab, self.sessions_tab, self._stub_14,
             self.compose_tab, self.cron_tab,
-            self.plex_tab, self.jellyfin_tab,
+            self._stub_17, self._stub_18,
             self.notif_tab, self.server_tab, self.play_history_tab,
             self.vpn_tab, self.proxy_tab, self.speedtest_tab,
             self.storage_health_tab, self.ssl_tab, self.tailscale_tab,
             self.bandwidth_tab, self.backup_tab, self.prowlarr_tab,
+            self._stub_31, self._stub_32, self.tautulli_tab,
+            self.uptime_kuma_tab, self.netdata_tab, self.glances_tab,
+            self.aggregate_tab,
+            self._stub_38, self._stub_39,
+            self.library_tab,
+            self.media_requests_tab, self.media_users_tab, self.now_playing_tab,
+            self.scheduler_tab, self.install_tab,
+            self.fail2ban_tab, self.restart_sequence_tab,
+            self.qbittorrent_tab, self.disk_usage_tab,
+            self.process_tab, self.ufw_tab, self.docker_stats_tab,
+            self.ports_tab, self.sensors_tab,
+            self.pihole_tab, self.network_toolkit_tab,
+            self.docker_volumes_tab, self.systemd_timers_tab,
+            self.watchstate_tab,
         ]:
             self.tabs.add(tab)
 
         self.tabs.bind("<<NotebookTabChanged>>", self._on_tab_changed)
+        self.tabs.select(2)   # open on Dashboard, not Connection
 
         # Status bar at the very bottom
         self._build_status_bar()
@@ -284,7 +389,7 @@ class MediaServerManager(tk.Tk):
         c.create_line(60, 218, W-60, 218, fill=BORDER, width=1)
 
         # Version / build tag
-        c.create_text(W//2, 232, text="v1.0.0",
+        c.create_text(W//2, 232, text="v{}".format(APP_VERSION),
                       font=("Segoe UI", 9), fill=TEXT_DIM)
 
         # Progress bar track
@@ -341,14 +446,19 @@ class MediaServerManager(tk.Tk):
                 self._update_server_sidebar()
                 self.log_viewer._rebuild_sources()
                 self.tray.start()
-                self.after(3000, self.start_service_watchdog)
-                self.after(5000, self.start_sab_toast_watcher)
+                self.after(500,   self._auto_connect)
+                self.after(3000,  self.start_service_watchdog)
+                self.after(5000,  self.start_sab_toast_watcher)
+                self.after(6000,  self.scheduler.start)
+                self.after(12000, self._check_for_update_bg)
+                self._maybe_show_onboarding()
         except tk.TclError:
             self.deiconify()
             self._update_player_sidebar()
             self._update_server_sidebar()
             self.log_viewer._rebuild_sources()
             self.tray.start()
+            self.after(500, self._auto_connect)
 
     def _on_close(self):
         """Minimize to tray instead of closing (if tray is active)."""
@@ -442,6 +552,24 @@ class MediaServerManager(tk.Tk):
         )
         self._status_lbl.pack(side="left")
 
+        # "Connect" button — opens the Connection panel (tab 0), which is no
+        # longer in the sidebar nav but still available here.
+        self._conn_btn = tk.Button(
+            bar, text="⚡ Connect",
+            command=lambda: self.tabs.select(0),
+            bg=t.blue, fg="#ffffff",
+            bd=0, relief="flat",
+            font=("Segoe UI Semibold", 9),
+            padx=12, pady=3,
+            cursor="hand2",
+        )
+        self._conn_btn.pack(side="left", padx=(12, 0))
+        self._conn_btn.bind("<Enter>",
+            lambda e: self._conn_btn.configure(bg=t.blue_bright))
+        self._conn_btn.bind("<Leave>",
+            lambda e: self._conn_btn.configure(
+                bg=t.status_running if self._connected else t.blue))
+
         # Right side: app name
         tk.Label(
             bar,
@@ -457,6 +585,18 @@ class MediaServerManager(tk.Tk):
         )
         self._alert_lbl.pack(side="right", padx=8)
 
+        # Update badge — hidden until a newer version is detected
+        self._update_badge = tk.Button(
+            bar, text="↑ Update available",
+            command=self._show_update_dialog,
+            bg=t.cyan, fg="#000000",
+            bd=0, relief="flat",
+            font=("Segoe UI Semibold", 9),
+            padx=10, pady=3,
+            cursor="hand2",
+        )
+        # Not packed yet — shown by _on_update_found()
+
     def update_status(self, connected: bool, host: str = ""):
         t = self.theme
         self._connected = connected
@@ -468,6 +608,13 @@ class MediaServerManager(tk.Tk):
         self._status_dot.itemconfig("dot",  fill=color)
         self._status_dot.itemconfig("glow", fill=glow_color)
         self._status_lbl.config(text=text, fg=fg)
+
+        # Update the Connect button to reflect current state
+        if connected:
+            self._conn_btn.configure(text="✓ Connected", bg=t.status_running)
+        else:
+            self._conn_btn.configure(text="⚡ Connect", bg=t.blue)
+        self._update_title()
 
         # Start or stop pulse animation
         if connected:
@@ -497,13 +644,78 @@ class MediaServerManager(tk.Tk):
             return
         self._pulse_job = self.after(60, self._pulse_dot, (step + 1) % 40)
 
-    def fire_alerts(self, alerts):
-        """Called from DashboardTab after each refresh with list of active alert strings."""
-        if alerts:
-            self._alert_lbl.config(text="  ⚠  " + "   ".join(alerts))
+    def fire_metric_alerts(self, metrics: dict):
+        """Called from DashboardTab with current metric values after each refresh."""
+        fired = self.alert_engine.evaluate(metrics)
+        if fired:
+            labels = [r["name"] for r, v in fired]
+            self._alert_lbl.config(text="  ⚠  " + "   ".join(labels))
+            threading.Thread(
+                target=self._dispatch_rule_alerts,
+                args=(fired,),
+                daemon=True,
+            ).start()
         else:
             self._alert_lbl.config(text="")
-        self.notification_manager.notify(alerts)
+
+    def _dispatch_rule_alerts(self, fired: list):
+        """Background thread: fire each rule's channels."""
+        nm = self.notification_manager
+        for rule, value in fired:
+            metric  = rule.get("metric", "cpu")
+            label, unit = METRIC_META.get(metric, (metric, ""))
+            op      = rule.get("operator", ">=")
+            thresh  = rule.get("threshold", "?")
+            name    = rule.get("name", "Alert")
+            title   = "⚠ {}".format(name)
+            body    = "{} {} {}{} (now {:.1f}{})".format(
+                label, op, thresh, unit, value, unit)
+            channels = rule.get("channels", ["toast", "ntfy", "email"])
+            if "toast" in channels:
+                self.after(0, lambda t=title, b=body:
+                           self.show_toast(t, b, level="warn"))
+            # ntfy and email are dispatched sync from this background thread
+            nm.send_rule_alert_sync(title, body, channels)
+
+    # ---------------------------------------------------------
+    # SELF-UPDATE
+    # ---------------------------------------------------------
+
+    def _check_for_update_bg(self):
+        """Background startup check — silently skipped if repo not configured."""
+        if not _updater.is_configured():
+            return
+        def _worker():
+            release = _updater.check_latest_release()
+            if release and _updater.is_newer(release.get("tag_name", ""), APP_VERSION):
+                self.after(0, lambda r=release: self._on_update_found(r))
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_update_found(self, release):
+        """Called on the UI thread when a newer version is available."""
+        tag = release.get("tag_name", "")
+        # Show the update badge in the status bar
+        self._update_badge.config(text="↑ v{} available".format(tag.lstrip("v")))
+        self._update_badge.pack(side="right", padx=(0, 8))
+        # Toast notification (non-blocking)
+        self.show_toast(
+            "Update Available",
+            "v{} is ready — click '↑ Update' in the status bar to install.".format(
+                tag.lstrip("v")),
+            duration_ms=8000,
+            level="ok",
+        )
+
+    def _show_update_dialog(self):
+        """Open the update dialog (also called from About dialog and status bar badge)."""
+        from ui.update_dialog import UpdateDialog
+        # Don't open a second dialog if one is already open
+        existing = getattr(self, "_update_dialog_win", None)
+        if existing and existing.winfo_exists():
+            existing.lift()
+            existing.focus_set()
+            return
+        self._update_dialog_win = UpdateDialog(self, self, current_version=APP_VERSION)
 
     # ---------------------------------------------------------
     # KEYBOARD SHORTCUTS
@@ -526,10 +738,8 @@ class MediaServerManager(tk.Tk):
     def _shortcut_refresh(self):
         if self._focused_on_input():
             return
-        try:
-            self.dashboard_tab.refresh()
-        except Exception:
-            pass
+        idx = self.tabs.index(self.tabs.select())
+        self._trigger_tab_refresh(idx)
 
     def _focused_on_input(self):
         try:
@@ -548,25 +758,66 @@ class MediaServerManager(tk.Tk):
     def _on_tab_changed(self, event):
         idx = self.tabs.index(self.tabs.select())
         self.sidebar.set_active(idx)
-        _refresh_map = {
+        self._current_tab_name = _TAB_NAMES.get(idx, "")
+        self._update_title()
+        self.after(100, lambda: self._trigger_tab_refresh(idx))
+
+    def _trigger_tab_refresh(self, idx):
+        m = {
             2:  lambda: self.dashboard_tab.refresh(),
             3:  lambda: self.services_tab.refresh_all(),
             4:  lambda: self.docker_tab.refresh_all(),
             7:  lambda: self.sabnzbd_tab.refresh(),
             10: lambda: self.smart_tab._fetch(),
             11: lambda: self.arr_tab._fetch(),
-            13: lambda: self.sessions_tab._fetch(),
-            14: lambda: self.emby_tab._fetch(),
+            13: lambda: self.sessions_tab._refresh(),
+            34: lambda: self.uptime_kuma_tab.refresh(),
+            35: lambda: self.netdata_tab.refresh(),
+            36: lambda: self.glances_tab.refresh(),
+            28: lambda: self.bandwidth_tab.refresh(),
+            25: lambda: self.storage_health_tab.refresh(),
+            9:  lambda: self.sftp_tab._navigate(self.sftp_tab._current_path, push_history=False),
+            6:  lambda: self.log_viewer.fetch(),
+            29: lambda: self.backup_tab.refresh(),
             15: lambda: self.compose_tab.refresh(),
             16: lambda: self.cron_tab.refresh(),
-            17: lambda: self.plex_tab._fetch(),
-            18: lambda: self.jellyfin_tab._fetch(),
-            19: lambda: None,   # notification history — no fetch needed
             20: lambda: self.server_tab._load(),
+            40: lambda: self.library_tab.on_show(),
+            21: lambda: self.play_history_tab.refresh(),
+            30: lambda: self.prowlarr_tab.refresh(),
+            22: lambda: self.vpn_tab.refresh(),
+            23: lambda: self.proxy_tab.refresh(),
+            26: lambda: self.ssl_tab.refresh(),
+            27: lambda: self.tailscale_tab.refresh(),
+            12: lambda: self.updates_tab._refresh(),
+            19: lambda: self.notif_tab._load_from_db(),
+            33: lambda: self.tautulli_tab.refresh(),
+            37: lambda: self.aggregate_tab.refresh(),
+            41: lambda: self.media_requests_tab.on_show(),
+            42: lambda: self.media_users_tab.on_show(),
+            43: lambda: self.now_playing_tab._fetch(),
+            44: lambda: self.scheduler_tab.on_show(),
+            45: lambda: self.install_tab.on_show(),
+            46: lambda: self.fail2ban_tab.on_show(),
+            47: lambda: self.restart_sequence_tab.on_show(),
+            48: lambda: self.qbittorrent_tab.on_show(),
+            50: lambda: self.process_tab.on_show(),
+            51: lambda: self.ufw_tab.on_show(),
+            52: lambda: self.docker_stats_tab.on_show(),
+            53: lambda: self.ports_tab.on_show(),
+            54: lambda: self.sensors_tab.on_show(),
+            55: lambda: self.pihole_tab.on_show(),
+            56: lambda: self.network_toolkit_tab.on_show(),
+            57: lambda: self.docker_volumes_tab.on_show(),
+            58: lambda: self.systemd_timers_tab.on_show(),
+            59: lambda: self.watchstate_tab.refresh(),
         }
-        fn = _refresh_map.get(idx)
+        fn = m.get(idx)
         if fn:
-            self.after(100, fn)
+            try:
+                fn()
+            except Exception:
+                pass
 
     def _start_reconnect_watchdog(self):
         import threading
@@ -606,26 +857,81 @@ class MediaServerManager(tk.Tk):
         self._update_player_sidebar()
         self._update_server_sidebar()
         self.log_viewer._rebuild_sources()
+        self.config_tab.reload()
+        self.sabnzbd_tab.refresh()
+        profile = self.config_manager.get_active_server()
+        if profile:
+            self.connection_panel.refresh_for_server(profile)
 
     def _update_player_sidebar(self):
-        """Show/hide Plex, Jellyfin, VPN sidebar entries based on config."""
+        """Dim/undim sidebar entries based on config — all items always visible."""
         cfg = self.config_manager
-        if cfg.plex_token:
-            self.sidebar.show_item(17)
+        sb  = self.sidebar
+
+        # ── MEDIA ──────────────────────────────────────────────────────
+        has_media = bool(cfg.plex_token or cfg.jellyfin_apikey or cfg.emby_apikey)
+        if has_media:
+            sb.undim_item(43)   # Now Playing
+            sb.undim_item(40)   # Media Library
         else:
-            self.sidebar.hide_item(17)
-        if cfg.jellyfin_apikey:
-            self.sidebar.show_item(18)
+            sb.dim_item(43, "Add a Plex, Jellyfin, or Emby API key in Config → Media")
+            sb.dim_item(40, "Add a Plex, Jellyfin, or Emby API key in Config → Media")
+
+        if cfg.jellyfin_apikey or cfg.emby_apikey:
+            sb.undim_item(42)   # Media Users
         else:
-            self.sidebar.hide_item(18)
+            sb.dim_item(42, "Add a Jellyfin or Emby API key in Config → Media")
+
+        # ── REQUESTS ───────────────────────────────────────────────────
+        if cfg.prowlarr_apikey:
+            sb.undim_item(30)
+        else:
+            sb.dim_item(30, "Add a Prowlarr API key in Config → Arr / Requests")
+
+        if cfg.overseerr_apikey or cfg.jellyseerr_apikey:
+            sb.undim_item(41)   # unified Requests
+        else:
+            sb.dim_item(41, "Add an Overseerr or Jellyseerr API key in Config → Arr / Requests")
+
+        # ── MONITORING ─────────────────────────────────────────────────
+        if cfg.tautulli_apikey:
+            sb.undim_item(33)
+        else:
+            sb.dim_item(33, "Add a Tautulli API key in Config → Monitoring")
+        if cfg.uptime_kuma_host:
+            sb.undim_item(34)
+        else:
+            sb.dim_item(34, "Set the Uptime Kuma host in Config → Monitoring")
+        if cfg.netdata_host:
+            sb.undim_item(35)
+        else:
+            sb.dim_item(35, "Set the Netdata host in Config → Monitoring")
+        if cfg.glances_host:
+            sb.undim_item(36)
+        else:
+            sb.dim_item(36, "Set the Glances host in Config → Monitoring")
+        if cfg.pihole_host:
+            sb.undim_item(55)
+        else:
+            sb.dim_item(55, "Set the Pi-hole / AdGuard host in Config → Pi-hole")
+        if cfg.watchstate_host:
+            sb.undim_item(59)
+        else:
+            sb.dim_item(59, "Set the Watchstate host in Config → Monitoring")
+
+        # ── INFRA ──────────────────────────────────────────────────────
         if cfg.vpn_enabled:
-            self.sidebar.show_item(22)
+            sb.undim_item(22)
         else:
-            self.sidebar.hide_item(22)
+            sb.dim_item(22, "Enable VPN monitoring in Config → VPN")
         if cfg.proxy_enabled:
-            self.sidebar.show_item(23)
+            sb.undim_item(23)
         else:
-            self.sidebar.hide_item(23)
+            sb.dim_item(23, "Enable Reverse Proxy in Config → Reverse Proxy")
+        if cfg.tailscale_enabled:
+            sb.undim_item(27)
+        else:
+            sb.dim_item(27, "Enable Tailscale in Config → Tailscale")
 
     def _update_server_sidebar(self):
         """Rebuild the SERVERS section in the sidebar from current profiles."""
@@ -637,10 +943,9 @@ class MediaServerManager(tk.Tk):
         self.show_toast("Switching Server",
                         "Connecting to {}…".format(profile.get("host", "")),
                         level="info")
-        # Navigate to Connection tab so the user sees progress
-        self.tabs.select(0)
 
         def _do():
+            self.after(0, lambda: self.update_status(False))
             try:
                 if self.ssh.connected:
                     self.ssh.disconnect()
@@ -652,36 +957,83 @@ class MediaServerManager(tk.Tk):
             password = profile.get("password", "")
             key_path = profile.get("key_path", "").strip() or None
             try:
-                ok, msg = self.ssh.connect(host, username, password,
-                                           port=port, key_path=key_path)
-                if ok:
+                result = self.ssh.connect(
+                    host=host, port=port, username=username,
+                    password=password or None, key_path=key_path)
+                if result is True:
                     # Persist as last_host / last_username for legacy compat
                     self.config_manager.last_host     = host
                     self.config_manager.last_username = username
-                    self.after(0, lambda: self.show_toast(
-                        "Connected", profile.get("name") or host, level="ok"))
-                    self.after(0, self.dashboard_tab.refresh)
+                    self.config_manager.upsert_server(
+                        host, username=username, port=str(port),
+                        password=password or "", key_path=key_path or "")
+                    # Point active_server_index at this profile so per-server
+                    # config reads go to the right server's settings dict.
+                    servers = self.config_manager.get_servers()
+                    for i, srv in enumerate(servers):
+                        if srv.get("host") == host:
+                            self.config_manager.set_active_server_index(i)
+                            break
+                    label = profile.get("name") or host
+                    self.after(0, lambda: self.update_status(True, host))
+                    self.after(0, self._start_reconnect_watchdog)
+                    self.after(0, lambda: self.show_toast("Connected", label, level="ok"))
+                    self.after(0, lambda: self.connection_panel._log(
+                        "Connected to {} ({})".format(label, host), "success"))
+                    self.after(0, self.apply_config)
+                    self.after(100, self.dashboard_tab.refresh)
                 else:
-                    self.after(0, lambda m=msg: self.show_toast(
+                    self.after(0, lambda m=result: self.show_toast(
                         "Connection Failed", m, level="error"))
+                    self.after(0, lambda m=result: self.connection_panel._log(
+                        "Connection failed: {}".format(m), "error"))
             except Exception as e:
                 self.after(0, lambda m=str(e): self.show_toast(
                     "Connection Error", m, level="error"))
+                self.after(0, lambda m=str(e): self.connection_panel._log(
+                    "Connection error: {}".format(m), "error"))
 
         threading.Thread(target=_do, daemon=True).start()
 
+    def _auto_connect(self):
+        """Connect to the last-used server on startup if credentials are saved."""
+        profile = self.config_manager.get_active_server()
+        if not profile or not profile.get("host"):
+            return
+        has_password = bool((profile.get("password") or "").strip())
+        has_key = (bool((profile.get("key_path") or "").strip()) or
+                   os.path.exists(os.path.expanduser("~/.ssh/id_rsa")))
+        if not has_password and not has_key:
+            return
+        self.switch_server(profile)
+
+    def open_server_dialog(self, profile=None):
+        """Open the Add / Edit Server modal dialog."""
+        from ui.server_dialog import ServerDialog
+        ServerDialog(self, self, profile=profile)
+
     # ---------------------------------------------------------
-    # SIDEBAR BADGE  (called by ArrTab after each refresh)
+    # SIDEBAR BADGES
     # ---------------------------------------------------------
     def set_arr_badge(self, missing_count):
         """Update the Arr sidebar button to show missing count badge."""
         self.after(0, lambda: self.sidebar.set_badge(11, missing_count))
 
+    def set_requests_badge(self, pending_count):
+        """Update the Requests sidebar button to show pending count badge."""
+        self.after(0, lambda: self.sidebar.set_badge(41, pending_count))
+
     # ---------------------------------------------------------
     # IN-APP TOAST NOTIFICATIONS
     # ---------------------------------------------------------
     def show_toast(self, title, message, duration_ms=5000, level="info"):
-        # Log to notification history
+        # Persist to SQLite
+        try:
+            server_id = (self.config_manager.get_active_server() or {}).get("name", "default")
+            self.metrics_store.insert_notification(server_id, level, title, message or "")
+        except Exception:
+            pass
+        # Log to notification history tab
         try:
             self.notif_tab.add_entry(title, message, level)
         except Exception:
@@ -722,6 +1074,31 @@ class MediaServerManager(tk.Tk):
                 pass
         _fadein()
         self.after(duration_ms, lambda: toast.destroy() if toast.winfo_exists() else None)
+
+    # ---------------------------------------------------------
+    # TASK SCHEDULER CALLBACKS
+    # ---------------------------------------------------------
+    def _on_task_done(self, task_id, task_name, exit_code, output, notify_on_failure):
+        """Called from the scheduler's background thread after each task run."""
+        if exit_code != 0:
+            self.after(0, lambda n=task_name, c=exit_code: self.show_toast(
+                f"Task failed: {n}", f"Exit code {c}",
+                level="error", duration_ms=8000))
+            if notify_on_failure:
+                self.notification_manager.send_alert(
+                    f"Scheduled task failed: {task_name}",
+                    f"Exit code {exit_code}\n\n{output[:1000]}",
+                )
+        self.after(0, self._refresh_scheduler_if_active)
+
+    def _refresh_scheduler_if_active(self):
+        try:
+            sel_idx = self.tabs.index(self.tabs.select())
+            my_idx  = self.tabs.index(self.scheduler_tab)
+            if sel_idx == my_idx:
+                self.scheduler_tab.refresh()
+        except Exception:
+            pass
 
     # ---------------------------------------------------------
     # SERVICE WATCHDOG
@@ -894,6 +1271,158 @@ class MediaServerManager(tk.Tk):
                              row=row_i, column=1, sticky="w", pady=3)
                 row_i += 1
 
+        win.bind("<Escape>", lambda e: win.destroy())
+
+    def _update_title(self):
+        base      = "All Clear Server Services"
+        connected = getattr(self, "_connected", False)
+        tab_name  = getattr(self, "_current_tab_name", "")
+        if connected:
+            host = self.config_manager.last_host
+            if tab_name:
+                self.title("{} — {}  ·  {}".format(base, host, tab_name))
+            else:
+                self.title("{} — {}".format(base, host))
+        elif tab_name:
+            self.title("{} — {}".format(base, tab_name))
+        else:
+            self.title(base)
+
+    def _show_about(self, event=None):
+        if hasattr(self, "_about_win") and self._about_win and self._about_win.winfo_exists():
+            self._about_win.lift()
+            return
+        t = self.theme
+        win = tk.Toplevel(self)
+        self._about_win = win
+        win.title("About All Clear")
+        win.configure(bg=t.bg)
+        win.resizable(False, False)
+        win.attributes("-topmost", True)
+
+        tk.Frame(win, bg=t.blue, height=4).pack(fill="x")
+
+        body = tk.Frame(win, bg=t.bg, padx=44, pady=28)
+        body.pack(fill="both", expand=True)
+
+        tk.Label(body, text="\U0001f5a5", bg=t.bg, fg=t.blue,
+                 font=("Segoe UI", 40)).pack()
+        tk.Label(body, text="All Clear Server Services", bg=t.bg, fg=t.text,
+                 font=("Segoe UI Semibold", 16)).pack(pady=(10, 2))
+        tk.Label(body, text="Version {}".format(APP_VERSION), bg=t.bg, fg=t.text_muted,
+                 font=("Segoe UI", 10)).pack()
+
+        check_btn = tk.Button(body, text="Check for Updates",
+                              command=lambda: (win.destroy(), self._show_update_dialog()))
+        t.style_button(check_btn)
+        check_btn.pack(pady=(10, 0))
+
+        tk.Frame(body, bg=t.card_border, height=1).pack(fill="x", pady=20)
+
+        tk.Label(body,
+                 text="A unified media server management tool\n"
+                      "for Plex, Emby, Jellyfin, and supporting services.",
+                 bg=t.bg, fg=t.text_muted, font=("Segoe UI", 10),
+                 justify="center").pack()
+
+        tk.Label(body, text="© 2026 Chris Royster", bg=t.bg, fg=t.text_dim,
+                 font=("Segoe UI", 9)).pack(pady=(14, 0))
+
+        close_btn = tk.Button(body, text="Close", command=win.destroy)
+        t.style_button(close_btn)
+        close_btn.pack(pady=(20, 0))
+
+        win.update_idletasks()
+        sw = self.winfo_screenwidth()
+        sh = self.winfo_screenheight()
+        w  = win.winfo_reqwidth()
+        h  = win.winfo_reqheight()
+        win.geometry("{}x{}+{}+{}".format(w, h, (sw - w) // 2, (sh - h) // 2))
+        win.bind("<Escape>", lambda e: win.destroy())
+
+    # ---------------------------------------------------------
+    # FIRST-RUN ONBOARDING
+    # ---------------------------------------------------------
+    def _maybe_show_onboarding(self):
+        cfg = self.config_manager
+        already_shown = cfg.get("onboarding_shown", False)
+        has_servers   = bool(cfg.get_servers() or cfg.last_host)
+        if already_shown or has_servers:
+            return
+        cfg.set("onboarding_shown", True)
+        self.after(400, self._show_onboarding)
+
+    def _show_onboarding(self):
+        t = self.theme
+        win = tk.Toplevel(self)
+        win.title("Welcome")
+        win.configure(bg=t.bg)
+        win.resizable(False, False)
+        win.attributes("-topmost", True)
+        win.grab_set()
+
+        # Top accent bar
+        tk.Frame(win, bg=t.blue, height=4).pack(fill="x")
+
+        body = tk.Frame(win, bg=t.bg, padx=40, pady=32)
+        body.pack(fill="both")
+
+        tk.Label(body, text="🖥", bg=t.bg, fg=t.text,
+                 font=("Segoe UI", 40)).pack()
+        tk.Label(body, text="Welcome to All Clear Server Services",
+                 bg=t.bg, fg=t.text,
+                 font=("Segoe UI Semibold", 15)).pack(pady=(14, 0))
+        tk.Label(body,
+                 text="Monitor and manage your media server from one place.\n"
+                      "Start by connecting to your server and adding API keys\n"
+                      "for Plex, Emby, Jellyfin, and other services.",
+                 bg=t.bg, fg=t.text_muted,
+                 font=("Segoe UI", 10),
+                 justify="center").pack(pady=(10, 0))
+
+        tk.Frame(body, bg=t.card_border, height=1).pack(fill="x", pady=24)
+
+        steps = [
+            ("1", "Connect",  "Click ⚡ Connect in the status bar and enter your server credentials."),
+            ("2", "Configure","Open Config (⚙) and add API keys for your media apps."),
+            ("3", "Explore",  "Navigate via the sidebar — the Dashboard updates automatically."),
+        ]
+        for num, heading, desc in steps:
+            row = tk.Frame(body, bg=t.bg)
+            row.pack(fill="x", pady=4)
+            tk.Label(row, text=num, bg=t.blue, fg="#fff",
+                     font=("Segoe UI Semibold", 10),
+                     width=2, padx=6, pady=2).pack(side="left")
+            col = tk.Frame(row, bg=t.bg)
+            col.pack(side="left", padx=12)
+            tk.Label(col, text=heading, bg=t.bg, fg=t.text,
+                     font=("Segoe UI Semibold", 10), anchor="w").pack(anchor="w")
+            tk.Label(col, text=desc, bg=t.bg, fg=t.text_muted,
+                     font=("Segoe UI", 9), anchor="w",
+                     wraplength=360, justify="left").pack(anchor="w")
+
+        btns = tk.Frame(body, bg=t.bg)
+        btns.pack(pady=(24, 0))
+
+        def _connect():
+            win.destroy()
+            self.tabs.select(0)
+
+        go = tk.Button(btns, text="⚡ Connect to Server", command=_connect)
+        t.style_button(go, "primary")
+        go.pack(side="left", padx=(0, 10))
+
+        tk.Button(btns, text="Explore on my own", command=win.destroy,
+                  bg=t.surface, fg=t.text_muted,
+                  bd=0, relief="flat", font=t.font_regular,
+                  padx=12, pady=5, cursor="hand2").pack(side="left")
+
+        win.update_idletasks()
+        sw = self.winfo_screenwidth()
+        sh = self.winfo_screenheight()
+        w  = win.winfo_reqwidth()
+        h  = win.winfo_reqheight()
+        win.geometry("{}x{}+{}+{}".format(w, h, (sw - w) // 2, (sh - h) // 2))
         win.bind("<Escape>", lambda e: win.destroy())
 
     # --------------------------------------------------

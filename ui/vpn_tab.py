@@ -101,6 +101,7 @@ class VPNTab(tk.Frame):
     # REFRESH
     # =========================================================
     def refresh(self):
+        if getattr(self, "_fetching", False): return
         self._rc.cancel()
 
         if not self.controller.ssh.connected:
@@ -109,6 +110,7 @@ class VPNTab(tk.Frame):
 
         self._refresh_btn.config(state="disabled", text="Checking…")
         self._set_bar("Querying VPN status…")
+        self._fetching = True
         threading.Thread(target=self._fetch, daemon=True).start()
 
     def _schedule_next(self):
@@ -118,51 +120,54 @@ class VPNTab(tk.Frame):
     # FETCH  (background thread)
     # =========================================================
     def _fetch(self):
-        ssh    = self.controller.ssh
-        result = {"state": "Unknown", "raw": ""}
+        try:
+            ssh    = self.controller.ssh
+            result = {"state": "Unknown", "raw": ""}
 
-        # ── 1. Try protonvpn-cli ─────────────────────────────
-        out, _, code = ssh.run(
-            "protonvpn-cli status 2>/dev/null || protonvpn status 2>/dev/null")
-        if out and out.strip() and "command not found" not in out:
-            result["raw"] = out
-            self._parse_protonvpn_cli(out, result)
-        else:
-            # ── 2. Try systemctl ──────────────────────────────
-            svc_out, _, _ = ssh.run(
-                "systemctl is-active protonvpn 2>/dev/null; "
-                "systemctl is-active protonvpn-cli 2>/dev/null")
-            if "active" in (svc_out or ""):
-                result["state"] = "Connected"
+            # ── 1. Try protonvpn-cli ─────────────────────────────
+            out, _, code = ssh.run(
+                "protonvpn-cli status 2>/dev/null || protonvpn status 2>/dev/null")
+            if out and out.strip() and "command not found" not in out:
+                result["raw"] = out
+                self._parse_protonvpn_cli(out, result)
+            else:
+                # ── 2. Try systemctl ──────────────────────────────
+                svc_out, _, _ = ssh.run(
+                    "systemctl is-active protonvpn 2>/dev/null; "
+                    "systemctl is-active protonvpn-cli 2>/dev/null")
+                if "active" in (svc_out or ""):
+                    result["state"] = "Connected"
 
-            # ── 3. Try wg show ────────────────────────────────
-            wg_out, _, _ = ssh.run("sudo wg show 2>/dev/null")
-            if wg_out and wg_out.strip():
-                result["raw"] += "\n--- wg show ---\n" + wg_out
-                self._parse_wg(wg_out, result)
+                # ── 3. Try wg show ────────────────────────────────
+                wg_out, _, _ = ssh.run("sudo wg show 2>/dev/null")
+                if wg_out and wg_out.strip():
+                    result["raw"] += "\n--- wg show ---\n" + wg_out
+                    self._parse_wg(wg_out, result)
 
-            # ── 4. Detect tun/proton interface ────────────────
-            ip_out, _, _ = ssh.run(
-                "ip addr show 2>/dev/null | grep -E '(proton|tun|wg)[0-9]'")
-            if ip_out and ip_out.strip():
-                result.setdefault("iface", ip_out.strip().split()[1].rstrip(":"))
-                if result["state"] == "Unknown":
-                    result["state"] = "Connected (interface up)"
-                result["raw"] += "\n--- ip addr ---\n" + ip_out
+                # ── 4. Detect tun/proton interface ────────────────
+                ip_out, _, _ = ssh.run(
+                    "ip addr show 2>/dev/null | grep -E '(proton|tun|wg)[0-9]'")
+                if ip_out and ip_out.strip():
+                    result.setdefault("iface", ip_out.strip().split()[1].rstrip(":"))
+                    if result["state"] == "Unknown":
+                        result["state"] = "Connected (interface up)"
+                    result["raw"] += "\n--- ip addr ---\n" + ip_out
 
-        # ── 5. Public IP check ───────────────────────────────
-        pub_out, _, _ = ssh.run(
-            "curl -s --max-time 5 https://api.ipify.org 2>/dev/null")
-        if pub_out and pub_out.strip():
-            result["public_ip"] = pub_out.strip()
+            # ── 5. Public IP check ───────────────────────────────
+            pub_out, _, _ = ssh.run(
+                "curl -s --max-time 5 https://api.ipify.org 2>/dev/null")
+            if pub_out and pub_out.strip():
+                result["public_ip"] = pub_out.strip()
 
-        if not result.get("raw"):
-            result["raw"] = ("protonvpn-cli not found and no WireGuard/tun "
-                             "interface detected.\n\n"
-                             "Make sure protonvpn-cli is installed or that "
-                             "the VPN interface is visible to this user.")
+            if not result.get("raw"):
+                result["raw"] = ("protonvpn-cli not found and no WireGuard/tun "
+                                 "interface detected.\n\n"
+                                 "Make sure protonvpn-cli is installed or that "
+                                 "the VPN interface is visible to this user.")
 
-        self.after(0, lambda r=result: self._populate(r))
+            self.after(0, lambda r=result: self._populate(r))
+        finally:
+            self._fetching = False
 
     # =========================================================
     # PARSERS
@@ -270,8 +275,9 @@ class VPNTab(tk.Frame):
     # HELPERS
     # =========================================================
     def _set_bar(self, text, level="info"):
-        colors = {"info":  self.theme.text_muted,
-                  "ok":    self.theme.status_running,
-                  "error": self.theme.status_stopped}
-        self._status_bar.config(text=text,
-                                 fg=colors.get(level, self.theme.text_muted))
+        t = self.theme
+        if text.endswith("…") or text.endswith("..."):
+            self._status_bar.config(text=text, bg=t.blue, fg="#ffffff")
+            return
+        colors = {"info": t.text_muted, "ok": t.status_running, "error": t.status_stopped}
+        self._status_bar.config(text=text, bg=t.surface_dark, fg=colors.get(level, t.text_muted))

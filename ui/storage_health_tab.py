@@ -121,12 +121,14 @@ class StorageHealthTab(tk.Frame):
     # REFRESH
     # =================================================================
     def refresh(self):
+        if getattr(self, "_fetching", False): return
         self._rc.cancel()
         if not self.controller.ssh.connected:
             self._set_status("Not connected to SSH", "error")
             return
         self._refresh_btn.config(state="disabled", text="Scanning...")
         self._set_status("Scanning filesystems...")
+        self._fetching = True
         threading.Thread(target=self._fetch, daemon=True).start()
 
     def _fetch(self):
@@ -135,6 +137,8 @@ class StorageHealthTab(tk.Frame):
         except Exception as exc:
             err = traceback.format_exc()
             self.after(0, lambda e=err: self._populate([], "ERROR:\n" + e, "error"))
+        finally:
+            self._fetching = False
 
     def _fetch_inner(self):
         ssh = self.controller.ssh
@@ -359,6 +363,9 @@ class StorageHealthTab(tk.Frame):
         self._detail.config(state="disabled")
 
     def _set_status(self, text, level="info"):
-        colors = {"info": self.theme.text_muted, "ok": self.theme.status_running,
-                  "warn": self.theme.yellow, "error": self.theme.status_stopped}
-        self._status.config(text=text, fg=colors.get(level, self.theme.text_muted))
+        t = self.theme
+        if text.endswith("…") or text.endswith("..."):
+            self._status.config(text=text, bg=t.blue, fg="#ffffff")
+            return
+        colors = {"info": t.text_muted, "ok": t.status_running, "warn": t.yellow, "error": t.status_stopped}
+        self._status.config(text=text, bg=t.surface_dark, fg=colors.get(level, t.text_muted))

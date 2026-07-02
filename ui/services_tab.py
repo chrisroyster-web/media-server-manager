@@ -129,6 +129,14 @@ class ServicesTab(CardConsoleTab):
             else: return
             out, err, code = result
             self._log_output("{0} {1}".format(name, action), out, err, code)
+            if code != 0:
+                self.after(0, lambda n=name, a=action, c=code: (
+                    self.controller.show_toast(
+                        f"{a.title()} failed — {n}",
+                        (err or out or "").strip().splitlines()[-1] if (err or out or "").strip() else f"exit {c}",
+                        level="error",
+                    )
+                ))
             self.refresh_all()
 
         threading.Thread(target=worker, daemon=True).start()

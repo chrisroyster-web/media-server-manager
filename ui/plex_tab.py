@@ -75,6 +75,10 @@ class PlexTab(tk.Frame):
         t.style_button(self._refresh_btn)
         self._refresh_btn.pack(side="right", padx=(0, 8))
 
+        scan_btn = tk.Button(hdr, text="⟳ Scan Libraries", command=self._open_scan_dialog)
+        t.style_button(scan_btn)
+        scan_btn.pack(side="right", padx=(0, 8))
+
         # Summary cards
         cards_row = tk.Frame(self, bg=t.bg)
         cards_row.pack(fill="x", padx=16, pady=(0, 8))
@@ -124,8 +128,10 @@ class PlexTab(tk.Frame):
     # FETCH
     # ---------------------------------------------------------
     def _fetch(self):
+        if getattr(self, "_fetching", False): return
         self._rc.cancel()
         self._refresh_btn.config(state="disabled", text="Loading…")
+        self._fetching = True
         threading.Thread(target=self._do_fetch, daemon=True).start()
 
     def _do_fetch(self):
@@ -151,6 +157,7 @@ class PlexTab(tk.Frame):
         except Exception as e:
             self.after(0, lambda err=str(e): self._show_error("Fetch failed: " + err[:80]))
         finally:
+            self._fetching = False
             self.after(0, lambda: self._refresh_btn.config(state="normal", text="⟳ Refresh"))
             self.after(0, self._rc.schedule)
 
@@ -297,6 +304,103 @@ class PlexTab(tk.Frame):
         kick_btn.pack(side="left")
 
     # ---------------------------------------------------------
+    # LIBRARY SCAN
+    # ---------------------------------------------------------
+    def _open_scan_dialog(self):
+        threading.Thread(target=self._fetch_sections_for_scan, daemon=True).start()
+
+    def _fetch_sections_for_scan(self):
+        cfg   = self.controller.config_manager
+        host  = cfg.plex_host
+        port  = cfg.plex_port
+        token = cfg.plex_token
+        if not token:
+            self.after(0, lambda: self._show_status("No Plex token configured.", self.theme.status_stopped))
+            return
+        try:
+            url = "http://{}:{}/library/sections".format(host, port)
+            req = urllib.request.Request(url, headers={
+                "X-Plex-Token": token, "Accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=10) as r:
+                data = json.loads(r.read())
+            sections = data.get("MediaContainer", {}).get("Directory", []) or []
+            if not isinstance(sections, list):
+                sections = [sections]
+            self.after(0, lambda s=sections: self._show_scan_dialog(s))
+        except Exception as e:
+            self.after(0, lambda err=str(e): self._show_status(
+                "Could not fetch libraries: " + err[:60], self.theme.status_stopped))
+
+    def _show_scan_dialog(self, sections):
+        t = self.theme
+        dlg = tk.Toplevel(self)
+        dlg.title("Scan Plex Libraries")
+        dlg.configure(bg=t.bg)
+        dlg.resizable(False, False)
+        dlg.grab_set()
+        dlg.transient(self)
+
+        tk.Label(dlg, text="Select libraries to scan:",
+                 bg=t.bg, fg=t.text, font=("Segoe UI Semibold", 11),
+                 padx=20, pady=12).pack(anchor="w")
+
+        checks_frame = tk.Frame(dlg, bg=t.bg, padx=20)
+        checks_frame.pack(fill="x")
+
+        vars_ = []
+        for sec in sections:
+            var = tk.BooleanVar(value=True)
+            vars_.append((var, sec.get("key", ""), sec.get("title", "Library")))
+            tk.Checkbutton(checks_frame, text=sec.get("title", "Library"),
+                           variable=var, bg=t.bg, fg=t.text,
+                           selectcolor=t.surface_dark,
+                           activebackground=t.bg, activeforeground=t.text,
+                           font=t.font_regular).pack(anchor="w", pady=2)
+
+        status_lbl = tk.Label(dlg, text="", bg=t.bg, fg=t.text_muted, font=t.font_small)
+        status_lbl.pack(pady=4)
+
+        def _do_scan():
+            selected = [(key, title) for var, key, title in vars_ if var.get()]
+            if not selected:
+                status_lbl.config(text="Nothing selected.", fg=t.yellow)
+                return
+            scan_btn.config(state="disabled", text="Scanning…")
+            threading.Thread(target=_worker, args=(selected,), daemon=True).start()
+
+        def _worker(selected):
+            cfg   = self.controller.config_manager
+            host  = cfg.plex_host
+            port  = cfg.plex_port
+            token = cfg.plex_token
+            ok = err = 0
+            for key, title in selected:
+                try:
+                    url = "http://{}:{}/library/sections/{}/refresh".format(host, port, key)
+                    req = urllib.request.Request(url, headers={"X-Plex-Token": token})
+                    urllib.request.urlopen(req, timeout=10).close()
+                    ok += 1
+                except Exception:
+                    err += 1
+            def _done():
+                msg = "Scan queued for {} librar{}.".format(ok, "ies" if ok != 1 else "y")
+                if err:
+                    msg += " ({} failed)".format(err)
+                status_lbl.config(text=msg, fg=t.status_running if not err else t.yellow)
+                self._show_status(msg)
+                dlg.after(2000, dlg.destroy)
+            self.after(0, _done)
+
+        btn_row = tk.Frame(dlg, bg=t.bg)
+        btn_row.pack(pady=12)
+        scan_btn = tk.Button(btn_row, text="Scan Selected", command=_do_scan)
+        t.style_button(scan_btn)
+        scan_btn.pack(side="left", padx=6)
+        tk.Button(btn_row, text="Cancel", command=dlg.destroy,
+                  bg=t.surface_dark, fg=t.text, relief="flat", bd=0,
+                  cursor="hand2").pack(side="left")
+
+    # ---------------------------------------------------------
     # KICK
     # ---------------------------------------------------------
     def _kick_session(self, session_id, username):
@@ -324,7 +428,11 @@ class PlexTab(tk.Frame):
     # HELPERS
     # ---------------------------------------------------------
     def _show_status(self, msg, color=None):
-        self._status_lbl.config(text=msg, fg=color or self.theme.text_muted)
+        t = self.theme
+        if msg.endswith("…") or msg.endswith("..."):
+            self._status_lbl.config(text=msg, bg=t.blue, fg="#ffffff")
+            return
+        self._status_lbl.config(text=msg, bg=t.surface_dark, fg=color or t.text_muted)
 
     def _show_error(self, msg):
         self._show_status(msg, self.theme.status_stopped)

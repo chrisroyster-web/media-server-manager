@@ -190,54 +190,61 @@ class ProwlarrTab(tk.Frame):
     # REFRESH
     # =========================================================
     def refresh(self):
+        if getattr(self, "_fetching", False): return
         self._rc.cancel()
         cfg = self.controller.config_manager
-        if not cfg.prowlarr_apikey:
+        srv = (cfg.get_active_server() or {}).get("settings", {})
+        self._active_srv = srv
+        if not srv.get("prowlarr_apikey", ""):
             self._status.config(
                 text="No API key — add it in Settings > Prowlarr",
-                fg=self.theme.yellow)
+                bg=self.theme.surface_dark, fg=self.theme.yellow)
             return
-        self._status.config(text="Loading…", fg=self.theme.text_muted)
+        self._status.config(text="Loading…", bg=self.theme.blue, fg="#ffffff")
+        self._fetching = True
         threading.Thread(target=self._fetch, daemon=True).start()
 
     def _fetch(self):
-        cfg  = self.controller.config_manager
-        host = cfg.prowlarr_host
-        port = cfg.prowlarr_port
-        key  = cfg.prowlarr_apikey
-
         try:
-            indexers = _api(host, port, key, "indexer")
-        except Exception as e:
-            self.after(0, lambda: self._status.config(
-                text="Cannot reach Prowlarr: {}".format(e),
-                fg=self.theme.status_stopped))
-            return
+            srv  = getattr(self, "_active_srv", {})
+            host = srv.get("prowlarr_host", "localhost")
+            port = srv.get("prowlarr_port", "9797")
+            key  = srv.get("prowlarr_apikey", "")
 
-        try:
-            stats_list = _api(host, port, key, "indexerstats")
-            # indexerstats returns {"indexers": [...], "userAgents": [...]}
-            stats_by_id = {s["indexerId"]: s
-                           for s in stats_list.get("indexers", [])}
-        except Exception:
-            stats_by_id = {}
+            try:
+                indexers = _api(host, port, key, "indexer")
+            except Exception as e:
+                self.after(0, lambda: self._status.config(
+                    text="Cannot reach Prowlarr: {}".format(e),
+                    bg=self.theme.surface_dark, fg=self.theme.status_stopped))
+                return
 
-        try:
-            history = _api(host, port, key, "history?pageSize=50&sortKey=date&sortDir=desc")
-            hist_records = history.get("records", [])
-        except Exception:
-            hist_records = []
+            try:
+                stats_list = _api(host, port, key, "indexerstats")
+                # indexerstats returns {"indexers": [...], "userAgents": [...]}
+                stats_by_id = {s["indexerId"]: s
+                               for s in stats_list.get("indexers", [])}
+            except Exception:
+                stats_by_id = {}
 
-        try:
-            health = _api(host, port, key, "health")
-        except Exception:
-            health = []
+            try:
+                history = _api(host, port, key, "history?pageSize=50&sortKey=date&sortDir=desc")
+                hist_records = history.get("records", [])
+            except Exception:
+                hist_records = []
 
-        self.after(0, lambda: self._populate(indexers, stats_by_id,
-                                              hist_records, health))
-        self.after(0, lambda: self._last_lbl.config(
-            text="Updated {}".format(time.strftime("%H:%M"))))
-        self.after(0, self._rc.schedule)
+            try:
+                health = _api(host, port, key, "health")
+            except Exception:
+                health = []
+
+            self.after(0, lambda: self._populate(indexers, stats_by_id,
+                                                  hist_records, health))
+            self.after(0, lambda: self._last_lbl.config(
+                text="Updated {}".format(time.strftime("%H:%M"))))
+            self.after(0, self._rc.schedule)
+        finally:
+            self._fetching = False
 
     # =========================================================
     # POPULATE
@@ -323,29 +330,31 @@ class ProwlarrTab(tk.Frame):
         self._status.config(
             text="{} indexer{} | {} enabled | {} grabs total".format(
                 n, "s" if n != 1 else "", len(enabled), total_grabs),
-            fg=t.status_stopped if failing else t.status_running)
+            bg=t.surface_dark, fg=t.status_stopped if failing else t.status_running)
 
     # =========================================================
     # TEST ALL
     # =========================================================
     def _test_all(self):
-        cfg = self.controller.config_manager
-        if not cfg.prowlarr_apikey:
+        srv = getattr(self, "_active_srv", {})
+        if not srv.get("prowlarr_apikey", ""):
             return
         self._test_btn.config(state="disabled", text="Testing…")
-        self._status.config(text="Testing all indexers…", fg=self.theme.yellow)
+        self._status.config(text="Testing all indexers…", bg=self.theme.blue, fg="#ffffff")
 
         def _run():
             try:
-                _api_post(cfg.prowlarr_host, cfg.prowlarr_port,
-                          cfg.prowlarr_apikey, "indexer/testall")
+                _api_post(srv.get("prowlarr_host", "localhost"),
+                          srv.get("prowlarr_port", "9797"),
+                          srv.get("prowlarr_apikey", ""), "indexer/testall")
                 self.after(0, lambda: self._status.config(
-                    text="Test complete — refreshing…", fg=self.theme.status_running))
+                    text="Test complete — refreshing…",
+                    bg=self.theme.surface_dark, fg=self.theme.status_running))
                 self.after(500, self.refresh)
             except Exception as e:
                 self.after(0, lambda: self._status.config(
                     text="Test failed: {}".format(e),
-                    fg=self.theme.status_stopped))
+                    bg=self.theme.surface_dark, fg=self.theme.status_stopped))
             finally:
                 self.after(0, lambda: self._test_btn.config(
                     state="normal", text="Test All Indexers"))

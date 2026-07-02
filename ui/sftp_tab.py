@@ -526,9 +526,9 @@ class SFTPTab(tk.Frame):
     # STATUS
     # =========================================================
     def _set_status(self, text, level="info"):
-        color = {
-            "info":    self.theme.text_muted,
-            "success": self.theme.status_running,
-            "error":   self.theme.status_stopped,
-        }.get(level, self.theme.text_muted)
-        self._status_lbl.config(text=text, fg=color)
+        t = self.theme
+        if text.endswith("…") or text.endswith("..."):
+            self._status_lbl.config(text=text, bg=t.blue, fg="#ffffff")
+            return
+        color = {"info": t.text_muted, "success": t.status_running, "error": t.status_stopped}.get(level, t.text_muted)
+        self._status_lbl.config(text=text, bg=t.surface_dark, fg=color)

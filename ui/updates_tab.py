@@ -46,6 +46,12 @@ class UpdatesTab(tk.Frame):
         apt_hdr.pack(fill="x", padx=16, pady=(4, 2))
         tk.Label(apt_hdr, text="System Packages  (apt)",
                  bg=t.bg, fg=t.text, font=t.font_title).pack(side="left")
+        self._dist_btn = tk.Button(apt_hdr, text="⬆⬆ Full Upgrade (dist)",
+                                    command=lambda: self._run_upgrade(dist=True))
+        t.style_button(self._dist_btn)
+        self._dist_btn.configure(fg=t.status_stopped)
+        self._dist_btn.pack(side="right", padx=(0, 6))
+
         self._upgrade_btn = tk.Button(apt_hdr, text="⬆  Run apt upgrade",
                                        command=self._run_upgrade)
         t.style_button(self._upgrade_btn)
@@ -117,8 +123,8 @@ class UpdatesTab(tk.Frame):
             tree.heading(col, text=text, anchor=anchor)
             tree.column(col, width=width, minwidth=50,
                         anchor=anchor, stretch=(width > 150))
-        tree.tag_configure("odd",      background=t.surface_dark)
-        tree.tag_configure("even",     background=t.card_bg)
+        tree.tag_configure("odd",      background=t.surface_dark, foreground=t.text)
+        tree.tag_configure("even",     background=t.card_bg,      foreground=t.text)
         tree.tag_configure("update",   foreground=t.yellow)
         tree.tag_configure("current",  foreground=t.status_running)
         tree.tag_configure("unknown",  foreground=t.text_muted)
@@ -133,6 +139,7 @@ class UpdatesTab(tk.Frame):
     # REFRESH
     # =========================================================
     def _refresh(self):
+        if getattr(self, "_fetching", False): return
         if not self.controller.ssh.connected:
             self._set_status("Not connected", "error")
             return
@@ -140,63 +147,67 @@ class UpdatesTab(tk.Frame):
         self._upgrade_btn.config(state="disabled")
         self._set_status("Checking for updates…")
         self._log("Checking for updates…\n")
+        self._fetching = True
         threading.Thread(target=self._fetch, daemon=True).start()
 
     def _fetch(self):
-        ssh = self.controller.ssh
+        try:
+            ssh = self.controller.ssh
 
-        # 1. apt-get update (quiet) then list upgradable
-        self._log("Running apt-get update…\n", "warn")
-        ssh.run("sudo apt-get update -qq 2>/dev/null")
+            # 1. apt-get update (quiet) then list upgradable
+            self._log("Running apt-get update…\n", "warn")
+            ssh.run_sudo("apt-get update -qq")
 
-        out, _, _ = ssh.run(
-            "apt list --upgradable 2>/dev/null | grep -v '^Listing'")
-        apt_packages = []
-        for line in out.strip().splitlines():
-            # Format: package/repo version arch [upgradable from: old]
-            try:
-                parts   = line.split()
-                pkg     = parts[0].split("/")[0]
-                avail   = parts[1]
-                arch    = parts[2]
-                old_ver = "--"
-                if "upgradable from:" in line:
-                    old_ver = line.split("upgradable from:")[-1].strip().rstrip("]")
-                apt_packages.append((pkg, old_ver, avail, arch))
-            except Exception:
-                continue
+            out, _, _ = ssh.run(
+                "apt list --upgradable 2>/dev/null | grep -v '^Listing'")
+            apt_packages = []
+            for line in out.strip().splitlines():
+                # Format: package/repo version arch [upgradable from: old]
+                try:
+                    parts   = line.split()
+                    pkg     = parts[0].split("/")[0]
+                    avail   = parts[1]
+                    arch    = parts[2]
+                    old_ver = "--"
+                    if "upgradable from:" in line:
+                        old_ver = line.split("upgradable from:")[-1].strip().rstrip("]")
+                    apt_packages.append((pkg, old_ver, avail, arch))
+                except Exception:
+                    continue
 
-        # 2. Docker image check — pull --dry-run not available everywhere,
-        # so we compare local image digest to registry via docker pull output
-        docker_cfg = self.controller.config_manager.get_docker()
-        docker_results = []
-        for name, data in docker_cfg.items():
-            container = data.get("container", "")
-            if not container:
-                continue
-            # Get current image name
-            img_out, _, _ = ssh.run(
-                "docker inspect --format '{{.Config.Image}}' " + container + " 2>/dev/null")
-            image = img_out.strip() or container
-            # Pull without extracting — just check if "Status: Image is up to date" or "newer"
-            pull_out, _, pull_code = ssh.run(
-                "sudo docker pull {} 2>&1 | tail -1".format(image))
-            pull_line = pull_out.strip()
-            if "up to date" in pull_line.lower():
-                status = "Up to date"
-                tag    = "current"
-            elif "newer" in pull_line.lower() or "pull complete" in pull_line.lower():
-                status = "Updated ✓"
-                tag    = "update"
-            elif pull_code != 0:
-                status = "Check failed"
-                tag    = "unknown"
-            else:
-                status = pull_line[:30] or "Unknown"
-                tag    = "unknown"
-            docker_results.append((name, image, status, tag))
+            # 2. Docker image check — pull --dry-run not available everywhere,
+            # so we compare local image digest to registry via docker pull output
+            docker_cfg = self.controller.config_manager.get_docker()
+            docker_results = []
+            for name, data in docker_cfg.items():
+                container = data.get("container", "")
+                if not container:
+                    continue
+                # Get current image name
+                img_out, _, _ = ssh.run(
+                    "docker inspect --format '{{.Config.Image}}' " + container + " 2>/dev/null")
+                image = img_out.strip() or container
+                # Pull without extracting — just check if "Status: Image is up to date" or "newer"
+                pull_out, _, pull_code = ssh.run_sudo(
+                    "docker pull {}".format(image))
+                pull_line = pull_out.strip()
+                if "up to date" in pull_line.lower():
+                    status = "Up to date"
+                    tag    = "current"
+                elif "newer" in pull_line.lower() or "pull complete" in pull_line.lower():
+                    status = "Updated ✓"
+                    tag    = "update"
+                elif pull_code != 0:
+                    status = "Check failed"
+                    tag    = "unknown"
+                else:
+                    status = pull_line[:30] or "Unknown"
+                    tag    = "unknown"
+                docker_results.append((name, image, status, tag))
 
-        self.after(0, lambda a=apt_packages, d=docker_results: self._populate(a, d))
+            self.after(0, lambda a=apt_packages, d=docker_results: self._populate(a, d))
+        finally:
+            self._fetching = False
 
     # =========================================================
     # POPULATE
@@ -239,6 +250,7 @@ class UpdatesTab(tk.Frame):
                      fg=color, font=("Segoe UI", 18, "bold")).pack()
 
         self._upgrade_btn.config(state="normal" if apt_count else "disabled")
+        self._dist_btn.config(state="normal")
         self._refresh_btn.config(state="normal", text="⟳ Check Now")
         self._last_lbl.config(text="Last check: " + time.strftime("%H:%M:%S"))
         self._set_status("{} apt package{} upgradable  —  {} Docker image{} checked".format(
@@ -249,26 +261,35 @@ class UpdatesTab(tk.Frame):
     # =========================================================
     # APT UPGRADE
     # =========================================================
-    def _run_upgrade(self):
-        if not messagebox.askyesno(
-                "Run apt upgrade",
-                "This will run:\n\n  sudo apt-get upgrade -y\n\non the remote server.\n\nContinue?",
-                parent=self):
+    def _run_upgrade(self, dist=False):
+        cmd   = "dist-upgrade" if dist else "upgrade"
+        title = "Run apt {}".format(cmd)
+        msg   = (
+            "This will run:\n\n"
+            "  sudo apt-get {} -y\n\n"
+            "on the remote server.{}Continue?"
+        ).format(
+            cmd,
+            "\n\ndist-upgrade may install or remove packages\nto satisfy dependencies.\n\n" if dist else "\n\n"
+        )
+        if not messagebox.askyesno(title, msg, parent=self):
             return
         self._upgrade_btn.config(state="disabled", text="Upgrading…")
-        self._log("\n--- Running apt-get upgrade ---\n", "warn")
-        threading.Thread(target=self._do_upgrade, daemon=True).start()
+        self._dist_btn.config(state="disabled")
+        self._log("\n--- Running apt-get {} ---\n".format(cmd), "warn")
+        threading.Thread(target=self._do_upgrade, args=(cmd,), daemon=True).start()
 
-    def _do_upgrade(self):
+    def _do_upgrade(self, cmd="upgrade"):
         ssh = self.controller.ssh
-        out, err, code = ssh.run(
-            "sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y 2>&1")
+        out, err, code = ssh.run_sudo(
+            "DEBIAN_FRONTEND=noninteractive apt-get {} -y".format(cmd))
         def _done(out=out, code=code):
             self._log(out + "\n", "ok" if code == 0 else "err")
             self._log("Exit code: {}\n".format(code),
                       "ok" if code == 0 else "err")
             self._upgrade_btn.config(state="normal", text="⬆  Run apt upgrade")
-            self._set_status("Upgrade complete (exit {})".format(code),
+            self._dist_btn.config(state="normal")
+            self._set_status("{} complete (exit {})".format(cmd, code),
                              "ok" if code == 0 else "error")
         self.after(0, _done)
 
@@ -284,7 +305,9 @@ class UpdatesTab(tk.Frame):
         self.after(0, _do)
 
     def _set_status(self, text, level="info"):
-        colors = {"info": self.theme.text_muted,
-                  "error": self.theme.status_stopped,
-                  "ok": self.theme.status_running}
-        self._status_lbl.config(text=text, fg=colors.get(level, self.theme.text_muted))
+        t = self.theme
+        if text.endswith("…") or text.endswith("..."):
+            self._status_lbl.config(text=text, bg=t.blue, fg="#ffffff")
+            return
+        colors = {"info": t.text_muted, "error": t.status_stopped, "ok": t.status_running}
+        self._status_lbl.config(text=text, bg=t.surface_dark, fg=colors.get(level, t.text_muted))

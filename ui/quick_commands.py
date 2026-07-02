@@ -1,6 +1,7 @@
 # ui/quick_commands.py
 
 import tkinter as tk
+from tkinter import messagebox
 import threading
 import time
 
@@ -60,6 +61,10 @@ class QuickCommandsPanel(tk.Frame):
             ("Complete Downloads",  "ls -lh /opt/media/downloads/complete/"),
             ("SABnzbd Status",      "systemctl status sabnzbdplus --no-pager"),
         ],
+        "Server Control": [
+            ("Reboot Server",   "sudo reboot"),
+            ("Shutdown Server", "sudo shutdown -h now"),
+        ],
     }
 
     CATEGORY_COLORS = {
@@ -70,6 +75,7 @@ class QuickCommandsPanel(tk.Frame):
         "Services":         "purple",
         "Security":         "red",
         "Downloads":        "blue",
+        "Server Control":   "red",
     }
 
     CARD_MIN_WIDTH = 280
@@ -280,10 +286,20 @@ class QuickCommandsPanel(tk.Frame):
     # RUN COMMAND (THREADED)
     # ---------------------------------------------------------
     def _run_command(self, label, cmd):
+        if any(w in cmd for w in ("shutdown", "reboot", "poweroff")):
+            if not messagebox.askyesno(
+                    f"Confirm: {label}",
+                    f"This will {label.lower()}.\n\nAre you sure?",
+                    parent=self):
+                return
         self._log("$ " + cmd, "cmd")
 
         def worker():
-            out, err, code = self.controller.ssh.run(cmd)
+            raw = cmd.strip()
+            if raw.startswith("sudo "):
+                out, err, code = self.controller.ssh.run_sudo(raw[5:])
+            else:
+                out, err, code = self.controller.ssh.run(raw)
 
             self._append("exit code: " + str(code) + "\n", "info")
 

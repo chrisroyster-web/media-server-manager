@@ -60,6 +60,7 @@ class ArrTab(tk.Frame):
         self.controller   = controller
         self.theme        = controller.theme
         self._missing_ids = {}   # tree iid -> (app, item_id) for Search Now
+        self._cal_days    = tk.IntVar(value=30)
         self._build_ui()
 
     # =========================================================
@@ -119,6 +120,7 @@ class ArrTab(tk.Frame):
         self._build_missing_tree()
         self._build_upcoming_tree()
         self._build_missing_toolbar()
+        self._build_upcoming_toolbar()
 
         # Status bar
         self._status_lbl = tk.Label(self, text="Configure API keys in the Config tab",
@@ -148,8 +150,8 @@ class ArrTab(tk.Frame):
             tree.heading(col, text=text, anchor=anchor)
             tree.column(col, width=width, minwidth=40,
                         anchor=anchor, stretch=(width > 150))
-        tree.tag_configure("odd",       background=t.surface_dark)
-        tree.tag_configure("even",      background=t.card_bg)
+        tree.tag_configure("odd",       background=t.surface_dark, foreground=t.text)
+        tree.tag_configure("even",      background=t.card_bg,      foreground=t.text)
         tree.tag_configure("sonarr",    foreground=t.cyan)
         tree.tag_configure("radarr",    foreground=t.purple)
         tree.tag_configure("warning",   foreground=t.yellow)
@@ -217,7 +219,7 @@ class ArrTab(tk.Frame):
             self.after(3000, lambda: self._search_status.config(text=""))
             return
 
-        cfg = self.controller.config_manager
+        srv = getattr(self, "_active_srv", {})
         ok = err = 0
 
         def worker():
@@ -226,9 +228,12 @@ class ArrTab(tk.Frame):
                 if iid not in self._missing_ids:
                     continue
                 app, item_id = self._missing_ids[iid]
-                host    = cfg.sonarr_host  if app == "sonarr" else cfg.radarr_host
-                port    = cfg.sonarr_port  if app == "sonarr" else cfg.radarr_port
-                apikey  = cfg.sonarr_apikey if app == "sonarr" else cfg.radarr_apikey
+                host   = (srv.get("sonarr_host", "localhost") if app == "sonarr"
+                          else srv.get("radarr_host", "localhost"))
+                port   = (srv.get("sonarr_port", "8989") if app == "sonarr"
+                          else srv.get("radarr_port", "7878"))
+                apikey = (srv.get("sonarr_apikey", "") if app == "sonarr"
+                          else srv.get("radarr_apikey", ""))
                 if app == "sonarr":
                     body = {"name": "EpisodeSearch", "episodeIds": [item_id]}
                 else:
@@ -251,6 +256,27 @@ class ArrTab(tk.Frame):
         threading.Thread(target=worker, daemon=True).start()
         self._search_status.config(text="Searching…", fg=self.theme.text_muted)
 
+    def _build_upcoming_toolbar(self):
+        t = self.theme
+        bar = tk.Frame(self._upcoming_frame, bg=t.bg)
+        bar.pack(fill="x", pady=(4, 0), before=self._upcoming_tree)
+
+        tk.Label(bar, text="Look ahead:", bg=t.bg, fg=t.text_muted,
+                 font=t.font_small).pack(side="left", padx=(8, 4))
+
+        om = tk.OptionMenu(bar, self._cal_days, 30, 60, 90, 120,
+                           command=lambda _: self._refresh())
+        om.config(bg=t.surface_light, fg=t.text, activebackground=t.surface,
+                  activeforeground=t.text, relief="flat", bd=0,
+                  font=t.font_small, highlightthickness=0)
+        om["menu"].config(bg=t.surface_light, fg=t.text,
+                          activebackground=t.blue, activeforeground=t.text,
+                          font=t.font_small)
+        om.pack(side="left")
+
+        tk.Label(bar, text="days", bg=t.bg, fg=t.text_muted,
+                 font=t.font_small).pack(side="left", padx=(2, 0))
+
     def _build_upcoming_tree(self):
         cols = ("app", "title", "airdate", "network", "quality")
         hdgs = [
@@ -266,40 +292,52 @@ class ArrTab(tk.Frame):
     # REFRESH
     # =========================================================
     def _refresh(self):
+        if getattr(self, "_fetching", False): return
         self._refresh_btn.config(state="disabled", text="Loading…")
         self._set_status("Fetching data…")
+        self._fetching = True
         threading.Thread(target=self._fetch, daemon=True).start()
 
     def _fetch(self):
-        cfg = self.controller.config_manager
-        results = {"sonarr": {}, "radarr": {}, "errors": []}
+        try:
+            cfg = self.controller.config_manager
+            srv = (cfg.get_active_server() or {}).get("settings", {})
+            self._active_srv = srv
+            results = {"sonarr": {}, "radarr": {}, "errors": []}
 
-        for app, host, port, apikey in [
-            ("sonarr", cfg.sonarr_host, cfg.sonarr_port, cfg.sonarr_apikey),
-            ("radarr", cfg.radarr_host, cfg.radarr_port, cfg.radarr_apikey),
-        ]:
-            if not apikey:
-                results["errors"].append("{}: no API key configured".format(app))
-                continue
-            try:
-                results[app]["queue"]    = _api_get(host, port, apikey, "queue?pageSize=50")
-                results[app]["missing"]  = _api_get(host, port, apikey,
-                    "wanted/missing?pageSize=30&sortKey=airDateUtc&sortDir=desc")
-                results[app]["calendar"] = _api_get(host, port, apikey,
-                    "calendar?unmonitored=false")
-                # Pre-fetch series list for Sonarr so we can resolve titles by ID.
-                # The wanted/missing and calendar endpoints don't always embed the
-                # full series object, leaving series.title empty.
-                if app == "sonarr":
-                    series_list = _api_get(host, port, apikey, "series")
-                    results[app]["series_map"] = {
-                        s["id"]: s["title"] for s in series_list
-                        if isinstance(s, dict) and "id" in s and "title" in s
-                    }
-            except Exception as e:
-                results["errors"].append("{}: {}".format(app, str(e)))
+            for app, host, port, apikey in [
+                ("sonarr", srv.get("sonarr_host", "localhost"),
+                 srv.get("sonarr_port", "8989"), srv.get("sonarr_apikey", "")),
+                ("radarr", srv.get("radarr_host", "localhost"),
+                 srv.get("radarr_port", "7878"), srv.get("radarr_apikey", "")),
+            ]:
+                if not apikey:
+                    results["errors"].append("{}: no API key configured".format(app))
+                    continue
+                try:
+                    results[app]["queue"]    = _api_get(host, port, apikey, "queue?pageSize=50")
+                    results[app]["missing"]  = _api_get(host, port, apikey,
+                        "wanted/missing?pageSize=30&sortKey=airDateUtc&sortDir=desc")
+                    today = time.strftime("%Y-%m-%d")
+                    days  = self._cal_days.get()
+                    end   = time.strftime("%Y-%m-%d", time.localtime(time.time() + days * 86400))
+                    results[app]["calendar"] = _api_get(host, port, apikey,
+                        f"calendar?unmonitored=false&start={today}&end={end}")
+                    # Pre-fetch series list for Sonarr so we can resolve titles by ID.
+                    # The wanted/missing and calendar endpoints don't always embed the
+                    # full series object, leaving series.title empty.
+                    if app == "sonarr":
+                        series_list = _api_get(host, port, apikey, "series")
+                        results[app]["series_map"] = {
+                            s["id"]: s["title"] for s in series_list
+                            if isinstance(s, dict) and "id" in s and "title" in s
+                        }
+                except Exception as e:
+                    results["errors"].append("{}: {}".format(app, str(e)))
 
-        self.after(0, lambda r=results: self._populate(r))
+            self.after(0, lambda r=results: self._populate(r))
+        finally:
+            self._fetching = False
 
     # =========================================================
     # POPULATE
@@ -446,4 +484,8 @@ class ArrTab(tk.Frame):
     # HELPERS
     # =========================================================
     def _set_status(self, msg):
-        self._status_lbl.config(text=msg)
+        t = self.theme
+        if msg.endswith("…") or msg.endswith("..."):
+            self._status_lbl.config(text=msg, bg=t.blue, fg="#ffffff")
+        else:
+            self._status_lbl.config(text=msg, bg=t.surface_dark, fg=t.text_muted)

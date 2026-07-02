@@ -4,6 +4,8 @@ vnstat bandwidth history tab.
 Shows daily/monthly traffic totals per interface with a canvas bar chart.
 """
 
+import json
+import datetime
 import tkinter as tk
 from tkinter import ttk
 import threading
@@ -118,22 +120,27 @@ class BandwidthTab(tk.Frame):
     # REFRESH
     # =========================================================
     def refresh(self):
+        if getattr(self, "_fetching", False): return
         self._rc.cancel()
         if not self.controller.ssh.connected:
             self._status.config(text="Not connected", fg=self.theme.status_stopped)
             return
-        self._status.config(text="Loading bandwidth data…", fg=self.theme.text_muted)
+        self._status.config(text="Loading bandwidth data…", bg=self.theme.blue, fg="#ffffff")
+        self._fetching = True
         threading.Thread(target=self._fetch, daemon=True).start()
 
     def _fetch(self):
-        ssh = self.controller.ssh
-        out, _, _ = ssh.run("command -v vnstat 2>/dev/null && echo FOUND")
-        has_vnstat = "FOUND" in (out or "")
+        try:
+            ssh = self.controller.ssh
+            out, _, _ = ssh.run("command -v vnstat 2>/dev/null && echo FOUND")
+            has_vnstat = "FOUND" in (out or "")
 
-        if has_vnstat:
-            self._fetch_vnstat(ssh)
-        else:
-            self._fetch_procnet(ssh)
+            if has_vnstat:
+                self._fetch_vnstat(ssh)
+            else:
+                self._fetch_procnet(ssh)
+        finally:
+            self._fetching = False
 
     def _fetch_vnstat(self, ssh):
         iface_out, _, _ = ssh.run("vnstat --iflist 2>/dev/null")
@@ -146,7 +153,6 @@ class BandwidthTab(tk.Frame):
 
         results = {}
         for iface in ifaces[:8]:
-            import json
             j_out, _, j_code = ssh.run("vnstat -i {} --json 2>/dev/null".format(iface))
             if j_code == 0 and j_out and j_out.strip():
                 try:
@@ -157,7 +163,7 @@ class BandwidthTab(tk.Frame):
         if not results:
             plain, _, _ = ssh.run("vnstat 2>/dev/null")
             self.after(0, lambda t=(plain or "No vnstat data"):
-                self._status.config(text=t[:200], fg=self.theme.text_muted))
+                self._status.config(text=t[:200], bg=self.theme.surface_dark, fg=self.theme.text_muted))
             return
 
         self.after(0, lambda: self._populate(results, list(results.keys())))
@@ -171,7 +177,7 @@ class BandwidthTab(tk.Frame):
         if not raw:
             self.after(0, lambda: self._status.config(
                 text="vnstat not installed. Install with: sudo apt install vnstat",
-                fg=self.theme.status_stopped))
+                bg=self.theme.surface_dark, fg=self.theme.status_stopped))
             return
 
         # /proc/net/dev columns: iface rx_bytes ... tx_bytes ...
@@ -192,8 +198,6 @@ class BandwidthTab(tk.Frame):
             rx_bytes = int(fields[0])
             tx_bytes = int(fields[8])
             ifaces.append(iface)
-            # Build a single synthetic "today" entry so _draw() works
-            import datetime
             today = datetime.date.today()
             results[iface] = {
                 "traffic": {
@@ -213,7 +217,7 @@ class BandwidthTab(tk.Frame):
         if not results:
             self.after(0, lambda: self._status.config(
                 text="No interface data found",
-                fg=self.theme.status_stopped))
+                bg=self.theme.surface_dark, fg=self.theme.status_stopped))
             return
 
         def _show():
@@ -221,7 +225,7 @@ class BandwidthTab(tk.Frame):
             self._status.config(
                 text="Live totals since boot (install vnstat for history)  |  "
                      "sudo apt install vnstat",
-                fg=self.theme.yellow)
+                bg=self.theme.surface_dark, fg=self.theme.yellow)
             self._last_lbl.config(text="Updated {}".format(time.strftime("%H:%M")))
 
         self.after(0, _show)
@@ -239,7 +243,7 @@ class BandwidthTab(tk.Frame):
         self._draw()
         self._status.config(
             text="vnstat data for: {}".format(", ".join(self._ifaces)),
-            fg=self.theme.text_muted)
+            bg=self.theme.surface_dark, fg=self.theme.text_muted)
 
     def _draw(self):
         t = self.theme
@@ -249,8 +253,6 @@ class BandwidthTab(tk.Frame):
             return
 
         idata = self._data[iface]
-        # Extract entries from JSON
-        import json
         entries = []
         if mode == "daily":
             days = idata.get("traffic", {}).get("day", [])

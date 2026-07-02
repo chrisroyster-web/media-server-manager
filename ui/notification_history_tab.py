@@ -33,6 +33,7 @@ class NotificationHistoryTab(tk.Frame):
         self._filter_var = tk.StringVar()
         self._level_var  = tk.StringVar(value="All")
         self._build_ui()
+        self._load_from_db()
 
     # =========================================================
     # BUILD
@@ -114,6 +115,28 @@ class NotificationHistoryTab(tk.Frame):
         self._canvas.itemconfig(self._canvas_win, width=e.width)
 
     # =========================================================
+    # LOAD FROM SQLITE (called once on init)
+    # =========================================================
+    def _load_from_db(self):
+        try:
+            rows = self.controller.metrics_store.get_notifications(
+                limit=self.MAX_ENTRIES)
+            self._entries = [
+                {
+                    "ts":      time.strftime("%H:%M:%S", time.localtime(r["ts"])),
+                    "date":    time.strftime("%Y-%m-%d",  time.localtime(r["ts"])),
+                    "level":   r["level"],
+                    "title":   r["title"],
+                    "message": r["message"],
+                    "server":  r.get("server_id", ""),
+                }
+                for r in rows
+            ]
+            self._render()
+        except Exception:
+            pass
+
+    # =========================================================
     # ADD ENTRY (called from main.show_toast)
     # =========================================================
     def add_entry(self, title, message, level="info"):
@@ -123,6 +146,7 @@ class NotificationHistoryTab(tk.Frame):
             "level":   level,
             "title":   title,
             "message": message or "",
+            "server":  "",
         })
         # Cap list size
         if len(self._entries) > self.MAX_ENTRIES:
@@ -194,12 +218,16 @@ class NotificationHistoryTab(tk.Frame):
                      font=t.font_small, anchor="w",
                      wraplength=600, justify="left").pack(fill="x", pady=(2, 0))
 
-        # Timestamp
-        ts_text = "{} {}".format(entry["date"], entry["ts"])
-        tk.Label(row, text=ts_text,
-                 bg=t.card_bg, fg=t.text_dim,
-                 font=t.font_small, anchor="e").pack(
-                     side="right", padx=(8, 12))
+        # Timestamp + server
+        ts_text = "{} {}".format(entry.get("date", ""), entry.get("ts", ""))
+        right = tk.Frame(row, bg=t.card_bg)
+        right.pack(side="right", padx=(8, 12))
+        tk.Label(right, text=ts_text, bg=t.card_bg, fg=t.text_dim,
+                 font=t.font_small, anchor="e").pack(anchor="e")
+        server = entry.get("server", "")
+        if server:
+            tk.Label(right, text=server, bg=t.card_bg, fg=t.text_dim,
+                     font=t.font_small, anchor="e").pack(anchor="e")
 
         # Mousewheel on row children
         def _mw(e):
@@ -212,4 +240,8 @@ class NotificationHistoryTab(tk.Frame):
     # =========================================================
     def _clear(self):
         self._entries.clear()
+        try:
+            self.controller.metrics_store.clear_notifications()
+        except Exception:
+            pass
         self._render()

@@ -29,10 +29,7 @@ class DockerManager:
         out, err, code = self.ssh.run(cmd)
 
         if code != 0:
-            # Inspect failed — fall back to name hint for well-known schedulers
-            if "watchtower" in container_name.lower():
-                return "scheduled"
-            return "unknown"
+            return "not_installed"
 
         status = out.strip()
 
@@ -123,3 +120,69 @@ class DockerManager:
         if code != 0:
             return []
         return [line.strip() for line in out.splitlines() if line.strip()]
+
+    # ---------------------------------------------------------
+    # PULL
+    # ---------------------------------------------------------
+    def pull(self, container_name):
+        """Pull the latest version of the image used by a container."""
+        if not self.ssh.connected:
+            return "", "Not connected", 1
+        out, _, code = self.ssh.run(
+            f"docker inspect -f '{{{{.Config.Image}}}}' {container_name} 2>/dev/null")
+        if code != 0 or not out.strip():
+            return "", f"Cannot determine image for {container_name}", 1
+        image = out.strip()
+        return self.ssh.run(f"docker pull {image} 2>&1")
+
+    # ---------------------------------------------------------
+    # PRUNE
+    # ---------------------------------------------------------
+    def prune_images(self):
+        """Remove all dangling (unused) images."""
+        if not self.ssh.connected:
+            return "", "Not connected", 1
+        return self.ssh.run("docker image prune -f 2>&1")
+
+    def prune_volumes(self):
+        """Remove all unused volumes."""
+        if not self.ssh.connected:
+            return "", "Not connected", 1
+        return self.ssh.run("docker volume prune -f 2>&1")
+
+    # ---------------------------------------------------------
+    # LIST IMAGES
+    # ---------------------------------------------------------
+    def list_images(self):
+        """Return list of dicts describing local Docker images, including layer counts."""
+        if not self.ssh.connected:
+            return []
+        out, _, _ = self.ssh.run(
+            "docker images --format "
+            "'{{.Repository}}|{{.Tag}}|{{.ID}}|{{.Size}}|{{.CreatedSince}}' 2>/dev/null")
+        images = []
+        for line in out.strip().splitlines():
+            parts = line.split("|")
+            if len(parts) == 5:
+                images.append({
+                    "repo": parts[0], "tag": parts[1], "id": parts[2],
+                    "size": parts[3], "created": parts[4], "layers": "?",
+                })
+        if not images:
+            return images
+        # Fetch layer counts with a single inspect call across all image IDs
+        ids_str = " ".join(img["id"] for img in images)
+        layer_out, _, _ = self.ssh.run(
+            f"docker image inspect {ids_str} "
+            "--format '{{{{.Id}}}}|{{{{len .RootFS.Layers}}}}' 2>/dev/null")
+        layer_map = {}
+        for line in layer_out.strip().splitlines():
+            parts = line.split("|")
+            if len(parts) == 2:
+                full_id = parts[0]
+                # docker images shows first 12 hex chars; inspect gives sha256:<64-hex>
+                short_id = full_id[7:19] if full_id.startswith("sha256:") else full_id[:12]
+                layer_map[short_id] = parts[1]
+        for img in images:
+            img["layers"] = layer_map.get(img["id"], "?")
+        return images

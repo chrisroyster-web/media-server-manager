@@ -6,7 +6,7 @@ and lets you run up/down/pull/restart per stack.
 """
 
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox
 import threading
 import time
 
@@ -72,7 +72,7 @@ class ComposeTab(tk.Frame):
             lambda e: canvas.itemconfig(self._win, width=e.width))
         self._body.bind("<Configure>",
             lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.bind_all("<MouseWheel>",
+        canvas.bind("<MouseWheel>",
             lambda e: canvas.yview_scroll(int(-1*(e.delta/120)), "units"))
 
         self._canvas = canvas
@@ -81,37 +81,42 @@ class ComposeTab(tk.Frame):
     # REFRESH
     # ------------------------------------------------------------------
     def refresh(self):
-        self._status_lbl.config(text="Scanning…")
+        if getattr(self, "_fetching", False): return
+        self._status_lbl.config(text="Scanning…", bg=self.theme.blue, fg="#ffffff")
         for f in self._stack_frames:
             f.destroy()
         self._stack_frames.clear()
+        self._fetching = True
         threading.Thread(target=self._fetch, daemon=True).start()
 
     def _fetch(self):
-        ssh = self.controller.ssh
-        if not ssh.connected:
-            self.after(0, lambda: self._show_msg("Not connected to server.", error=False))
-            return
+        try:
+            ssh = self.controller.ssh
+            if not ssh.connected:
+                self.after(0, lambda: self._show_msg("Not connected to server.", error=False))
+                return
 
-        # Find compose stacks via docker compose ls
-        out, err, code = ssh.run("docker compose ls --format json 2>/dev/null || docker compose ls 2>/dev/null")
-        if code != 0 or not out.strip():
-            self.after(0, lambda: self._show_msg(
-                "No compose stacks found.\n\nMake sure Docker Compose v2 is installed\nand stacks are running or stopped."))
-            return
+            # Find compose stacks via docker compose ls
+            out, err, code = ssh.run("docker compose ls --format json 2>/dev/null || docker compose ls 2>/dev/null")
+            if code != 0 or not out.strip():
+                self.after(0, lambda: self._show_msg(
+                    "No compose stacks found.\n\nMake sure Docker Compose v2 is installed\nand stacks are running or stopped."))
+                return
 
-        stacks = self._parse_stacks(out.strip())
-        if not stacks:
-            self.after(0, lambda: self._show_msg("No compose stacks found."))
-            return
+            stacks = self._parse_stacks(out.strip())
+            if not stacks:
+                self.after(0, lambda: self._show_msg("No compose stacks found."))
+                return
 
-        # For each stack, get per-service status
-        stack_data = []
-        for name, config_file, status in stacks:
-            services = self._fetch_services(ssh, name, config_file)
-            stack_data.append((name, config_file, status, services))
+            # For each stack, get per-service status
+            stack_data = []
+            for name, config_file, status in stacks:
+                services = self._fetch_services(ssh, name, config_file)
+                stack_data.append((name, config_file, status, services))
 
-        self.after(0, lambda d=stack_data: self._render(d))
+            self.after(0, lambda d=stack_data: self._render(d))
+        finally:
+            self._fetching = False
 
     def _parse_stacks(self, raw):
         """Parse `docker compose ls` output (JSON or table)."""
@@ -185,7 +190,8 @@ class ComposeTab(tk.Frame):
         self._stack_frames.clear()
 
         ts = time.strftime("%H:%M:%S")
-        self._status_lbl.config(text="Updated {}".format(ts))
+        self._status_lbl.config(text="Updated {}".format(ts),
+                               bg=self.theme.surface_dark, fg=self.theme.text_muted)
 
         for name, config_file, status, services in stack_data:
             frame = self._build_stack_card(name, config_file, status, services)
@@ -240,6 +246,18 @@ class ComposeTab(tk.Frame):
                 font=t.font_small, padx=10, pady=3,
             ).pack(side="right", padx=(0, 6))
 
+        # Edit button — opens compose file in an in-app editor
+        if config_file:
+            first_cfg = config_file.split(",")[0].strip()
+            tk.Button(
+                hdr, text="✏ Edit",
+                command=lambda n=name, f=first_cfg: self._edit_compose(n, f),
+                bg=t.surface_light, fg=t.text,
+                bd=0, relief="flat",
+                font=t.font_small, padx=10, pady=3,
+                cursor="hand2",
+            ).pack(side="right", padx=(0, 6))
+
         # ── Service list ─────────────────────────────────────────────
         if services:
             svc_frame = tk.Frame(card, bg=t.surface, padx=14, pady=8)
@@ -286,7 +304,7 @@ class ComposeTab(tk.Frame):
             console_frame,
             height=0,   # hidden until an action runs
             bg=t.surface_dark, fg=t.text_muted,
-            font=("Consolas", 10), bd=0, relief="flat",
+            font=t.font_mono, bd=0, relief="flat",
             state="disabled", wrap="word",
         )
         console.pack(fill="x", padx=14, pady=(0, 10))
@@ -336,6 +354,120 @@ class ComposeTab(tk.Frame):
         self.after(0, _do)
 
     # ------------------------------------------------------------------
+    # COMPOSE FILE EDITOR
+    # ------------------------------------------------------------------
+    def _edit_compose(self, stack_name, config_file):
+        """Fetch the compose file via SSH and open it in an in-app text editor."""
+        if not self.controller.ssh.connected:
+            messagebox.showerror("Edit Compose", "Not connected to server.", parent=self)
+            return
+
+        def _fetch():
+            out, err, code = self.controller.ssh.run(
+                "cat '{}' 2>&1".format(config_file))
+            if code != 0:
+                self.after(0, lambda e=err: messagebox.showerror(
+                    "Edit Compose",
+                    "Could not read {}:\n{}".format(config_file, e[:300]),
+                    parent=self))
+                return
+            self.after(0, lambda content=out:
+                       self._open_compose_editor(stack_name, config_file, content))
+
+        threading.Thread(target=_fetch, daemon=True).start()
+
+    def _open_compose_editor(self, stack_name, config_file, content):
+        t = self.theme
+        win = tk.Toplevel(self)
+        win.title("Edit — {}".format(config_file))
+        win.geometry("920x680")
+        win.configure(bg=t.bg)
+        win.transient(self.winfo_toplevel())
+
+        # Header
+        hdr = tk.Frame(win, bg=t.surface_dark, padx=16, pady=10)
+        hdr.pack(fill="x")
+        tk.Label(hdr, text="✏  {}".format(stack_name),
+                 bg=t.surface_dark, fg=t.text,
+                 font=("Segoe UI", 11, "bold")).pack(side="left")
+        tk.Label(hdr, text=config_file,
+                 bg=t.surface_dark, fg=t.text_muted,
+                 font=t.font_small).pack(side="left", padx=14)
+
+        tk.Frame(win, bg=t.card_border, height=1).pack(fill="x")
+
+        # Editor
+        editor_frame = tk.Frame(win, bg=t.surface_dark)
+        editor_frame.pack(fill="both", expand=True)
+
+        hsb = tk.Scrollbar(editor_frame, orient="horizontal")
+        vsb = tk.Scrollbar(editor_frame, orient="vertical")
+        editor = tk.Text(
+            editor_frame,
+            bg=t.surface_dark, fg=t.text,
+            font=t.font_mono,
+            wrap="none",
+            insertbackground=t.blue,
+            selectbackground=t.surface_light,
+            relief="flat", bd=0,
+            padx=14, pady=10,
+            xscrollcommand=hsb.set,
+            yscrollcommand=vsb.set,
+        )
+        hsb.configure(command=editor.xview)
+        vsb.configure(command=editor.yview)
+        vsb.pack(side="right", fill="y")
+        hsb.pack(side="bottom", fill="x")
+        editor.pack(fill="both", expand=True)
+        editor.insert("1.0", content)
+        editor.focus_set()
+
+        tk.Frame(win, bg=t.card_border, height=1).pack(fill="x")
+
+        # Footer
+        footer = tk.Frame(win, bg=t.surface_dark, padx=16, pady=10)
+        footer.pack(fill="x")
+        status_lbl = tk.Label(footer, text="", bg=t.surface_dark,
+                               fg=t.text_muted, font=t.font_small)
+        status_lbl.pack(side="left")
+
+        def _save():
+            new_content = editor.get("1.0", "end-1c")
+            save_btn.config(state="disabled", text="Saving…")
+            status_lbl.config(text="Saving…", fg=t.text_muted)
+
+            def _worker():
+                import base64
+                b64 = base64.b64encode(new_content.encode("utf-8")).decode("ascii")
+                cmd = "echo '{}' | base64 -d | sudo tee '{}' > /dev/null 2>&1".format(
+                    b64, config_file)
+                _, err, code = self.controller.ssh.run(cmd)
+
+                def _done():
+                    save_btn.config(state="normal", text="Save")
+                    if code == 0:
+                        status_lbl.config(text="Saved successfully.", fg=t.status_running)
+                        win.after(3000, lambda: status_lbl.config(text=""))
+                    else:
+                        status_lbl.config(
+                            text="Save failed: {}".format((err or "unknown error")[:120]),
+                            fg=t.status_stopped)
+                self.after(0, _done)
+
+            threading.Thread(target=_worker, daemon=True).start()
+
+        save_btn = tk.Button(footer, text="Save", command=_save,
+                              bg=t.blue, fg="#ffffff",
+                              bd=0, relief="flat", font=t.font_regular,
+                              padx=16, pady=5, cursor="hand2")
+        save_btn.pack(side="right", padx=(6, 0))
+
+        tk.Button(footer, text="Close", command=win.destroy,
+                  bg=t.surface_light, fg=t.text,
+                  bd=0, relief="flat", font=t.font_regular,
+                  padx=12, pady=5, cursor="hand2").pack(side="right")
+
+    # ------------------------------------------------------------------
     # HELPERS
     # ------------------------------------------------------------------
     def _show_msg(self, msg, error=True):
@@ -350,4 +482,4 @@ class ComposeTab(tk.Frame):
         )
         lbl.pack(pady=40)
         self._stack_frames.append(lbl)
-        self._status_lbl.config(text="")
+        self._status_lbl.config(text="", bg=self.theme.surface_dark)

@@ -18,40 +18,76 @@ class Sidebar(tk.Frame):
     ANIM_STEPS      = 12
     ANIM_MS         = 12
 
-    # (icon, label, tab_index, section)
-    _NAV_ITEMS = [
-        ("\U0001f50c", "Connection",      0,  "CORE"),
-        ("⚡",         "Quick Commands",  1,  None),
-        ("\U0001f4ca", "Dashboard",       2,  None),
+    # Accent color for each sidebar section header bar + label
+    _SECTION_COLORS = {
+        "SERVERS":    "#5b8ef0",
+        "CORE":       "#5b8ef0",
+        "MEDIA":      "#a855f7",
+        "REQUESTS":   "#f97316",
+        "MONITORING": "#22c55e",
+        "INFRA":      "#64748b",
+        "TOOLS":      "#06b6d4",
+        "SETTINGS":   "#6b7280",
+    }
 
-        ("\U0001f3b5", "Emby",            14,  "MEDIA"),
-        ("\U0001f7e1", "Plex",           17,  None),
-        ("\U0001f9ca", "Jellyfin",       18,  None),
+    # (icon, label, tab_index, section)
+    # Connection (0) and Quick Commands (1) are accessible via status bar / keyboard only.
+    _NAV_ITEMS = [
+        ("\U0001f4ca", "Dashboard",       2,  "CORE"),
+        ("\U0001f5a5", "All Servers",    37,  None),
+        ("⚡",         "Quick Commands",  1,  None),
+
+        ("\U0001f3a5", "Now Playing",    43,  "MEDIA"),
+        ("\U0001f4da", "Media Library",  40,  None),
         ("\U0001f4fa", "Play History",   21,  None),
-        ("\U0001f3ac", "Arr",            11,  None),
+        ("\U0001f465", "Media Users",    42,  None),
+
+        ("\U0001f3ac", "Arr",            11,  "REQUESTS"),
         ("\U0001f50d", "Prowlarr",       30,  None),
+        ("\U0001f4e5", "Requests",       41,  None),
         ("\U0001f4e5", "SABnzbd",         7,  None),
+        ("\U0001f9f2", "qBittorrent",   48,  None),
+
+        ("\U0001f4ca", "Tautulli",       33,  "MONITORING"),
+        ("\U0001f7e2", "Uptime Kuma",    34,  None),
+        ("\U0001f4c8", "Netdata",        35,  None),
+        ("\U0001f52d", "Glances",        36,  None),
+        ("\U0001f4ca", "Bandwidth",      28,  None),
+        ("\U0001f4f6", "Speedtest",      24,  None),
+        ("\U0001f321", "Sensors",        54,  None),
+        ("\U0001f6e1", "Pi-hole",        55,  None),
+        ("\U0001f501", "Watchstate",     59,  None),
 
         ("\U0001f9e9", "Services",        3,  "INFRA"),
+        ("\U0001f504", "Restart Seq.",   47,  None),
         ("\U0001f433", "Docker",          4,  None),
+        ("\U0001f4ca", "Docker Stats",  52,  None),
+        ("\U0001f4e6", "Docker Volumes", 57, None),
         ("\U0001f40b", "Compose",        15,  None),
         ("⏰",         "Cron Jobs",      16,  None),
+        ("⏲",     "Timers",         58,  None),
+        ("📅",         "Scheduler",      44,  None),
+        ("📦",         "Install Apps",   45,  None),
+        ("\U0001f465", "Sessions",       13,  None),
+        ("\U0001f5a5", "Processes",      50,  None),
         ("\U0001f4bf", "Disk Health",    10,  None),
         ("\U0001f5c4", "Storage Health", 25,  None),
         ("\U0001f6e1", "VPN",            22,  None),
         ("\U0001f310", "Reverse Proxy",  23,  None),
         ("\U0001f4a0", "Tailscale",      27,  None),
+        ("\U0001f6e1", "UFW Firewall",   51,  None),
+        ("\U0001f50c", "Ports",          53,  None),
 
         ("\U0001f4c2", "Files",           9,  "TOOLS"),
         ("\U0001f4cb", "Log Viewer",      6,  None),
         (">_",         "Custom Commands", 5,  None),
-        ("\U0001f4f6", "Speedtest",      24,  None),
-        ("\U0001f4ca", "Bandwidth",      28,  None),
         ("\U0001f510", "SSL Certs",      26,  None),
+        ("\U0001f6ab", "Fail2ban",       46,  None),
         ("\U0001f4be", "Backups",        29,  None),
-        ("\U0001f514", "Notifications",  19,  None),
         ("\U0001f504", "Updates",        12,  None),
-        ("\U0001f465", "Sessions",       13,  None),
+        ("\U0001f514", "Notifications",  19,  None),
+        ("\U0001f4be", "Disk Usage",     49,  None),
+        ("\U0001f527", "Net Toolkit",    56,  None),
 
         ("⚙",         "Config",          8,  "SETTINGS"),
     ]
@@ -67,6 +103,8 @@ class Sidebar(tk.Frame):
         self._animating  = False
         self._buttons    = []
         self._active_idx = 0
+        # {idx: {"label": str, "reason": str}}
+        self._dimmed     = {}
 
         # Right-edge separator
         tk.Frame(self, bg="#1a1a1a", width=1).place(
@@ -143,16 +181,29 @@ class Sidebar(tk.Frame):
         # Thin separator under header
         tk.Frame(self, bg="#1a1a1a", height=1).pack(fill="x", side="top")
 
-        # ── Bottom version label (packed before canvas to stay fixed) ──
+        # ── Bottom version + shortcut hint ────────────────────────────
         tk.Frame(self, bg="#1a1a1a", height=1).pack(fill="x", side="bottom")
+        self._shortcut_hint = tk.Label(
+            self,
+            text="Ctrl+?  shortcuts  ·  Ctrl+F  search",
+            bg=t.sidebar_bg, fg=t.text_dim,
+            font=("Segoe UI", 8),
+            anchor="center",
+            cursor="hand2",
+        )
+        self._shortcut_hint.pack(side="bottom", pady=(0, 4))
+        self._shortcut_hint.bind(
+            "<Button-1>", lambda e: self.controller._show_shortcut_help())
         self._ver_lbl = tk.Label(
             self,
-            text="Media Server Manager",
+            text="All Clear  ·  v2.0.0",
             bg=t.sidebar_bg, fg=t.text_dim,
             font=("Segoe UI", 9),
             anchor="center",
+            cursor="hand2",
         )
-        self._ver_lbl.pack(side="bottom", pady=10)
+        self._ver_lbl.pack(side="bottom", pady=(6, 2))
+        self._ver_lbl.bind("<Button-1>", self.controller._show_about)
 
         # ── Scrollable nav canvas ─────────────────────────────────────
         self._nav_canvas = tk.Canvas(
@@ -184,20 +235,28 @@ class Sidebar(tk.Frame):
         for icon, label, idx, section in self._NAV_ITEMS:
             if section and section != current_section:
                 current_section = section
-                spacer = tk.Frame(self._nav_frame, bg=t.sidebar_bg, height=4)
+                color   = self._SECTION_COLORS.get(section, t.blue)
+                sec_bg  = self._tint(color, t.sidebar_bg, 0.30)
+
+                spacer = tk.Frame(self._nav_frame, bg=t.sidebar_bg, height=6)
                 spacer.pack(fill="x")
                 spacer.bind("<MouseWheel>", self._on_mousewheel)
 
+                sec_frame = tk.Frame(self._nav_frame, bg=sec_bg)
+                sec_frame.pack(fill="x", pady=(0, 2))
+                sec_frame.bind("<MouseWheel>", self._on_mousewheel)
+
+                tk.Frame(sec_frame, bg=color, width=3).pack(side="left", fill="y")
                 sec_lbl = tk.Label(
-                    self._nav_frame,
+                    sec_frame,
                     text=section,
-                    bg=t.sidebar_bg, fg=t.sidebar_section_text,
-                    font=("Segoe UI", 8, "bold"),
-                    anchor="w", padx=16,
+                    bg=sec_bg, fg=color,
+                    font=("Segoe UI", 9, "bold"),
+                    anchor="w", padx=10,
                 )
-                sec_lbl.pack(fill="x", pady=(4, 2))
+                sec_lbl.pack(side="left", fill="x", expand=True, pady=4)
                 sec_lbl.bind("<MouseWheel>", self._on_mousewheel)
-                self._section_widgets.append((sec_lbl, spacer))
+                self._section_widgets.append((sec_frame, spacer))
 
             row = tk.Frame(self._nav_frame, bg=t.sidebar_bg)
             row.pack(fill="x", padx=6, pady=1)
@@ -225,7 +284,21 @@ class Sidebar(tk.Frame):
             self._create_tooltip(btn, label)
             self._buttons.append((btn, icon, label, idx, row))
 
-        self.set_active(0)
+        self.set_active(2)
+
+    # ------------------------------------------------------------------
+    # HELPERS
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _tint(color: str, base: str, ratio: float) -> str:
+        """Blend *color* into *base* at *ratio* (0 = all base, 1 = all color)."""
+        def _c(h, i): return int(h[i:i+2], 16)
+        cr, cg, cb = _c(color, 1), _c(color, 3), _c(color, 5)
+        br, bg, bb = _c(base,  1), _c(base,  3), _c(base,  5)
+        r = int(cr * ratio + br * (1 - ratio))
+        g = int(cg * ratio + bg * (1 - ratio))
+        b = int(cb * ratio + bb * (1 - ratio))
+        return "#{:02x}{:02x}{:02x}".format(r, g, b)
 
     # ------------------------------------------------------------------
     # SCROLLING
@@ -243,14 +316,21 @@ class Sidebar(tk.Frame):
     # ACTIVE STATE  (Teams-style: full-width blue row, no accent bar)
     # ------------------------------------------------------------------
     def set_active(self, idx):
+        # Don't activate a dimmed item
+        if idx in self._dimmed:
+            return
         self._active_idx = idx
         t = self.theme
         for btn, icon, label, btn_idx, row in self._buttons:
             is_active = (btn_idx == idx)
+            is_dimmed = (btn_idx in self._dimmed)
             if is_active:
                 row.configure(bg=t.sidebar_active_bg)
                 btn.configure(bg=t.sidebar_active_bg,
                               fg=t.sidebar_icon_active)
+            elif is_dimmed:
+                row.configure(bg=t.sidebar_bg)
+                btn.configure(bg=t.sidebar_bg, fg=t.text_dim)
             else:
                 row.configure(bg=t.sidebar_bg)
                 btn.configure(bg=t.sidebar_bg, fg=t.sidebar_icon)
@@ -286,6 +366,49 @@ class Sidebar(tk.Frame):
                 row.pack_forget()
                 break
 
+    def dim_item(self, idx, reason="Configure in Settings → Config to enable"):
+        """Grey out a nav item. It stays visible but clicking shows a setup hint."""
+        t = self.theme
+        for btn, icon, label, btn_idx, row in self._buttons:
+            if btn_idx != idx:
+                continue
+            self._dimmed[idx] = {"label": label, "reason": reason}
+            row.configure(bg=t.sidebar_bg)
+            btn.configure(
+                fg=t.text_dim,
+                bg=t.sidebar_bg,
+                cursor="arrow",
+                command=lambda i=idx: self._dimmed_click(i),
+            )
+            break
+
+    def undim_item(self, idx):
+        """Restore a dimmed nav item to its normal clickable state."""
+        t = self.theme
+        self._dimmed.pop(idx, None)
+        for btn, icon, label, btn_idx, row in self._buttons:
+            if btn_idx != idx:
+                continue
+            btn.configure(
+                fg=t.sidebar_icon,
+                bg=t.sidebar_bg,
+                cursor="hand2",
+                command=lambda i=idx: self._nav_click(i),
+            )
+            break
+
+    def _dimmed_click(self, idx):
+        """Called when the user clicks a dimmed (unconfigured) nav item."""
+        info = self._dimmed.get(idx, {})
+        label  = info.get("label", "This tab")
+        reason = info.get("reason", "Configure in Settings → Config to enable")
+        self.controller.show_toast(
+            "{} not configured".format(label),
+            reason,
+            duration_ms=4000,
+            level="info",
+        )
+
     def set_badge(self, idx, count):
         """Show or hide a small count badge on the nav item at `idx`."""
         t = self.theme
@@ -315,7 +438,17 @@ class Sidebar(tk.Frame):
     def _on_hover(self, btn, row, idx, entering):
         t = self.theme
         is_active = (idx == self._active_idx)
-        if entering and not is_active:
+        is_dimmed = (idx in self._dimmed)
+        if is_dimmed:
+            # Subtle tint on hover to indicate it's interactive, but don't
+            # brighten the text — keeps it clearly "not enabled"
+            if entering:
+                row.configure(bg=t.surface_dark)
+                btn.configure(bg=t.surface_dark)
+            else:
+                row.configure(bg=t.sidebar_bg)
+                btn.configure(bg=t.sidebar_bg)
+        elif entering and not is_active:
             btn.configure(fg=t.sidebar_icon_hover, bg=t.surface_light)
             row.configure(bg=t.surface_light)
         elif not entering and not is_active:
@@ -383,19 +516,41 @@ class Sidebar(tk.Frame):
             return
 
         # Section label + spacer
-        spacer = tk.Frame(self._server_section_frame, bg=t.sidebar_bg, height=4)
+        spacer = tk.Frame(self._server_section_frame, bg=t.sidebar_bg, height=8)
         spacer.pack(fill="x")
         spacer.bind("<MouseWheel>", self._on_mousewheel)
 
+        color = self._SECTION_COLORS.get("SERVERS", t.blue)
+        sec_frame = tk.Frame(self._server_section_frame, bg=t.sidebar_bg)
+        sec_frame.pack(fill="x", pady=(0, 2))
+        sec_frame.bind("<MouseWheel>", self._on_mousewheel)
+
+        tk.Frame(sec_frame, bg=color, width=3).pack(side="left", fill="y")
         sec_lbl = tk.Label(
-            self._server_section_frame,
+            sec_frame,
             text="SERVERS",
-            bg=t.sidebar_bg, fg=t.sidebar_section_text,
-            font=("Segoe UI", 8, "bold"),
-            anchor="w", padx=16,
+            bg=t.sidebar_bg, fg=color,
+            font=("Segoe UI", 7, "bold"),
+            anchor="w", padx=10,
         )
-        sec_lbl.pack(fill="x", pady=(4, 2))
+        sec_lbl.pack(side="left", fill="x", expand=True, pady=3)
         sec_lbl.bind("<MouseWheel>", self._on_mousewheel)
+
+        add_btn = tk.Button(
+            sec_frame, text="+",
+            command=lambda: self.controller.open_server_dialog(),
+            bg=t.sidebar_bg, fg=color,
+            bd=0, relief="flat",
+            font=("Segoe UI", 13, "bold"),
+            padx=8, pady=0,
+            cursor="hand2",
+        )
+        add_btn.pack(side="right", padx=(0, 4))
+        add_btn.bind("<Enter>",
+            lambda e: add_btn.configure(fg=t.sidebar_icon_hover, bg=t.surface_light))
+        add_btn.bind("<Leave>",
+            lambda e: add_btn.configure(fg=color, bg=t.sidebar_bg))
+        add_btn.bind("<MouseWheel>", self._on_mousewheel)
 
         for i, srv in enumerate(servers):
             virtual_idx = 1000 + i
@@ -425,6 +580,8 @@ class Sidebar(tk.Frame):
             btn.bind("<Leave>",
                 lambda e, b=btn, r=row, ii=virtual_idx: self._on_hover(b, r, ii, False))
             btn.bind("<MouseWheel>", self._on_mousewheel)
+            btn.bind("<Button-3>",
+                lambda e, s=srv, ii=i: self._server_right_click(e, s, ii))
             self._create_tooltip(btn, name)
 
         # Show the frame (was hidden if no servers before)
@@ -437,6 +594,45 @@ class Sidebar(tk.Frame):
             self.controller.switch_server(profile)
         except Exception:
             pass
+
+    def _server_right_click(self, event, srv, idx):
+        t = self.theme
+        menu = tk.Menu(self, tearoff=0,
+                       bg=t.surface, fg=t.text,
+                       activebackground=t.blue, activeforeground="#fff",
+                       font=("Segoe UI", 10), bd=0, relief="flat")
+        menu.add_command(
+            label="  Connect",
+            command=lambda: self._server_click(srv, idx))
+        menu.add_separator()
+        menu.add_command(
+            label="  Edit…",
+            command=lambda: self.controller.open_server_dialog(srv))
+        menu.add_command(
+            label="  Delete",
+            command=lambda: self._delete_server(srv))
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
+    def _delete_server(self, srv):
+        import tkinter.messagebox as mb
+        name = srv.get("name") or srv.get("host", "this server")
+        if not mb.askyesno("Delete Server",
+                           "Delete profile for '{}'?".format(name),
+                           parent=self):
+            return
+        cfg     = self.controller.config_manager
+        servers = [s for s in cfg.get_servers()
+                   if s.get("host") != srv.get("host")]
+        cfg.set_servers(servers)
+        active = cfg.get_active_server_index()
+        if active >= len(servers):
+            cfg.set_active_server_index(max(0, len(servers) - 1))
+        self.rebuild_servers(cfg)
+        if hasattr(self.controller, "server_tab"):
+            self.controller.server_tab._load()
 
     # ------------------------------------------------------------------
     # TOGGLE / ANIMATION
@@ -475,29 +671,31 @@ class Sidebar(tk.Frame):
             self._app_lbl.pack_forget()
             self._theme_btn.pack_forget()
             self._toggle_btn.pack_forget()
-            # Re-pack toggle centered so it's always reachable
             self._toggle_btn.pack(expand=True)
             self._ver_lbl.config(text="")
+            self._shortcut_hint.pack_forget()
         else:
             self._toggle_btn.pack_forget()
             self._icon_lbl.pack(side="left", padx=(14, 4), pady=14)
             self._app_lbl.pack(side="left")
             self._theme_btn.pack(side="right")
             self._toggle_btn.pack(side="right", padx=4)
-            self._ver_lbl.config(text="Media Server Manager")
+            self._ver_lbl.config(text="All Clear  ·  v2.0.0")
+            self._shortcut_hint.pack(side="bottom", pady=(0, 4))
 
-        # Section header labels
-        for sec_lbl, spacer in self._section_widgets:
+        # Section header frames
+        for sec_frame, spacer in self._section_widgets:
             if collapsed:
-                sec_lbl.pack_forget()
+                sec_frame.pack_forget()
                 spacer.pack_forget()
             else:
                 spacer.pack(fill="x")
-                sec_lbl.pack(fill="x", pady=(4, 2))
+                sec_frame.pack(fill="x", pady=(0, 2))
 
         # Nav button text: icon only vs icon + label
         for btn, icon, label, idx, row in self._buttons:
             is_active = (idx == self._active_idx)
+            is_dimmed = (idx in self._dimmed)
             if collapsed:
                 btn.configure(text=icon, width=3, anchor="center",
                                padx=0, pady=10)
@@ -507,6 +705,9 @@ class Sidebar(tk.Frame):
                 if is_active:
                     btn.configure(bg=self.theme.sidebar_active_bg,
                                    fg=self.theme.sidebar_icon_active)
+                elif is_dimmed:
+                    btn.configure(bg=self.theme.sidebar_bg,
+                                  fg=self.theme.text_dim)
                 else:
                     btn.configure(bg=self.theme.sidebar_bg,
-                                   fg=self.theme.sidebar_icon)
+                                  fg=self.theme.sidebar_icon)

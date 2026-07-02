@@ -214,98 +214,103 @@ class ReverseProxyTab(tk.Frame):
     # REFRESH
     # =========================================================
     def refresh(self):
+        if getattr(self, "_fetching", False): return
         if not self.controller.ssh.connected:
             self._set_bar("Not connected to SSH", "error")
             return
         self._refresh_btn.config(state="disabled", text="Loading…")
         self._set_bar("Reading proxy config…")
+        self._fetching = True
         threading.Thread(target=self._fetch, daemon=True).start()
 
     # =========================================================
     # FETCH  (background thread)
     # =========================================================
     def _fetch(self):
-        ssh    = self.controller.ssh
-        cfg    = self.controller.config_manager
-        ptype  = cfg.proxy_type  # "Auto-detect", "Nginx", "Caddy", "Traefik"
-        result = {"proxy": ptype, "routes": [], "raw": "", "status": "Unknown"}
+        try:
+            ssh    = self.controller.ssh
+            cfg    = self.controller.config_manager
+            ptype  = cfg.proxy_type  # "Auto-detect", "Nginx", "Caddy", "Traefik"
+            result = {"proxy": ptype, "routes": [], "raw": "", "status": "Unknown"}
 
-        if ptype == "Auto-detect":
-            detected = _detect_proxy(ssh)
-            if detected:
-                ptype = detected
-                result["proxy"] = detected
-            else:
-                result["status"] = "Not detected"
-                result["raw"] = ("Could not detect a running reverse proxy.\n"
-                                 "Make sure nginx/caddy/traefik is installed and active.")
-                self.after(0, lambda r=result: self._populate(r))
-                return
+            if ptype == "Auto-detect":
+                detected = _detect_proxy(ssh)
+                if detected:
+                    ptype = detected
+                    result["proxy"] = detected
+                else:
+                    result["status"] = "Not detected"
+                    result["raw"] = ("Could not detect a running reverse proxy.\n"
+                                     "Make sure nginx/caddy/traefik is installed and active.")
+                    self.after(0, lambda r=result: self._populate(r))
+                    return
 
-        # ── Nginx ─────────────────────────────────────────────
-        if ptype == "Nginx":
-            conf_text = ""
-            for path in _NGINX_CONF_PATHS:
-                out, _, _ = ssh.run(
-                    "cat {p} 2>/dev/null || "
-                    "find {p} -name '*.conf' -exec cat {{}} \\; 2>/dev/null".format(p=path))
-                if out and out.strip():
-                    conf_text += out + "\n"
-            if conf_text:
-                result["routes"] = _parse_nginx(conf_text)
-                result["raw"]    = conf_text[:4000]
-                # Check if nginx is active
-                svc, _, _ = ssh.run("systemctl is-active nginx 2>/dev/null")
-                result["status"] = svc.strip() if svc else "unknown"
-            else:
-                result["status"] = "Config not found"
-                result["raw"]    = "Could not read nginx config files."
+            # ── Nginx ─────────────────────────────────────────────
+            if ptype == "Nginx":
+                conf_text = ""
+                for path in _NGINX_CONF_PATHS:
+                    out, _, _ = ssh.run(
+                        "cat {p} 2>/dev/null || "
+                        "find {p} -name '*.conf' -exec cat {{}} \\; 2>/dev/null".format(p=path))
+                    if out and out.strip():
+                        conf_text += out + "\n"
+                if conf_text:
+                    result["routes"] = _parse_nginx(conf_text)
+                    result["raw"]    = conf_text[:4000]
+                    # Check if nginx is active
+                    svc, _, _ = ssh.run("systemctl is-active nginx 2>/dev/null")
+                    result["status"] = svc.strip() if svc else "unknown"
+                else:
+                    result["status"] = "Config not found"
+                    result["raw"]    = "Could not read nginx config files."
 
-        # ── Caddy ─────────────────────────────────────────────
-        elif ptype == "Caddy":
-            conf_text = ""
-            for path in _CADDY_CONF_PATHS:
-                out, _, _ = ssh.run("cat {p} 2>/dev/null".format(p=path))
-                if out and out.strip():
-                    conf_text = out
-                    break
-            if not conf_text:
-                # Try caddy adapt
-                out, _, _ = ssh.run("caddy adapt 2>/dev/null | head -200")
-                conf_text = out or ""
-            if conf_text:
-                result["routes"] = _parse_caddy(conf_text)
-                result["raw"]    = conf_text[:4000]
-                svc, _, _ = ssh.run("systemctl is-active caddy 2>/dev/null")
-                result["status"] = svc.strip() if svc else "unknown"
-            else:
-                result["status"] = "Config not found"
-                result["raw"]    = "Could not read Caddy config files."
+            # ── Caddy ─────────────────────────────────────────────
+            elif ptype == "Caddy":
+                conf_text = ""
+                for path in _CADDY_CONF_PATHS:
+                    out, _, _ = ssh.run("cat {p} 2>/dev/null".format(p=path))
+                    if out and out.strip():
+                        conf_text = out
+                        break
+                if not conf_text:
+                    # Try caddy adapt
+                    out, _, _ = ssh.run("caddy adapt 2>/dev/null | head -200")
+                    conf_text = out or ""
+                if conf_text:
+                    result["routes"] = _parse_caddy(conf_text)
+                    result["raw"]    = conf_text[:4000]
+                    svc, _, _ = ssh.run("systemctl is-active caddy 2>/dev/null")
+                    result["status"] = svc.strip() if svc else "unknown"
+                else:
+                    result["status"] = "Config not found"
+                    result["raw"]    = "Could not read Caddy config files."
 
-        # ── Traefik ───────────────────────────────────────────
-        elif ptype == "Traefik":
-            conf_text = ""
-            for path in _TRAEFIK_CONF_PATHS:
-                out, _, _ = ssh.run("cat {p} 2>/dev/null".format(p=path))
-                if out and out.strip():
-                    conf_text = out
-                    break
-            if not conf_text:
-                # Try docker labels inspection
-                out, _, _ = ssh.run(
-                    "docker inspect $(docker ps -q) 2>/dev/null | "
-                    "grep -o '\"traefik[^\"]*\":[^,}]*' | head -40")
-                conf_text = out or ""
-            if conf_text:
-                result["routes"] = _parse_traefik(conf_text)
-                result["raw"]    = conf_text[:4000]
-                svc, _, _ = ssh.run("systemctl is-active traefik 2>/dev/null")
-                result["status"] = svc.strip() if svc else "unknown"
-            else:
-                result["status"] = "Config not found"
-                result["raw"]    = "Could not read Traefik config files."
+            # ── Traefik ───────────────────────────────────────────
+            elif ptype == "Traefik":
+                conf_text = ""
+                for path in _TRAEFIK_CONF_PATHS:
+                    out, _, _ = ssh.run("cat {p} 2>/dev/null".format(p=path))
+                    if out and out.strip():
+                        conf_text = out
+                        break
+                if not conf_text:
+                    # Try docker labels inspection
+                    out, _, _ = ssh.run(
+                        "docker inspect $(docker ps -q) 2>/dev/null | "
+                        "grep -o '\"traefik[^\"]*\":[^,}]*' | head -40")
+                    conf_text = out or ""
+                if conf_text:
+                    result["routes"] = _parse_traefik(conf_text)
+                    result["raw"]    = conf_text[:4000]
+                    svc, _, _ = ssh.run("systemctl is-active traefik 2>/dev/null")
+                    result["status"] = svc.strip() if svc else "unknown"
+                else:
+                    result["status"] = "Config not found"
+                    result["raw"]    = "Could not read Traefik config files."
 
-        self.after(0, lambda r=result: self._populate(r))
+            self.after(0, lambda r=result: self._populate(r))
+        finally:
+            self._fetching = False
 
     # =========================================================
     # POPULATE  (main thread)
@@ -347,8 +352,9 @@ class ReverseProxyTab(tk.Frame):
     # HELPERS
     # =========================================================
     def _set_bar(self, text, level="info"):
-        colors = {"info":  self.theme.text_muted,
-                  "ok":    self.theme.status_running,
-                  "error": self.theme.status_stopped}
-        self._status_bar.config(text=text,
-                                fg=colors.get(level, self.theme.text_muted))
+        t = self.theme
+        if text.endswith("…") or text.endswith("..."):
+            self._status_bar.config(text=text, bg=t.blue, fg="#ffffff")
+            return
+        colors = {"info": t.text_muted, "ok": t.status_running, "error": t.status_stopped}
+        self._status_bar.config(text=text, bg=t.surface_dark, fg=colors.get(level, t.text_muted))

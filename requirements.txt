@@ -1,5 +1,7 @@
 paramiko
 pillow
+pystray
 cffi
 cryptography
 bcrypt
+apprise

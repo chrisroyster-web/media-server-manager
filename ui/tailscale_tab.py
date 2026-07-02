@@ -4,6 +4,7 @@ Tailscale status tab.
 Parses `tailscale status --json` over SSH into a peer table.
 """
 
+import datetime
 import tkinter as tk
 from tkinter import ttk
 import threading
@@ -126,37 +127,42 @@ class TailscaleTab(tk.Frame):
     # REFRESH
     # =========================================================
     def refresh(self):
+        if getattr(self, "_fetching", False): return
         self._rc.cancel()
         if not self.controller.ssh.connected:
-            self._status.config(text="Not connected", fg=self.theme.status_stopped)
+            self._status.config(text="Not connected", bg=self.theme.surface_dark, fg=self.theme.status_stopped)
             return
-        self._status.config(text="Loading Tailscale status…", fg=self.theme.text_muted)
+        self._status.config(text="Loading Tailscale status…", bg=self.theme.blue, fg="#ffffff")
+        self._fetching = True
         threading.Thread(target=self._fetch, daemon=True).start()
 
     def _fetch(self):
-        ssh = self.controller.ssh
-        out, err, code = ssh.run("tailscale status --json 2>/dev/null")
-        if code != 0 or not out.strip():
-            # Try without --json (older versions)
-            out_txt, _, code2 = ssh.run("tailscale status 2>/dev/null")
-            if code2 == 0:
-                self.after(0, lambda: self._populate_text(out_txt))
-            else:
-                self.after(0, lambda: self._status.config(
-                    text="tailscale not found or not running",
-                    fg=self.theme.status_stopped))
-            return
         try:
-            data = json.loads(out)
-        except Exception:
-            self.after(0, lambda: self._status.config(
-                text="Could not parse tailscale JSON output",
-                fg=self.theme.status_stopped))
-            return
-        self.after(0, lambda: self._populate(data))
-        self.after(0, lambda: self._last_lbl.config(
-            text="Updated {}".format(time.strftime("%H:%M"))))
-        self.after(0, self._rc.schedule)
+            ssh = self.controller.ssh
+            out, err, code = ssh.run("tailscale status --json 2>/dev/null")
+            if code != 0 or not out.strip():
+                # Try without --json (older versions)
+                out_txt, _, code2 = ssh.run("tailscale status 2>/dev/null")
+                if code2 == 0:
+                    self.after(0, lambda: self._populate_text(out_txt))
+                else:
+                    self.after(0, lambda: self._status.config(
+                        text="tailscale not found or not running",
+                        bg=self.theme.surface_dark, fg=self.theme.status_stopped))
+                return
+            try:
+                data = json.loads(out)
+            except Exception:
+                self.after(0, lambda: self._status.config(
+                    text="Could not parse tailscale JSON output",
+                    bg=self.theme.surface_dark, fg=self.theme.status_stopped))
+                return
+            self.after(0, lambda: self._populate(data))
+            self.after(0, lambda: self._last_lbl.config(
+                text="Updated {}".format(time.strftime("%H:%M"))))
+            self.after(0, self._rc.schedule)
+        finally:
+            self._fetching = False
 
     def _populate(self, data):
         t = self.theme
@@ -194,7 +200,6 @@ class TailscaleTab(tk.Frame):
             last  = peer.get("LastSeen", "") or ("now" if is_online else "—")
             if last and last not in ("now", "—") and "T" in last:
                 try:
-                    import datetime
                     dt = datetime.datetime.fromisoformat(last.replace("Z", "+00:00"))
                     last = dt.strftime("%Y-%m-%d %H:%M")
                 except Exception:
@@ -214,11 +219,11 @@ class TailscaleTab(tk.Frame):
         self._status.config(
             text="{} peer{} total  |  {} online  |  {} offline".format(
                 total, "s" if total != 1 else "", online, offline),
-            fg=t.text_muted)
+            bg=t.surface_dark, fg=t.text_muted)
 
     def _populate_text(self, text):
         """Fallback: display raw text output in the status area."""
-        self._status.config(text=text[:200], fg=self.theme.text_muted)
+        self._status.config(text=text[:200], bg=self.theme.surface_dark, fg=self.theme.text_muted)
 
     def _on_select(self, _event=None):
         sel = self._tree.selection()

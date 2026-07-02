@@ -6,6 +6,8 @@ from tkinter import ttk
 import threading
 import time
 from ui.refresh_control import RefreshControl
+from ui.empty_state import EmptyState
+from ui.loading_spinner import LoadingSpinner
 
 
 class DashboardTab(tk.Frame):
@@ -24,6 +26,7 @@ class DashboardTab(tk.Frame):
         self._history     = collections.deque(maxlen=30)  # {cpu, ram} dicts
         self._net_history = collections.deque(maxlen=30)  # {rx_bps, tx_bps} dicts
         self._build_ui()
+        self._seed_history_from_db()
 
     # =========================================================
     # BUILD UI
@@ -39,6 +42,8 @@ class DashboardTab(tk.Frame):
         self.refresh_btn = tk.Button(header, text="⟳ Refresh", command=self.refresh)
         self.theme.style_button(self.refresh_btn)
         self.refresh_btn.pack(side="right")
+        self._spinner = LoadingSpinner(header, self.theme)
+        self._spinner.pack(side="right", padx=(0, 6))
 
         cfg_default = self.controller.config_manager.dashboard_refresh_interval
         self._rc = RefreshControl(header, self.controller, "dashboard",
@@ -49,9 +54,12 @@ class DashboardTab(tk.Frame):
                                           fg=self.theme.text_secondary, font=self.theme.font_small)
         self.last_updated_lbl.pack(side="right", padx=12)
 
-        # ---- Scrollable body ----
-        canvas = tk.Canvas(self, bg=self.theme.bg, highlightthickness=0)
-        scrollbar = tk.Scrollbar(self, orient="vertical", command=canvas.yview)
+        # ---- Scrollable body (inside a container so the overlay can cover it) ----
+        self._body_container = tk.Frame(self, bg=self.theme.bg)
+        self._body_container.pack(fill="both", expand=True)
+
+        canvas = tk.Canvas(self._body_container, bg=self.theme.bg, highlightthickness=0)
+        scrollbar = tk.Scrollbar(self._body_container, orient="vertical", command=canvas.yview)
         canvas.configure(yscrollcommand=scrollbar.set)
         scrollbar.pack(side="right", fill="y")
         canvas.pack(side="left", fill="both", expand=True)
@@ -69,6 +77,17 @@ class DashboardTab(tk.Frame):
             w.bind("<MouseWheel>", _mw)
             w.bind("<Button-4>",   _mw)
             w.bind("<Button-5>",   _mw)
+
+        # ---- Disconnected overlay (shown until first successful fetch) ----
+        self._disconn_overlay = EmptyState(
+            self._body_container, self.theme,
+            icon="🔌",
+            title="Not connected",
+            subtitle="Connect to a server to view live metrics.",
+            action_text="⚡ Connect",
+            action_cmd=lambda: self.controller.tabs.select(0),
+        )
+        self._disconn_overlay.place(relx=0, rely=0, relwidth=1, relheight=1)
 
         # ---- Row 1: Connection / Uptime / CPU Temp ----
         r1 = tk.Frame(self.body, bg=self.theme.bg)
@@ -260,8 +279,8 @@ class DashboardTab(tk.Frame):
         self.storage_tree.column("used",  width=90,  minwidth=60,  anchor="e", stretch=False)
         self.storage_tree.column("total", width=90,  minwidth=60,  anchor="e", stretch=False)
         self.storage_tree.column("pct",   width=80,  minwidth=50,  anchor="e", stretch=False)
-        self.storage_tree.tag_configure("odd",  background=t.surface_dark)
-        self.storage_tree.tag_configure("even", background=t.card_bg)
+        self.storage_tree.tag_configure("odd",  background=t.surface_dark, foreground=t.text)
+        self.storage_tree.tag_configure("even", background=t.card_bg,      foreground=t.text)
         self.storage_tree.tag_configure("ok",   foreground=t.status_running)
         self.storage_tree.tag_configure("warn", foreground=t.yellow)
         self.storage_tree.tag_configure("crit", foreground=t.status_stopped)
@@ -347,8 +366,8 @@ class DashboardTab(tk.Frame):
         self.proc_tree.column("cpu",  width=80,  minwidth=60,  anchor="e", stretch=False)
         self.proc_tree.column("mem",  width=80,  minwidth=60,  anchor="e", stretch=False)
         self.proc_tree.column("cmd",  width=300, minwidth=100, anchor="w", stretch=True)
-        self.proc_tree.tag_configure("odd",  background=t.surface_dark)
-        self.proc_tree.tag_configure("even", background=t.card_bg)
+        self.proc_tree.tag_configure("odd",  background=t.surface_dark, foreground=t.text)
+        self.proc_tree.tag_configure("even", background=t.card_bg,      foreground=t.text)
         self.proc_tree.pack(fill="x")
         # pre-populate with placeholder rows
         self.proc_iids = []
@@ -356,6 +375,27 @@ class DashboardTab(tk.Frame):
             tag = "even" if i % 2 == 0 else "odd"
             iid = self.proc_tree.insert("", "end", values=("--", "--", "--", "--"), tags=(tag,))
             self.proc_iids.append(iid)
+
+    # =========================================================
+    # SEED HISTORY FROM SQLITE
+    # =========================================================
+    def _seed_history_from_db(self):
+        """Pre-populate in-memory history deques from SQLite so charts
+        survive app restarts.  Called once after _build_ui."""
+        try:
+            cfg       = self.controller.config_manager
+            server_id = (cfg.get_active_server() or {}).get("name", "default")
+            rows = self.controller.metrics_store.query_metrics(
+                server_id, limit=self._history.maxlen)
+            for r in rows:
+                self._history.append({"cpu": r["cpu"], "ram": r["ram"]})
+                self._net_history.append(
+                    {"rx_bps": r["rx_bps"], "tx_bps": r["tx_bps"]})
+            if self._history:
+                self.after(100, self._redraw_chart)
+                self.after(100, self._redraw_net_chart)
+        except Exception:
+            pass
 
     # =========================================================
     # HISTORY CHART
@@ -586,400 +626,422 @@ class DashboardTab(tk.Frame):
     # =========================================================
     # REFRESH
     # =========================================================
+    def _set_disconnected(self):
+        m = self.theme.text_muted
+        self.card_connection.config(text="Not connected", fg=m)
+        for card in (self.card_uptime, self.card_temp, self.card_cpu,
+                     self.card_ram, self.card_disk, self.card_net_rx,
+                     self.card_net_tx, self.card_ups_battery,
+                     self.card_ups_load, self.card_ups_runtime,
+                     self.card_gpu_util, self.card_gpu_vram, self.card_gpu_temp):
+            card.config(text="--", fg=m)
+        self.last_updated_lbl.config(text="")
+        self.refresh_btn.config(state="normal", text="⟳ Refresh")
+        self._spinner.stop()
+        self._disconn_overlay.place(relx=0, rely=0, relwidth=1, relheight=1)
+        self._disconn_overlay.lift()
+
     def refresh(self):
+        if getattr(self, "_fetching", False): return
         if not self.controller.ssh.connected:
             self._set_disconnected()
             return
+        self._disconn_overlay.place_forget()
         self.refresh_btn.config(state="disabled", text="Refreshing...")
+        self._spinner.start()
+        self._fetching = True
         threading.Thread(target=self._fetch, daemon=True).start()
 
     def _fetch(self):
-        ssh  = self.controller.ssh
-        host = self.controller.config_manager.last_host
-
-        self.after(0, lambda: self.card_connection.config(
-            text=host, fg=self.theme.status_running))
-
-        # -- Uptime --
-        out, _, _ = ssh.run("uptime -p")
-        uptime = out.strip().replace("up ", "") or "--"
-        self.after(0, lambda: self.card_uptime.config(text=uptime))
-
-        # -- CPU % --
-        cpu_pct_hist = 0
-        out, _, _ = ssh.run("nproc && cat /proc/loadavg")
-        lines = out.strip().splitlines()
         try:
-            cores = int(lines[0])
-            load1 = float(lines[1].split()[0])
-            pct   = min(int(load1 / cores * 100), 100)
-            cpu_pct_hist = pct
-            cpu_text  = str(pct) + "%"
-            cpu_color = self._usage_color(pct)
-        except Exception:
-            cpu_text, cpu_color = "--", self.theme.text_muted
-        self.after(0, lambda t=cpu_text, c=cpu_color: self.card_cpu.config(text=t, fg=c))
+            ssh  = self.controller.ssh
+            host = self.controller.config_manager.last_host
 
-        # -- CPU Temperature --
-        out, _, _ = ssh.run(
-            "cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null || echo 0")
-        try:
-            temp_c = int(out.strip()) // 1000
-            temp_text  = str(temp_c) + "°C"
-            temp_color = (self.theme.status_running if temp_c < 70 else
-                          self.theme.yellow if temp_c < 85 else
-                          self.theme.status_stopped)
-        except Exception:
-            temp_text, temp_color = "--", self.theme.text_muted
-        self.after(0, lambda t=temp_text, c=temp_color: self.card_temp.config(text=t, fg=c))
+            self.after(0, lambda: self.card_connection.config(
+                text=host, fg=self.theme.status_running))
 
-        # -- RAM --
-        ram_pct_hist = 0
-        out, _, _ = ssh.run("free -m | awk 'NR==2{printf \"%s %s\", $3, $2}'")
-        try:
-            used, total = map(int, out.strip().split())
-            pct = int(used / total * 100)
-            ram_pct_hist = pct
-            ram_text  = (str(pct) + "%  (" +
-                         str(used // 1024) + "G / " + str(total // 1024) + "G)")
-            ram_color = self._usage_color(pct)
-        except Exception:
-            ram_text, ram_color = "--", self.theme.text_muted
-        self.after(0, lambda t=ram_text, c=ram_color: self.card_ram.config(text=t, fg=c))
+            # -- Uptime --
+            out, _, _ = ssh.run("uptime -p")
+            uptime = out.strip().replace("up ", "") or "--"
+            self.after(0, lambda: self.card_uptime.config(text=uptime))
 
-        # -- Record history and redraw chart --
-        self._history.append({"cpu": cpu_pct_hist, "ram": ram_pct_hist})
-        self.after(0, self._redraw_chart)
+            # -- CPU % --
+            cpu_pct_hist = 0
+            out, _, _ = ssh.run("nproc && cat /proc/loadavg")
+            lines = out.strip().splitlines()
+            try:
+                cores = int(lines[0])
+                load1 = float(lines[1].split()[0])
+                pct   = min(int(load1 / cores * 100), 100)
+                cpu_pct_hist = pct
+                cpu_text  = str(pct) + "%"
+                cpu_color = self._usage_color(pct)
+            except Exception:
+                cpu_text, cpu_color = "--", self.theme.text_muted
+            self.after(0, lambda t=cpu_text, c=cpu_color: self.card_cpu.config(text=t, fg=c))
 
-        # -- Disk / --
-        out, _, _ = ssh.run("df -h / | awk 'NR==2{print $3\"/\"$2\" (\"$5\")\"}'")
-        disk_text = out.strip() or "--"
-        try:
-            pct_str   = disk_text.split("(")[1].rstrip("%)") if "(" in disk_text else "0"
-            disk_color = self._usage_color(int(pct_str))
-        except Exception:
-            disk_color = self.theme.text_muted
-        self.after(0, lambda t=disk_text, c=disk_color: self.card_disk.config(text=t, fg=c))
+            # -- CPU Temperature --
+            out, _, _ = ssh.run(
+                "cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null || echo 0")
+            try:
+                temp_c = int(out.strip()) // 1000
+                temp_text  = str(temp_c) + "°C"
+                temp_color = (self.theme.status_running if temp_c < 70 else
+                              self.theme.yellow if temp_c < 85 else
+                              self.theme.status_stopped)
+            except Exception:
+                temp_text, temp_color = "--", self.theme.text_muted
+            self.after(0, lambda t=temp_text, c=temp_color: self.card_temp.config(text=t, fg=c))
 
-        # -- Network I/O rate --
-        out, _, _ = ssh.run("cat /proc/net/dev")
-        rx_total = tx_total = 0
-        for line in out.splitlines()[2:]:
-            parts = line.split()
-            if len(parts) >= 10 and not parts[0].startswith("lo"):
+            # -- RAM --
+            ram_pct_hist = 0
+            out, _, _ = ssh.run("free -m | awk 'NR==2{printf \"%s %s\", $3, $2}'")
+            try:
+                used, total = map(int, out.strip().split())
+                pct = int(used / total * 100)
+                ram_pct_hist = pct
+                ram_text  = (str(pct) + "%  (" +
+                             str(used // 1024) + "G / " + str(total // 1024) + "G)")
+                ram_color = self._usage_color(pct)
+            except Exception:
+                ram_text, ram_color = "--", self.theme.text_muted
+            self.after(0, lambda t=ram_text, c=ram_color: self.card_ram.config(text=t, fg=c))
+
+            # -- Record history and redraw chart --
+            self._history.append({"cpu": cpu_pct_hist, "ram": ram_pct_hist})
+            self.after(0, self._redraw_chart)
+
+            # -- Disk / --
+            disk_pct_hist = 0
+            out, _, _ = ssh.run("df -h / | awk 'NR==2{print $3\"/\"$2\" (\"$5\")\"}'")
+            disk_text = out.strip() or "--"
+            try:
+                pct_str    = disk_text.split("(")[1].rstrip("%)") if "(" in disk_text else "0"
+                disk_pct_hist = int(pct_str)
+                disk_color = self._usage_color(disk_pct_hist)
+            except Exception:
+                disk_text, disk_color = "--", self.theme.text_muted
+            self.after(0, lambda t=disk_text, c=disk_color: self.card_disk.config(text=t, fg=c))
+
+            # -- Network I/O rate --
+            out, _, _ = ssh.run("cat /proc/net/dev")
+            rx_total = tx_total = 0
+            for line in out.splitlines()[2:]:
+                parts = line.split()
+                if len(parts) >= 10 and not parts[0].startswith("lo"):
+                    try:
+                        rx_total += int(parts[1])
+                        tx_total += int(parts[9])
+                    except ValueError:
+                        pass
+            now = time.time()
+            rx_bps = tx_bps = 0.0
+            if self._net_prev is not None:
+                prev_rx, prev_tx, prev_t = self._net_prev
+                elapsed = max(now - prev_t, 1)
+                rx_bps  = max(0.0, (rx_total - prev_rx) / elapsed)
+                tx_bps  = max(0.0, (tx_total - prev_tx) / elapsed)
+                rx_text = self._fmt_rate(rx_bps)
+                tx_text = self._fmt_rate(tx_bps)
+                self._net_history.append({"rx_bps": rx_bps, "tx_bps": tx_bps})
+                self.after(0, self._redraw_net_chart)
+            else:
+                rx_text = tx_text = "Sampling..."
+            self._net_prev = (rx_total, tx_total, now)
+
+            # -- Persist snapshot to SQLite --
+            try:
+                cfg = self.controller.config_manager
+                server_id = (cfg.get_active_server() or {}).get("name", "default")
+                self.controller.metrics_store.insert_metric(
+                    server_id=server_id,
+                    cpu=float(cpu_pct_hist),
+                    ram=float(ram_pct_hist),
+                    disk=float(disk_pct_hist),
+                    rx_bps=float(rx_bps),
+                    tx_bps=float(tx_bps),
+                )
+            except Exception:
+                pass
+            self.after(0, lambda t=rx_text: self.card_net_rx.config(text=t))
+            self.after(0, lambda t=tx_text: self.card_net_tx.config(text=t))
+
+            # -- UPS --
+            out, _, _ = ssh.run("upsc apcups@localhost 2>/dev/null")
+            ups = {}
+            for line in out.splitlines():
+                if ":" in line:
+                    k, _, v = line.partition(":")
+                    ups[k.strip()] = v.strip()
+            battery    = ups.get("battery.charge", "--")
+            load       = ups.get("ups.load",       "--")
+            runtime_s  = ups.get("battery.runtime", None)
+            try:
+                secs = int(runtime_s) if runtime_s else 0
+                runtime_text = str(secs // 3600) + "h " + str((secs % 3600) // 60) + "m"
+            except Exception:
+                runtime_text = "--"
+            try:
+                bat_pct   = int(float(battery))
+                bat_color = (self.theme.status_running if bat_pct > 50 else
+                             self.theme.yellow         if bat_pct > 20 else
+                             self.theme.status_stopped)
+            except Exception:
+                bat_color = self.theme.text_muted
+            bat_text  = (battery + "%") if battery != "--" else "--"
+            load_text = (load    + "%") if load    != "--" else "--"
+            self.after(0, lambda t=bat_text,     c=bat_color: self.card_ups_battery.config(text=t, fg=c))
+            self.after(0, lambda t=load_text:                 self.card_ups_load.config(text=t))
+            self.after(0, lambda t=runtime_text:              self.card_ups_runtime.config(text=t))
+
+            # -- GPU (nvidia-smi, then rocm-smi, then lm-sensors fallback) --
+            gpu_util = gpu_vram = gpu_temp = "--"
+            out, _, _ = ssh.run(
+                "nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu "
+                "--format=csv,noheader,nounits 2>/dev/null | head -1")
+            if out and out.strip():
+                parts = [p.strip() for p in out.strip().split(",")]
+                if len(parts) == 4:
+                    try:
+                        gpu_util = parts[0] + "%"
+                        vram_used_mb  = int(parts[1])
+                        vram_total_mb = int(parts[2])
+                        gpu_vram = "{}/{}G".format(
+                            round(vram_used_mb  / 1024, 1),
+                            round(vram_total_mb / 1024, 1))
+                        gpu_temp = parts[3] + "°C"
+                    except Exception:
+                        pass
+            if gpu_util == "--":
+                # Try AMD via rocm-smi
+                out, _, _ = ssh.run(
+                    "rocm-smi --showuse --showmemuse --showtemp 2>/dev/null | "
+                    "awk '/GPU use/{u=$NF} /GTT use/{v=$NF} /Temperature/{t=$NF} "
+                    "END{print u\" \"v\" \"t}'")
+                if out and out.strip() and out.strip() != "  ":
+                    parts = out.strip().split()
+                    if len(parts) >= 1 and parts[0] not in ("", "N/A"):
+                        gpu_util = parts[0] + "%"
+                    if len(parts) >= 2 and parts[1] not in ("", "N/A"):
+                        gpu_vram = parts[1] + "% VRAM"
+                    if len(parts) >= 3 and parts[2] not in ("", "N/A"):
+                        gpu_temp = parts[2] + "°C"
+            if gpu_util == "--":
+                # lm-sensors — try to find a GPU chip
+                out, _, _ = ssh.run(
+                    "sensors 2>/dev/null | grep -A5 -i 'amdgpu\\|nouveau\\|nvidia' | "
+                    "grep -i 'temp\\|junction\\|edge' | head -1 | "
+                    "awk '{for(i=1;i<=NF;i++) if($i~/\\+[0-9]/) {print $i; exit}}'")
+                if out and out.strip():
+                    gpu_temp = out.strip().lstrip("+")
+                    gpu_util = "n/a"
+                    gpu_vram = "n/a"
+            def _update_gpu(u=gpu_util, v=gpu_vram, t=gpu_temp):
+                t_color = (self.theme.status_running if gpu_temp == "--" or gpu_temp in ("n/a",) else
+                           self.theme.status_running if int(''.join(c for c in gpu_temp if c.isdigit()) or 0) < 75 else
+                           self.theme.yellow         if int(''.join(c for c in gpu_temp if c.isdigit()) or 0) < 90 else
+                           self.theme.status_stopped)
+                self.card_gpu_util.config(text=u)
+                self.card_gpu_vram.config(text=v)
+                self.card_gpu_temp.config(text=t, fg=t_color)
+            self.after(0, _update_gpu)
+
+            # -- CPU Temperature (enhanced: prefer lm-sensors package temp) --
+            out, _, _ = ssh.run(
+                "sensors 2>/dev/null | grep -E 'Package id|Tdie|Tctl|k10temp' | "
+                "head -1 | grep -oP '\\+[0-9.]+°C' | head -1 || "
+                "awk '{print int($1/1000)}' /sys/class/thermal/thermal_zone0/temp 2>/dev/null")
+            if out and out.strip():
+                raw = out.strip().lstrip("+").replace("°C", "").strip()
                 try:
-                    rx_total += int(parts[1])
-                    tx_total += int(parts[9])
-                except ValueError:
-                    pass
-        now = time.time()
-        rx_bps = tx_bps = 0.0
-        if self._net_prev is not None:
-            prev_rx, prev_tx, prev_t = self._net_prev
-            elapsed = max(now - prev_t, 1)
-            rx_bps  = max(0.0, (rx_total - prev_rx) / elapsed)
-            tx_bps  = max(0.0, (tx_total - prev_tx) / elapsed)
-            rx_text = self._fmt_rate(rx_bps)
-            tx_text = self._fmt_rate(tx_bps)
-            self._net_history.append({"rx_bps": rx_bps, "tx_bps": tx_bps})
-            self.after(0, self._redraw_net_chart)
-        else:
-            rx_text = tx_text = "Sampling..."
-        self._net_prev = (rx_total, tx_total, now)
-        self.after(0, lambda t=rx_text: self.card_net_rx.config(text=t))
-        self.after(0, lambda t=tx_text: self.card_net_tx.config(text=t))
-
-        # -- UPS --
-        out, _, _ = ssh.run("upsc apcups@localhost 2>/dev/null")
-        ups = {}
-        for line in out.splitlines():
-            if ":" in line:
-                k, _, v = line.partition(":")
-                ups[k.strip()] = v.strip()
-        battery    = ups.get("battery.charge", "--")
-        load       = ups.get("ups.load",       "--")
-        runtime_s  = ups.get("battery.runtime", None)
-        try:
-            secs = int(runtime_s) if runtime_s else 0
-            runtime_text = str(secs // 3600) + "h " + str((secs % 3600) // 60) + "m"
-        except Exception:
-            runtime_text = "--"
-        try:
-            bat_pct   = int(float(battery))
-            bat_color = (self.theme.status_running if bat_pct > 50 else
-                         self.theme.yellow         if bat_pct > 20 else
-                         self.theme.status_stopped)
-        except Exception:
-            bat_color = self.theme.text_muted
-        bat_text  = (battery + "%") if battery != "--" else "--"
-        load_text = (load    + "%") if load    != "--" else "--"
-        self.after(0, lambda t=bat_text,     c=bat_color: self.card_ups_battery.config(text=t, fg=c))
-        self.after(0, lambda t=load_text:                 self.card_ups_load.config(text=t))
-        self.after(0, lambda t=runtime_text:              self.card_ups_runtime.config(text=t))
-
-        # -- GPU (nvidia-smi, then rocm-smi, then lm-sensors fallback) --
-        gpu_util = gpu_vram = gpu_temp = "--"
-        out, _, _ = ssh.run(
-            "nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu "
-            "--format=csv,noheader,nounits 2>/dev/null | head -1")
-        if out and out.strip():
-            parts = [p.strip() for p in out.strip().split(",")]
-            if len(parts) == 4:
-                try:
-                    gpu_util = parts[0] + "%"
-                    vram_used_mb  = int(parts[1])
-                    vram_total_mb = int(parts[2])
-                    gpu_vram = "{}/{}G".format(
-                        round(vram_used_mb  / 1024, 1),
-                        round(vram_total_mb / 1024, 1))
-                    gpu_temp = parts[3] + "°C"
+                    temp_c     = float(raw)
+                    temp_text  = "{:.0f}°C".format(temp_c)
+                    temp_color = (self.theme.status_running if temp_c < 70 else
+                                  self.theme.yellow         if temp_c < 85 else
+                                  self.theme.status_stopped)
+                    self.after(0, lambda t=temp_text, c=temp_color: self.card_temp.config(text=t, fg=c))
                 except Exception:
                     pass
-        if gpu_util == "--":
-            # Try AMD via rocm-smi
+
+            # -- SABnzbd --
+            out, _, _ = ssh.run("systemctl is-active sabnzbdplus 2>/dev/null")
+            sab_state = out.strip() or "unknown"
+            sab_color = (self.theme.status_running if sab_state == "active" else
+                         self.theme.status_stopped)
+            self.after(0, lambda t=sab_state, c=sab_color: self.card_sabnzbd.config(text=t, fg=c))
+
+            # -- Storage breakdown (per-mount df for reliable parsing) --
+            mounts = self.controller.config_manager.get_storage_mounts()
+            mount_args = " ".join('"{0}"'.format(m.replace('"', '\\"')) for m in mounts)
             out, _, _ = ssh.run(
-                "rocm-smi --showuse --showmemuse --showtemp 2>/dev/null | "
-                "awk '/GPU use/{u=$NF} /GTT use/{v=$NF} /Temperature/{t=$NF} "
-                "END{print u\" \"v\" \"t}'")
-            if out and out.strip() and out.strip() != "  ":
-                parts = out.strip().split()
-                if len(parts) >= 1 and parts[0] not in ("", "N/A"):
-                    gpu_util = parts[0] + "%"
-                if len(parts) >= 2 and parts[1] not in ("", "N/A"):
-                    gpu_vram = parts[1] + "% VRAM"
-                if len(parts) >= 3 and parts[2] not in ("", "N/A"):
-                    gpu_temp = parts[2] + "°C"
-        if gpu_util == "--":
-            # lm-sensors — try to find a GPU chip
-            out, _, _ = ssh.run(
-                "sensors 2>/dev/null | grep -A5 -i 'amdgpu\\|nouveau\\|nvidia' | "
-                "grep -i 'temp\\|junction\\|edge' | head -1 | "
-                "awk '{for(i=1;i<=NF;i++) if($i~/\\+[0-9]/) {print $i; exit}}'")
-            if out and out.strip():
-                gpu_temp = out.strip().lstrip("+")
-                gpu_util = "n/a"
-                gpu_vram = "n/a"
-        def _update_gpu(u=gpu_util, v=gpu_vram, t=gpu_temp):
-            t_color = (self.theme.status_running if gpu_temp == "--" or gpu_temp in ("n/a",) else
-                       self.theme.status_running if int(''.join(c for c in gpu_temp if c.isdigit()) or 0) < 75 else
-                       self.theme.yellow         if int(''.join(c for c in gpu_temp if c.isdigit()) or 0) < 90 else
-                       self.theme.status_stopped)
-            self.card_gpu_util.config(text=u)
-            self.card_gpu_vram.config(text=v)
-            self.card_gpu_temp.config(text=t, fg=t_color)
-        self.after(0, _update_gpu)
+                'for m in {0}; do '
+                'r=$(df -h "$m" 2>/dev/null | awk \'NR==2{{print $3"|"$2"|"$5}}\'); '
+                '[ -n "$r" ] && echo "$m|$r"; '
+                'done'.format(mount_args))
+            storage_data = {}
+            for line in out.strip().splitlines():
+                parts = [p.strip() for p in line.split("|")]
+                if len(parts) == 4 and parts[0]:
+                    storage_data[parts[0]] = (parts[1], parts[2], parts[3])
+            def _update_storage(storage_data=storage_data):
+                for mount, iid in self.storage_rows.items():
+                    row_tag = "even" if list(self.storage_rows).index(mount) % 2 == 0 else "odd"
+                    if mount in storage_data:
+                        used_s, total_s, pct_s = storage_data[mount]
+                        try:
+                            pct_int = int(pct_s.rstrip("%"))
+                            if pct_int >= 85:   clr_tag = "crit"
+                            elif pct_int >= 60: clr_tag = "warn"
+                            else:               clr_tag = "ok"
+                        except Exception:
+                            clr_tag = ""
+                        self.storage_tree.item(iid,
+                            values=(mount, used_s, total_s, pct_s),
+                            tags=(row_tag, clr_tag))
+                    else:
+                        self.storage_tree.item(iid,
+                            values=(mount, "N/A", "N/A", "N/A"),
+                            tags=(row_tag,))
+            self.after(0, _update_storage)
 
-        # -- CPU Temperature (enhanced: prefer lm-sensors package temp) --
-        out, _, _ = ssh.run(
-            "sensors 2>/dev/null | grep -E 'Package id|Tdie|Tctl|k10temp' | "
-            "head -1 | grep -oP '\\+[0-9.]+°C' | head -1 || "
-            "awk '{print int($1/1000)}' /sys/class/thermal/thermal_zone0/temp 2>/dev/null")
-        if out and out.strip():
-            raw = out.strip().lstrip("+").replace("°C", "").strip()
-            try:
-                temp_c     = float(raw)
-                temp_text  = "{:.0f}°C".format(temp_c)
-                temp_color = (self.theme.status_running if temp_c < 70 else
-                              self.theme.yellow         if temp_c < 85 else
-                              self.theme.status_stopped)
-                self.after(0, lambda t=temp_text, c=temp_color: self.card_temp.config(text=t, fg=c))
-            except Exception:
-                pass
+            # -- Docker health --
+            docker_cfg = self.controller.config_manager.get_docker()
+            dm = self.controller.docker_manager
+            for name, data in docker_cfg.items():
+                if name not in self.docker_cards:
+                    continue
+                status = dm.get_status(data["container"])
+                color  = (self.theme.status_running  if status == "running"   else
+                          self.theme.status_stopped  if status == "stopped"   else
+                          self.theme.yellow          if status == "paused"    else
+                          self.theme.cyan            if status == "scheduled" else
+                          self.theme.status_unknown)
+                def _upd_docker(n=name, s=status, c=color):
+                    card = self.docker_cards[n]
+                    card["dot"].delete("all")
+                    card["dot"].create_oval(1, 1, 9, 9, fill=c, outline=c)
+                    card["status_lbl"].config(text=s, fg=c)
+                self.after(0, _upd_docker)
 
-        # -- SABnzbd --
-        out, _, _ = ssh.run("systemctl is-active sabnzbdplus 2>/dev/null")
-        sab_state = out.strip() or "unknown"
-        sab_color = (self.theme.status_running if sab_state == "active" else
-                     self.theme.status_stopped)
-        self.after(0, lambda t=sab_state, c=sab_color: self.card_sabnzbd.config(text=t, fg=c))
-
-        # -- Storage breakdown (per-mount df for reliable parsing) --
-        mounts = self.controller.config_manager.get_storage_mounts()
-        mount_args = " ".join('"{0}"'.format(m.replace('"', '\\"')) for m in mounts)
-        out, _, _ = ssh.run(
-            'for m in {0}; do '
-            'r=$(df -h "$m" 2>/dev/null | awk \'NR==2{{print $3"|"$2"|"$5}}\'); '
-            '[ -n "$r" ] && echo "$m|$r"; '
-            'done'.format(mount_args))
-        storage_data = {}
-        for line in out.strip().splitlines():
-            parts = [p.strip() for p in line.split("|")]
-            if len(parts) == 4 and parts[0]:
-                storage_data[parts[0]] = (parts[1], parts[2], parts[3])
-        def _update_storage(storage_data=storage_data):
-            for mount, iid in self.storage_rows.items():
-                row_tag = "even" if list(self.storage_rows).index(mount) % 2 == 0 else "odd"
-                if mount in storage_data:
-                    used_s, total_s, pct_s = storage_data[mount]
-                    try:
-                        pct_int = int(pct_s.rstrip("%"))
-                        if pct_int >= 85:   clr_tag = "crit"
-                        elif pct_int >= 60: clr_tag = "warn"
-                        else:               clr_tag = "ok"
-                    except Exception:
-                        clr_tag = ""
-                    self.storage_tree.item(iid,
-                        values=(mount, used_s, total_s, pct_s),
-                        tags=(row_tag, clr_tag))
+            # -- Services --
+            services_cfg = self.controller.config_manager.get_services()
+            sm = self.controller.service_manager
+            running = stopped = 0
+            for name, data in services_cfg.items():
+                status = sm.get_status(data["service"])
+                if status == "running":
+                    running += 1
+                    color = self.theme.status_running
+                elif status in ("stopped", "failed"):
+                    stopped += 1
+                    color = self.theme.status_stopped
                 else:
-                    self.storage_tree.item(iid,
-                        values=(mount, "N/A", "N/A", "N/A"),
-                        tags=(row_tag,))
-        self.after(0, _update_storage)
+                    color = self.theme.status_unknown
+                def _upd_svc(n=name, s=status, c=color):
+                    if n in self.svc_rows:
+                        self.svc_rows[n].config(text=s, fg=c)
+                self.after(0, _upd_svc)
+            self.after(0, lambda: self.card_svc_running.config(text=str(running)))
+            self.after(0, lambda: self.card_svc_stopped.config(
+                text=str(stopped),
+                fg=self.theme.status_stopped if stopped else self.theme.status_running))
 
-        # -- Docker health --
-        docker_cfg = self.controller.config_manager.get_docker()
-        dm = self.controller.docker_manager
-        for name, data in docker_cfg.items():
-            if name not in self.docker_cards:
-                continue
-            status = dm.get_status(data["container"])
-            color  = (self.theme.status_running  if status == "running"   else
-                      self.theme.status_stopped  if status == "stopped"   else
-                      self.theme.yellow          if status == "paused"    else
-                      self.theme.cyan            if status == "scheduled" else
-                      self.theme.status_unknown)
-            def _upd_docker(n=name, s=status, c=color):
-                card = self.docker_cards[n]
-                card["dot"].delete("all")
-                card["dot"].create_oval(1, 1, 9, 9, fill=c, outline=c)
-                card["status_lbl"].config(text=s, fg=c)
-            self.after(0, _upd_docker)
+            # -- Top Processes --
+            out, _, _ = ssh.run(
+                "ps aux --sort=-%cpu --no-header | head -5"
+                " | awk '{print $1\"|\"$3\"|\"$4\"|\"$11}'")
+            procs = [l.split("|") for l in out.strip().splitlines() if "|" in l]
+            def _update_procs(procs=procs):
+                for i, iid in enumerate(self.proc_iids):
+                    if i < len(procs) and len(procs[i]) == 4:
+                        u, c, m, cmd = procs[i]
+                        cmd_s = cmd.split("/")[-1][:45]
+                        self.proc_tree.item(iid, values=(u, c + "%", m + "%", cmd_s))
+                    else:
+                        self.proc_tree.item(iid, values=("--", "--", "--", "--"))
+            self.after(0, _update_procs)
 
-        # -- Services --
-        services_cfg = self.controller.config_manager.get_services()
-        sm = self.controller.service_manager
-        running = stopped = 0
-        for name, data in services_cfg.items():
-            status = sm.get_status(data["service"])
-            if status == "running":
-                running += 1
-                color = self.theme.status_running
-            elif status in ("stopped", "failed"):
-                stopped += 1
-                color = self.theme.status_stopped
+            # -- Recent Errors --
+            out, _, _ = ssh.run(
+                "journalctl -p err -n 5 --no-pager --output=short 2>/dev/null")
+            alert_text = out.strip() or "No recent errors"
+            def _upd_alerts(t=alert_text):
+                self.alert_text.configure(state="normal")
+                self.alert_text.delete("1.0", "end")
+                self.alert_text.insert("end", t)
+                self.alert_text.configure(state="disabled")
+            self.after(0, _upd_alerts)
+
+            # -- Last Backup --
+            out, _, _ = ssh.run(
+                "tail -5 /var/log/media-backup.log 2>/dev/null || echo 'Log not found'")
+            blog = out.strip()
+            blog_lower = blog.lower()
+            if any(w in blog_lower for w in ("success", "complete", "done", "finished")):
+                dot_color   = self.theme.status_running
+                status_text = "Success"
+            elif any(w in blog_lower for w in ("error", "fail", "fatal")):
+                dot_color   = self.theme.status_stopped
+                status_text = "Failed"
             else:
-                color = self.theme.status_unknown
-            def _upd_svc(n=name, s=status, c=color):
-                if n in self.svc_rows:
-                    self.svc_rows[n].config(text=s, fg=c)
-            self.after(0, _upd_svc)
-        self.after(0, lambda: self.card_svc_running.config(text=str(running)))
-        self.after(0, lambda: self.card_svc_stopped.config(
-            text=str(stopped),
-            fg=self.theme.status_stopped if stopped else self.theme.status_running))
+                dot_color   = self.theme.text_muted
+                status_text = "Unknown"
+            def _upd_backup(log=blog, dc=dot_color, st=status_text):
+                self.backup_dot.delete("all")
+                self.backup_dot.create_oval(1, 1, 11, 11, fill=dc, outline=dc)
+                self.backup_status_lbl.config(text=st, fg=dc)
+                self.backup_text.configure(state="normal")
+                self.backup_text.delete("1.0", "end")
+                self.backup_text.insert("end", log)
+                self.backup_text.configure(state="disabled")
+            self.after(0, _upd_backup)
 
-        # -- Top Processes --
-        out, _, _ = ssh.run(
-            "ps aux --sort=-%cpu --no-header | head -5"
-            " | awk '{print $1\"|\"$3\"|\"$4\"|\"$11}'")
-        procs = [l.split("|") for l in out.strip().splitlines() if "|" in l]
-        def _update_procs(procs=procs):
-            for i, iid in enumerate(self.proc_iids):
-                if i < len(procs) and len(procs[i]) == 4:
-                    u, c, m, cmd = procs[i]
-                    cmd_s = cmd.split("/")[-1][:45]
-                    self.proc_tree.item(iid, values=(u, c + "%", m + "%", cmd_s))
-                else:
-                    self.proc_tree.item(iid, values=("--", "--", "--", "--"))
-        self.after(0, _update_procs)
-
-        # -- Recent Errors --
-        out, _, _ = ssh.run(
-            "journalctl -p err -n 5 --no-pager --output=short 2>/dev/null")
-        alert_text = out.strip() or "No recent errors"
-        def _upd_alerts(t=alert_text):
-            self.alert_text.configure(state="normal")
-            self.alert_text.delete("1.0", "end")
-            self.alert_text.insert("end", t)
-            self.alert_text.configure(state="disabled")
-        self.after(0, _upd_alerts)
-
-        # -- Last Backup --
-        out, _, _ = ssh.run(
-            "tail -5 /var/log/media-backup.log 2>/dev/null || echo 'Log not found'")
-        blog = out.strip()
-        blog_lower = blog.lower()
-        if any(w in blog_lower for w in ("success", "complete", "done", "finished")):
-            dot_color   = self.theme.status_running
-            status_text = "Success"
-        elif any(w in blog_lower for w in ("error", "fail", "fatal")):
-            dot_color   = self.theme.status_stopped
-            status_text = "Failed"
-        else:
-            dot_color   = self.theme.text_muted
-            status_text = "Unknown"
-        def _upd_backup(log=blog, dc=dot_color, st=status_text):
-            self.backup_dot.delete("all")
-            self.backup_dot.create_oval(1, 1, 11, 11, fill=dc, outline=dc)
-            self.backup_status_lbl.config(text=st, fg=dc)
-            self.backup_text.configure(state="normal")
-            self.backup_text.delete("1.0", "end")
-            self.backup_text.insert("end", log)
-            self.backup_text.configure(state="disabled")
-        self.after(0, _upd_backup)
-
-        # -- Alert threshold checks --
-        alerts = []
-        thresh = self.controller.config_manager.get_thresholds()
-        if cpu_pct_hist and cpu_pct_hist >= thresh.get("cpu", 80):
-            alerts.append("CPU {0}%".format(cpu_pct_hist))
-        if ram_pct_hist and ram_pct_hist >= thresh.get("ram", 85):
-            alerts.append("RAM {0}%".format(ram_pct_hist))
-        # check latest storage disk %
-        for mount, iid in self.storage_rows.items():
+            # -- Alert rule evaluation --
+            _temp_c = 0.0
             try:
-                pct_text = self.storage_tree.item(iid, "values")[3]
-                pct_val = int(str(pct_text).rstrip("%"))
-                if pct_val >= thresh.get("disk", 90):
-                    alerts.append("Disk {0} {1}%".format(mount, pct_val))
+                _temp_c = float(self.card_temp.cget("text").rstrip("°C"))
             except Exception:
                 pass
-        # check temp
-        try:
-            tc = int(self.card_temp.cget("text").rstrip("°C"))
-            if tc >= thresh.get("temp", 85):
-                alerts.append("Temp {0}°C".format(tc))
-        except Exception:
-            pass
-        self.after(0, lambda a=alerts: self.controller.fire_alerts(a))
 
-        # -- Timestamp --
-        ts = time.strftime("%H:%M:%S")
-        self.after(0, lambda: self.last_updated_lbl.config(text="Updated " + ts))
-        self.after(0, lambda: self.refresh_btn.config(state="normal", text="Refresh"))
+            _disk_max = float(disk_pct_hist)
+            for _mount, _iid in self.storage_rows.items():
+                try:
+                    _pct = float(str(self.storage_tree.item(_iid, "values")[3]).rstrip("%"))
+                    if _pct > _disk_max:
+                        _disk_max = _pct
+                except Exception:
+                    pass
 
-        self._schedule_refresh()
+            _metrics = {
+                "cpu":  float(cpu_pct_hist),
+                "ram":  float(ram_pct_hist),
+                "disk": _disk_max,
+                "temp": _temp_c,
+            }
+            self.after(0, lambda m=_metrics: self.controller.fire_metric_alerts(m))
 
-    # =========================================================
-    # HELPERS
-    # =========================================================
-    def _set_disconnected(self):
-        self.card_connection.config(text="Not connected", fg=self.theme.status_stopped)
-        for lbl in (self.card_uptime, self.card_temp, self.card_cpu, self.card_ram,
-                    self.card_disk, self.card_net_rx, self.card_net_tx,
-                    self.card_ups_battery, self.card_ups_load, self.card_ups_runtime,
-                    self.card_sabnzbd, self.card_svc_running, self.card_svc_stopped):
-            lbl.config(text="--", fg=self.theme.text_muted)
-        for mount, iid in self.storage_rows.items():
-            self.storage_tree.item(iid, values=(mount, "--", "--", "--"))
-        for lbl in self.svc_rows.values():
-            lbl.config(text="unknown", fg=self.theme.status_unknown)
-        for iid in self.proc_iids:
-            self.proc_tree.item(iid, values=("--", "--", "--", "--"))
-        self.refresh_btn.config(state="normal", text="Refresh")
+            # -- Timestamp --
+            ts = time.strftime("%H:%M:%S")
+            self.after(0, lambda: self.last_updated_lbl.config(text="Updated " + ts))
+            self.after(0, lambda: self.refresh_btn.config(state="normal", text="⟳ Refresh"))
+            self.after(0, self._spinner.stop)
 
+        # =========================================================
+        # HELPERS
+        # =========================================================
+        finally:
+            self._fetching = False
     def _usage_color(self, pct):
-        if pct < 60: return self.theme.status_running
-        if pct < 85: return self.theme.yellow
-        return self.theme.status_stopped
+        t = self.theme
+        if pct < 70:
+            return t.status_running
+        if pct < 85:
+            return t.yellow
+        return t.status_stopped
 
     def _fmt_rate(self, bps):
-        if bps < 1024:
-            return str(int(bps)) + " B/s"
-        if bps < 1024 * 1024:
-            return "{:.1f} KB/s".format(bps / 1024)
-        return "{:.1f} MB/s".format(bps / (1024 * 1024))
-
-    def _schedule_refresh(self):
-        self._rc.schedule()
+        if bps >= 1_000_000:
+            return "{:.1f} MB/s".format(bps / 1_000_000)
+        if bps >= 1_000:
+            return "{:.1f} KB/s".format(bps / 1_000)
+        return "{:.0f} B/s".format(bps)
