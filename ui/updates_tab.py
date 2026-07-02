@@ -184,34 +184,45 @@ class UpdatesTab(tk.Frame):
                 except Exception:
                     continue
 
-            # 2. Docker image check — pull --dry-run not available everywhere,
-            # so we compare local image digest to registry via docker pull output
+            # 2. Docker image check — compare the image ID the container is
+            # actually running against the freshly-pulled tag's image ID.
+            # (Parsing docker pull's text output instead — "up to date" vs
+            # "newer" — is unreliable across repeated checks: once an update
+            # has been pulled once, the local cache already matches the
+            # registry, so every later pull reports "up to date" even though
+            # the *running* container was never recreated and is still on
+            # the old image. Comparing IDs directly avoids that false
+            # negative regardless of local cache state.)
             docker_cfg = self.controller.config_manager.get_docker()
             docker_results = []
             for name, data in docker_cfg.items():
                 container = data.get("container", "")
                 if not container:
                     continue
-                # Get current image name
-                img_out, _, _ = ssh.run(
-                    "docker inspect --format '{{.Config.Image}}' " + shlex.quote(container) + " 2>/dev/null")
-                image = img_out.strip() or container
-                # Pull without extracting — just check if "Status: Image is up to date" or "newer"
+                q = shlex.quote(container)
+                # .Config.Image = the tag the container was created from
+                # .Image        = the image ID it's actually running right now
+                insp_out, _, insp_code = ssh.run(
+                    "docker inspect --format '{{.Config.Image}}|{{.Image}}' " + q + " 2>/dev/null")
+                if insp_code != 0 or not insp_out.strip():
+                    docker_results.append((name, container, "Not found", "unknown", container))
+                    continue
+                insp_parts = insp_out.strip().split("|", 1)
+                image      = insp_parts[0] if insp_parts and insp_parts[0] else container
+                running_id = insp_parts[1] if len(insp_parts) > 1 else ""
+
                 pull_out, _, pull_code = ssh.run_sudo(
-                    "docker pull {}".format(shlex.quote(image)))
-                pull_line = pull_out.strip()
-                if "up to date" in pull_line.lower():
-                    status = "Up to date"
-                    tag    = "current"
-                elif "newer" in pull_line.lower() or "pull complete" in pull_line.lower():
-                    status = "Updated ✓"
-                    tag    = "update"
-                elif pull_code != 0:
-                    status = "Check failed"
-                    tag    = "unknown"
+                    "docker pull {} 2>&1".format(shlex.quote(image)))
+                if pull_code != 0:
+                    status, tag = pull_out.strip()[:30] or "Check failed", "unknown"
                 else:
-                    status = pull_line[:30] or "Unknown"
-                    tag    = "unknown"
+                    new_id_out, _, _ = ssh.run(
+                        "docker inspect --format '{{.Id}}' " + shlex.quote(image) + " 2>/dev/null")
+                    new_id = new_id_out.strip()
+                    if new_id and running_id and new_id != running_id:
+                        status, tag = "Update available", "update"
+                    else:
+                        status, tag = "Up to date", "current"
                 docker_results.append((name, image, status, tag, container))
 
             self.after(0, lambda a=apt_packages, d=docker_results: self._populate(a, d))
@@ -252,7 +263,7 @@ class UpdatesTab(tk.Frame):
 
         for label, val, color in [
             ("Apt Updates",      str(apt_count),      t.yellow if apt_count else t.status_running),
-            ("Docker Refreshed", str(docker_updated), t.cyan),
+            ("Docker Updates",   str(docker_updated), t.yellow if docker_updated else t.status_running),
             ("Docker Checked",   str(len(docker_results)), t.text_muted),
         ]:
             card = tk.Frame(self._summary_frame, bg=t.card_bg,
