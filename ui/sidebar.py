@@ -231,7 +231,9 @@ class Sidebar(tk.Frame):
 
         # ── Build nav items ───────────────────────────────────────────
         self._section_widgets = []
+        self._first_nav_row   = None   # anchor for _server_section_frame re-pack
         current_section = None
+        pending_section = None
 
         for icon, label, idx, section in self._NAV_ITEMS:
             if section and section != current_section:
@@ -257,11 +259,21 @@ class Sidebar(tk.Frame):
                 )
                 sec_lbl.pack(side="left", fill="x", expand=True, pady=4)
                 sec_lbl.bind("<MouseWheel>", self._on_mousewheel)
-                self._section_widgets.append((sec_frame, spacer))
+                # Row for this item (below) is this section's anchor — captured
+                # once it's created, so re-packing after a collapse can restore
+                # the header to its correct position instead of appending it
+                # to the end of the pack order.
+                pending_section = (sec_frame, spacer)
 
             row = tk.Frame(self._nav_frame, bg=t.sidebar_bg)
             row.pack(fill="x", padx=6, pady=1)
             row.bind("<MouseWheel>", self._on_mousewheel)
+            if self._first_nav_row is None:
+                self._first_nav_row = row
+            if pending_section is not None:
+                sec_frame, spacer = pending_section
+                self._section_widgets.append((sec_frame, spacer, row))
+                pending_section = None
 
             btn = tk.Button(
                 row,
@@ -585,8 +597,14 @@ class Sidebar(tk.Frame):
                 lambda e, s=srv, ii=i: self._server_right_click(e, s, ii))
             self._create_tooltip(btn, name)
 
-        # Show the frame (was hidden if no servers before)
-        self._server_section_frame.pack(fill="x")
+        # Show the frame (was hidden if no servers before). before= restores
+        # it to the top instead of appending it after every other section
+        # if this runs after _build_sidebar already packed the rest of the
+        # nav (e.g. adding the first server after startup).
+        if self._first_nav_row is not None:
+            self._server_section_frame.pack(fill="x", before=self._first_nav_row)
+        else:
+            self._server_section_frame.pack(fill="x")
 
     def _server_click(self, profile, idx):
         try:
@@ -684,14 +702,17 @@ class Sidebar(tk.Frame):
             self._ver_lbl.config(text="All Clear  ·  v2.0.0")
             self._shortcut_hint.pack(side="bottom", pady=(0, 4))
 
-        # Section header frames
-        for sec_frame, spacer in self._section_widgets:
+        # Section header frames — re-pack with before= to restore each
+        # header to its original slot (a bare pack() would instead append
+        # it after every already-packed nav row, dumping every section
+        # label at the bottom of the sidebar).
+        for sec_frame, spacer, anchor_row in self._section_widgets:
             if collapsed:
                 sec_frame.pack_forget()
                 spacer.pack_forget()
             else:
-                spacer.pack(fill="x")
-                sec_frame.pack(fill="x", pady=(0, 2))
+                spacer.pack(fill="x", before=anchor_row)
+                sec_frame.pack(fill="x", pady=(0, 2), before=anchor_row)
 
         # Nav button text: icon only vs icon + label
         for btn, icon, label, idx, row in self._buttons:
