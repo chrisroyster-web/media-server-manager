@@ -143,12 +143,26 @@ class ComposeTab(tk.Frame):
                 stacks.append((parts[0], parts[-1] if len(parts) >= 3 else "", parts[1]))
         return stacks
 
+    def _compose_file_flags(self, config_file):
+        """
+        Build -f flags from docker compose ls's ConfigFiles field (comma-separated
+        when a stack uses an override file). -p <project> alone is not reliably
+        enough for `pull`/`up` on every Compose version -- those need to actually
+        read the compose file, and not all versions can recover its location from
+        existing containers' labels ("No configuration file provided: not found").
+        """
+        if not config_file:
+            return ""
+        files = [f.strip() for f in config_file.split(",") if f.strip()]
+        return " ".join("-f {}".format(shlex.quote(f)) for f in files)
+
     def _fetch_services(self, ssh, stack_name, config_file):
         """Return list of (service_name, status, image) for a stack."""
         # Use -p (project name) to scope to the stack
-        q = shlex.quote(stack_name)
-        cmd = "docker compose -p {} ps --format json 2>/dev/null || docker compose -p {} ps 2>/dev/null".format(
-            q, q)
+        q  = shlex.quote(stack_name)
+        ff = self._compose_file_flags(config_file)
+        cmd = "docker compose {ff} -p {q} ps --format json 2>/dev/null || docker compose {ff} -p {q} ps 2>/dev/null".format(
+            ff=ff, q=q)
         out, _, code = ssh.run(cmd)
         services = []
         if code != 0 or not out.strip():
@@ -233,10 +247,10 @@ class ComposeTab(tk.Frame):
 
         # Action buttons
         btn_cfg = [
-            ("▲ Up",      t.status_running,   lambda n=name: self._run_action(n, "up -d")),
-            ("▼ Down",    t.status_stopped,     lambda n=name: self._run_action(n, "down")),
-            ("⟳ Restart", t.yellow,  lambda n=name: self._run_action(n, "restart")),
-            ("⬇ Pull",    t.blue,    lambda n=name: self._run_action(n, "pull")),
+            ("▲ Up",      t.status_running,   lambda n=name, c=config_file: self._run_action(n, c, "up -d")),
+            ("▼ Down",    t.status_stopped,     lambda n=name, c=config_file: self._run_action(n, c, "down")),
+            ("⟳ Restart", t.yellow,  lambda n=name, c=config_file: self._run_action(n, c, "restart")),
+            ("⬇ Pull",    t.blue,    lambda n=name, c=config_file: self._run_action(n, c, "pull")),
         ]
         for btn_txt, btn_col, cmd in reversed(btn_cfg):
             fg = "#000000" if btn_col == t.yellow else "#ffffff"
@@ -317,7 +331,7 @@ class ComposeTab(tk.Frame):
     # ------------------------------------------------------------------
     # ACTIONS
     # ------------------------------------------------------------------
-    def _run_action(self, stack_name, action):
+    def _run_action(self, stack_name, config_file, action):
         # Find the card for this stack
         card = None
         for f in self._stack_frames:
@@ -334,7 +348,8 @@ class ComposeTab(tk.Frame):
                 self._append_console(card, "Not connected.\n")
                 return
 
-            cmd = "docker compose -p {} {} 2>&1".format(shlex.quote(stack_name), action)
+            ff  = self._compose_file_flags(config_file)
+            cmd = "docker compose {} -p {} {} 2>&1".format(ff, shlex.quote(stack_name), action)
             self._append_console(card, "$ {}\n".format(cmd))
             out, _, _ = ssh.run(cmd)
             self._append_console(card, out + "\n")

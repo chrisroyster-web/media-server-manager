@@ -354,18 +354,27 @@ class UpdatesTab(tk.Frame):
                 False, "Could not inspect {} — is it still running?".format(container)))
             return
 
-        labels = (info.get("Config") or {}).get("Labels") or {}
-        project = labels.get("com.docker.compose.project")
-        service = labels.get("com.docker.compose.service")
+        labels      = (info.get("Config") or {}).get("Labels") or {}
+        project     = labels.get("com.docker.compose.project")
+        service     = labels.get("com.docker.compose.service")
+        config_file = labels.get("com.docker.compose.project.config_files", "")
 
         if project and service:
-            self._apply_via_compose(ssh, project, service, display_name)
+            self._apply_via_compose(ssh, project, service, config_file, display_name)
         else:
             self._prompt_recreate(ssh, container, info, display_name, image)
 
-    def _apply_via_compose(self, ssh, project, service, display_name):
-        cmd = "docker compose -p {p} pull {s} && docker compose -p {p} up -d {s}".format(
-            p=shlex.quote(project), s=shlex.quote(service))
+    def _apply_via_compose(self, ssh, project, service, config_file, display_name):
+        # -p (project name) alone isn't reliably enough for `pull`/`up` on every
+        # Compose version -- those need to read the actual compose file, and not
+        # every version can recover its location from container labels ("No
+        # configuration file provided: not found"). Docker Compose stamps the
+        # file path(s) it used onto every container it creates via the
+        # com.docker.compose.project.config_files label, so use that directly.
+        ff = " ".join("-f {}".format(shlex.quote(f.strip()))
+                       for f in config_file.split(",") if f.strip())
+        cmd = "docker compose {ff} -p {p} pull {s} && docker compose {ff} -p {p} up -d {s}".format(
+            ff=ff, p=shlex.quote(project), s=shlex.quote(service))
         self._log("$ {}\n".format(cmd))
         out, err, code = ssh.run(cmd)
         self._log((out or "") + (err or "") + "\n", "ok" if code == 0 else "err")
