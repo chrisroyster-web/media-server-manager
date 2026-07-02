@@ -10,6 +10,7 @@ from tkinter import ttk, messagebox
 import threading
 import time
 import shlex
+import json
 
 
 class UpdatesTab(tk.Frame):
@@ -71,9 +72,14 @@ class UpdatesTab(tk.Frame):
             ])
 
         # --- Docker section ---
-        tk.Label(self, text="Docker Images",
-                 bg=t.bg, fg=t.text, font=t.font_title).pack(
-            anchor="w", padx=16, pady=(4, 2))
+        docker_hdr = tk.Frame(self, bg=t.bg)
+        docker_hdr.pack(fill="x", padx=16, pady=(4, 2))
+        tk.Label(docker_hdr, text="Docker Images",
+                 bg=t.bg, fg=t.text, font=t.font_title).pack(side="left")
+        self._apply_btn = tk.Button(docker_hdr, text="⬆  Apply Update",
+                                     command=self._apply_update, state="disabled")
+        t.style_button(self._apply_btn)
+        self._apply_btn.pack(side="right")
 
         docker_frame = tk.Frame(self, bg=t.bg)
         docker_frame.pack(fill="x", padx=16, pady=(0, 4))
@@ -84,6 +90,8 @@ class UpdatesTab(tk.Frame):
                 ("image",     "Image",      300, "w"),
                 ("status",    "Status",     120, "center"),
             ])
+        self._docker_tree.bind("<<TreeviewSelect>>", self._on_docker_select)
+        self._docker_row_info = {}   # tree iid -> {"container", "image", "tag"}
 
         # Output console for upgrade output
         tk.Label(self, text="Output", bg=t.bg, fg=t.text_muted,
@@ -204,7 +212,7 @@ class UpdatesTab(tk.Frame):
                 else:
                     status = pull_line[:30] or "Unknown"
                     tag    = "unknown"
-                docker_results.append((name, image, status, tag))
+                docker_results.append((name, image, status, tag, container))
 
             self.after(0, lambda a=apt_packages, d=docker_results: self._populate(a, d))
         finally:
@@ -225,17 +233,22 @@ class UpdatesTab(tk.Frame):
 
         # Docker tree
         self._docker_tree.delete(*self._docker_tree.get_children())
-        for idx, (name, image, status, stag) in enumerate(docker_results):
+        self._docker_row_info = {}
+        for idx, (name, image, status, stag, container) in enumerate(docker_results):
             row_tag = "even" if idx % 2 == 0 else "odd"
-            self._docker_tree.insert("", "end",
+            iid = self._docker_tree.insert("", "end",
                                       values=(name, image, status),
                                       tags=(row_tag, stag))
+            self._docker_row_info[iid] = {
+                "name": name, "image": image, "tag": stag, "container": container,
+            }
+        self._apply_btn.config(state="disabled")
 
         # Summary cards
         for w in self._summary_frame.winfo_children():
             w.destroy()
         apt_count = len(apt_packages)
-        docker_updated = sum(1 for _, _, _, tag in docker_results if tag == "update")
+        docker_updated = sum(1 for _, _, _, tag, _ in docker_results if tag == "update")
 
         for label, val, color in [
             ("Apt Updates",      str(apt_count),      t.yellow if apt_count else t.status_running),
@@ -293,6 +306,142 @@ class UpdatesTab(tk.Frame):
             self._set_status("{} complete (exit {})".format(cmd, code),
                              "ok" if code == 0 else "error")
         self.after(0, _done)
+
+    # =========================================================
+    # DOCKER — APPLY UPDATE
+    # =========================================================
+    def _on_docker_select(self, _event=None):
+        sel = self._docker_tree.selection()
+        row = self._docker_row_info.get(sel[0]) if sel else None
+        self._apply_btn.config(state="normal" if row and row["tag"] == "update" else "disabled")
+
+    def _apply_update(self):
+        sel = self._docker_tree.selection()
+        if not sel:
+            return
+        row = self._docker_row_info.get(sel[0])
+        if not row or not row["container"]:
+            return
+        self._apply_btn.config(state="disabled", text="Applying…")
+        self._log("\n--- Applying update for {} ---\n".format(row["name"]), "warn")
+        threading.Thread(target=self._do_apply_update,
+                          args=(row["container"], row["name"], row["image"]),
+                          daemon=True).start()
+
+    def _do_apply_update(self, container, display_name, image):
+        ssh = self.controller.ssh
+        out, _, code = ssh.run("docker inspect {} 2>/dev/null".format(shlex.quote(container)))
+        info = None
+        if code == 0 and out.strip():
+            try:
+                data = json.loads(out)
+                info = data[0] if data else None
+            except Exception:
+                info = None
+        if info is None:
+            self.after(0, lambda: self._finish_apply(
+                False, "Could not inspect {} — is it still running?".format(container)))
+            return
+
+        labels = (info.get("Config") or {}).get("Labels") or {}
+        project = labels.get("com.docker.compose.project")
+        service = labels.get("com.docker.compose.service")
+
+        if project and service:
+            self._apply_via_compose(ssh, project, service, display_name)
+        else:
+            self._prompt_recreate(ssh, container, info, display_name, image)
+
+    def _apply_via_compose(self, ssh, project, service, display_name):
+        cmd = "docker compose -p {p} pull {s} && docker compose -p {p} up -d {s}".format(
+            p=shlex.quote(project), s=shlex.quote(service))
+        self._log("$ {}\n".format(cmd))
+        out, err, code = ssh.run(cmd)
+        self._log((out or "") + (err or "") + "\n", "ok" if code == 0 else "err")
+        self.after(0, lambda: self._finish_apply(
+            code == 0,
+            "{} updated and recreated via compose.".format(display_name) if code == 0
+            else "compose pull/up failed (exit {}) — see output above.".format(code)))
+
+    # ---- Standalone (non-compose) container: best-effort recreate ----
+    def _prompt_recreate(self, ssh, container, info, display_name, image):
+        cmd = self._build_recreate_cmd(container, info, image)
+
+        def _ask():
+            msg = (
+                "{} isn't managed by Docker Compose, so it has to be recreated "
+                "directly. This is a best-effort clone of its current ports, "
+                "volumes, environment variables, restart policy, and network — "
+                "anything else (labels, extra hosts, capabilities, etc.) will "
+                "NOT be preserved.\n\n"
+                "Command that will run:\n\n{}\n\nContinue?"
+            ).format(display_name, cmd)
+            if messagebox.askyesno("Apply Update — {}".format(display_name), msg, parent=self):
+                self._log("$ {}\n".format(cmd), "warn")
+                threading.Thread(target=self._run_recreate, args=(ssh, cmd, display_name),
+                                  daemon=True).start()
+            else:
+                self._finish_apply(None, "Cancelled.")
+        self.after(0, _ask)
+
+    def _run_recreate(self, ssh, cmd, display_name):
+        out, err, code = ssh.run_sudo(cmd)
+        self._log((out or "") + (err or "") + "\n", "ok" if code == 0 else "err")
+        self.after(0, lambda: self._finish_apply(
+            code == 0,
+            "{} recreated on the new image.".format(display_name) if code == 0
+            else "Recreate failed (exit {}) — the old container may already be "
+                 "stopped/removed. Check the output above.".format(code)))
+
+    def _build_recreate_cmd(self, container, info, image):
+        cfg      = info.get("Config") or {}
+        host_cfg = info.get("HostConfig") or {}
+        name     = (info.get("Name") or "/" + container).lstrip("/")
+
+        parts = ["docker", "stop", shlex.quote(container),
+                  "&&", "docker", "rm", shlex.quote(container),
+                  "&&", "docker", "run", "-d", "--name", shlex.quote(name)]
+
+        policy = (host_cfg.get("RestartPolicy") or {}).get("Name") or ""
+        if policy and policy != "no":
+            retries = (host_cfg.get("RestartPolicy") or {}).get("MaximumRetryCount", 0)
+            if policy == "on-failure" and retries:
+                parts += ["--restart", "on-failure:{}".format(retries)]
+            else:
+                parts += ["--restart", policy]
+
+        net_mode = host_cfg.get("NetworkMode") or ""
+        if net_mode and net_mode not in ("default", "bridge"):
+            parts += ["--network", shlex.quote(net_mode)]
+
+        for cport, bindings in sorted((host_cfg.get("PortBindings") or {}).items()):
+            for b in (bindings or []):
+                hostport = b.get("HostPort") or ""
+                if not hostport:
+                    continue
+                hostip = b.get("HostIp") or ""
+                spec = "{}:{}:{}".format(hostip, hostport, cport) if hostip else "{}:{}".format(hostport, cport)
+                parts += ["-p", shlex.quote(spec)]
+
+        for m in (info.get("Mounts") or []):
+            src, dst = m.get("Source", ""), m.get("Destination", "")
+            if not src or not dst:
+                continue
+            mode = "rw" if m.get("RW", True) else "ro"
+            parts += ["-v", shlex.quote("{}:{}:{}".format(src, dst, mode))]
+
+        for e in (cfg.get("Env") or []):
+            parts += ["-e", shlex.quote(e)]
+
+        parts.append(shlex.quote(image))
+        return " ".join(parts)
+
+    def _finish_apply(self, ok, message):
+        self._apply_btn.config(state="normal", text="⬆  Apply Update")
+        self._log(message + "\n", "ok" if ok else ("err" if ok is False else "warn"))
+        self._set_status(message, "ok" if ok else ("error" if ok is False else "info"))
+        if ok:
+            self.after(800, self._refresh)
 
     # =========================================================
     # HELPERS
