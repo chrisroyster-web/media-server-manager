@@ -127,8 +127,8 @@ class StorageHealthTab(tk.Frame):
         if not self.controller.ssh.connected:
             self._set_status("Not connected to SSH", "error")
             return
-        self._refresh_btn.config(state="disabled", text="Scanning...")
-        self._set_status("Scanning filesystems...")
+        self._refresh_btn.config(state="disabled", text="Scanning…")
+        self._set_status("Scanning filesystems…")
         self._fetching = True
         threading.Thread(target=self._fetch, daemon=True).start()
 

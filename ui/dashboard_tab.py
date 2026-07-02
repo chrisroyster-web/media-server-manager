@@ -647,7 +647,7 @@ class DashboardTab(tk.Frame):
             self._set_disconnected()
             return
         self._disconn_overlay.place_forget()
-        self.refresh_btn.config(state="disabled", text="Refreshing...")
+        self.refresh_btn.config(state="disabled", text="Refreshing…")
         self._spinner.start()
         self._fetching = True
         threading.Thread(target=self._fetch, daemon=True).start()

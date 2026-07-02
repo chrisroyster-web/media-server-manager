@@ -109,7 +109,7 @@ class MediaServerManager(tk.Tk):
         super().__init__()
         self.withdraw()   # hidden until splash finishes
 
-        self.title("Media Server Manager")
+        self.title("All Clear Server Services")
         self.geometry("1500x1000")
         self.minsize(1200, 850)
 

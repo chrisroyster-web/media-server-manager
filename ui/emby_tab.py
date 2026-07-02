@@ -202,7 +202,7 @@ class EmbyTab(tk.Frame):
     def _fetch(self):
         if getattr(self, "_fetching", False): return
         self._rc.cancel()
-        self._status_lbl.config(text="Refreshing...", bg=self.theme.blue, fg="#ffffff")
+        self._status_lbl.config(text="Refreshing…", bg=self.theme.blue, fg="#ffffff")
         self._fetching = True
         threading.Thread(target=self._do_fetch, daemon=True).start()
 
@@ -296,14 +296,9 @@ class EmbyTab(tk.Frame):
         kick_btn = tk.Button(
             top, text="Kick",
             command=lambda sid=session_id, u=user: self._kick_session(sid, u),
-            bg="#3a1a1a", fg="#f87171",
-            activebackground="#c42b1c", activeforeground="#ffffff",
-            bd=0, relief="flat",
-            font=t.font_small, padx=10, pady=3, cursor="hand2",
         )
+        t.style_button(kick_btn, "danger")
         kick_btn.pack(side="right", padx=(4, 0))
-        kick_btn.bind("<Enter>", lambda e: kick_btn.configure(bg="#c42b1c", fg="#ffffff"))
-        kick_btn.bind("<Leave>", lambda e: kick_btn.configure(bg="#3a1a1a", fg="#f87171"))
 
         # Expand/collapse detail button
         detail_state = [False]

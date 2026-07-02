@@ -150,7 +150,7 @@ class EmbyUsersTab(tk.Frame):
 
         self._delete_btn = tk.Button(self._action_frame, text="Delete User",
                                       command=self._delete_user,
-                                      bg="#3a1a1a", fg="#f87171",
+                                      bg=t.status_stopped, fg="#ffffff",
                                       bd=0, relief="flat", font=t.font_small,
                                       padx=12, pady=4, cursor="hand2")
         self._delete_btn.pack(side="left", pady=6)
