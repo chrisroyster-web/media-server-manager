@@ -168,6 +168,9 @@ class CustomCommandsTab(tk.Frame):
         cmd = self.cmd_var.get().strip()
         if not cmd:
             return
+        if not self.controller.ssh.connected:
+            self._log("Not connected to server.", "error")
+            return
 
         self._log(f"$ {cmd}", "cmd")
         self.run_btn.config(text="Running…", state="disabled")

@@ -40,17 +40,17 @@ class BackupTab(tk.Frame):
         self._rc = RefreshControl(hdr, self.controller, "backup",
                                   default=60, on_refresh=self.refresh)
         self._rc.pack(side="right")
-        btn = tk.Button(hdr, text="⟳ Refresh", command=self.refresh)
-        t.style_button(btn)
-        btn.pack(side="right", padx=(0, 8))
+        self._refresh_btn = tk.Button(hdr, text="⟳ Refresh", command=self.refresh)
+        t.style_button(self._refresh_btn)
+        self._refresh_btn.pack(side="right", padx=(0, 8))
 
-        run_btn = tk.Button(hdr, text="▶ Run Now", command=self._run_backup)
-        t.style_button(run_btn)
-        run_btn.pack(side="right", padx=(0, 8))
+        self._run_btn = tk.Button(hdr, text="▶ Run Now", command=self._run_backup)
+        t.style_button(self._run_btn)
+        self._run_btn.pack(side="right", padx=(0, 8))
 
-        deploy_btn = tk.Button(hdr, text="⬆ Deploy Script", command=self._deploy_script)
-        t.style_button(deploy_btn)
-        deploy_btn.pack(side="right", padx=(0, 8))
+        self._deploy_btn = tk.Button(hdr, text="⬆ Deploy Script", command=self._deploy_script)
+        t.style_button(self._deploy_btn)
+        self._deploy_btn.pack(side="right", padx=(0, 8))
         self._last_lbl = tk.Label(hdr, text="", bg=t.bg, fg=t.text_muted,
                                    font=t.font_small)
         self._last_lbl.pack(side="right", padx=12)
@@ -143,11 +143,14 @@ class BackupTab(tk.Frame):
     # REFRESH
     # =========================================================
     def refresh(self):
+        if getattr(self, "_fetching", False): return
         self._rc.cancel()
         if not self.controller.ssh.connected:
             self._status.config(text="Not connected", fg=self.theme.status_stopped)
             return
         self._status.config(text="Scanning backup logs…", bg=self.theme.blue, fg="#ffffff")
+        self._fetching = True
+        self._refresh_btn.config(state="disabled")
         threading.Thread(target=self._fetch, daemon=True).start()
 
     def _fetch(self):
@@ -277,6 +280,8 @@ class BackupTab(tk.Frame):
         self.after(0, lambda: self._last_lbl.config(
             text="Updated {}".format(time.strftime("%H:%M"))))
         self.after(0, self._rc.schedule)
+        self._fetching = False
+        self.after(0, lambda: self._refresh_btn.config(state="normal"))
 
     def _parse_rsync_log(self, path, text):
         name = re.sub(r'\.log$', '', path.split("/")[-1])
@@ -405,18 +410,22 @@ class BackupTab(tk.Frame):
             return
 
         def worker():
-            out, err, code = self.controller.ssh.put_file(
-                local_path, "/opt/media/backup.sh")
-            if code == 0:
-                self.after(0, lambda: self._status.config(
-                    text="Script deployed to /opt/media/backup.sh",
-                    bg=self.theme.surface_dark, fg=self.theme.status_running))
-                self.after(0, lambda: messagebox.showinfo(
-                    "Deployed", "backup.sh uploaded to /opt/media/backup.sh"))
-            else:
-                msg = (err or "Unknown error").strip()
-                self.after(0, lambda: messagebox.showerror("Deploy Failed", msg))
+            try:
+                out, err, code = self.controller.ssh.put_file(
+                    local_path, "/opt/media/backup.sh")
+                if code == 0:
+                    self.after(0, lambda: self._status.config(
+                        text="Script deployed to /opt/media/backup.sh",
+                        bg=self.theme.surface_dark, fg=self.theme.status_running))
+                    self.after(0, lambda: messagebox.showinfo(
+                        "Deployed", "backup.sh uploaded to /opt/media/backup.sh"))
+                else:
+                    msg = (err or "Unknown error").strip()
+                    self.after(0, lambda: messagebox.showerror("Deploy Failed", msg))
+            finally:
+                self.after(0, lambda: self._deploy_btn.config(state="normal"))
 
+        self._deploy_btn.config(state="disabled")
         self._status.config(text="Deploying script…", bg=self.theme.blue, fg="#ffffff")
         threading.Thread(target=worker, daemon=True).start()
 
@@ -433,20 +442,24 @@ class BackupTab(tk.Frame):
             return
 
         def worker():
-            self.after(0, lambda: self._status.config(
-                text="Backup running…", bg=self.theme.blue, fg="#ffffff"))
-            _, err, code = self.controller.ssh.run("sudo /opt/media/backup.sh")
-            if code == 0:
+            try:
                 self.after(0, lambda: self._status.config(
-                    text="Backup completed successfully",
-                    bg=self.theme.surface_dark, fg=self.theme.status_running))
-                self.after(500, self.refresh)
-            else:
-                msg = (err or "").strip()[:120]
-                self.after(0, lambda: self._status.config(
-                    text="Backup failed (exit {}): {}".format(code, msg),
-                    bg=self.theme.surface_dark, fg=self.theme.status_stopped))
+                    text="Backup running…", bg=self.theme.blue, fg="#ffffff"))
+                _, err, code = self.controller.ssh.run("sudo /opt/media/backup.sh")
+                if code == 0:
+                    self.after(0, lambda: self._status.config(
+                        text="Backup completed successfully",
+                        bg=self.theme.surface_dark, fg=self.theme.status_running))
+                    self.after(500, self.refresh)
+                else:
+                    msg = (err or "").strip()[:120]
+                    self.after(0, lambda: self._status.config(
+                        text="Backup failed (exit {}): {}".format(code, msg),
+                        bg=self.theme.surface_dark, fg=self.theme.status_stopped))
+            finally:
+                self.after(0, lambda: self._run_btn.config(state="normal"))
 
+        self._run_btn.config(state="disabled")
         threading.Thread(target=worker, daemon=True).start()
 
     # =========================================================

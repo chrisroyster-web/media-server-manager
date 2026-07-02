@@ -286,7 +286,8 @@ class QuickCommandsPanel(tk.Frame):
     # RUN COMMAND (THREADED)
     # ---------------------------------------------------------
     def _run_command(self, label, cmd):
-        if any(w in cmd for w in ("shutdown", "reboot", "poweroff")):
+        if any(w in cmd for w in ("shutdown", "reboot", "poweroff", "restart",
+                                   "cleanup.sh", "mount -a")):
             if not messagebox.askyesno(
                     f"Confirm: {label}",
                     f"This will {label.lower()}.\n\nAre you sure?",

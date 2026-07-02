@@ -263,7 +263,8 @@ class MediaUsersTab(tk.Frame):
                 users = users.get("Items", []) or []
         except Exception as e:
             self.after(0, lambda: self._status.config(
-                text="Error: {}".format(e), bg=self.theme.surface_dark, fg=self.theme.status_stopped))
+                text="Cannot reach {}: {}".format(server, e),
+                bg=self.theme.surface_dark, fg=self.theme.status_stopped))
             return
         finally:
             self._fetching = False
@@ -347,6 +348,10 @@ class MediaUsersTab(tk.Frame):
         user     = self._selected
         policy   = dict(user.get("Policy") or {})
         disabled = policy.get("IsDisabled", False)
+        if not disabled and not messagebox.askyesno(
+                "Disable User", "Disable {}? They won't be able to sign in.".format(
+                    user.get("Name", "this user")), parent=self):
+            return
         policy["IsDisabled"] = not disabled
         uid = user["Id"]
 

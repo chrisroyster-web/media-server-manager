@@ -420,7 +420,8 @@ class InstallTab(tk.Frame):
                           else "warn" if state in ("stopped", "unhealthy")
                           else None)
                 method_str = f" [{method}]" if method and method not in ("none",) else ""
-                self._log(state + method_str + "\n", tag)
+                msg_str = f"  —  {status['message']}" if state == "error" and status.get("message") else ""
+                self._log(state + method_str + msg_str + "\n", tag or ("error" if state == "error" else None))
 
             self._log("── Scan complete ─────────────────────────────────────\n", "section")
             self.after(0, lambda: self._scan_btn.config(
@@ -440,6 +441,9 @@ class InstallTab(tk.Frame):
         elif state == "stopped":
             self._run_op(app, "start")
         elif state == "running":
+            if not messagebox.askyesno(
+                    "Restart", f"Restart {app['name']}?", parent=self):
+                return
             self._run_op(app, "restart")
         elif state == "unhealthy":
             self._run_op(app, "fix")

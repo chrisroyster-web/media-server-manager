@@ -1842,35 +1842,6 @@ class ConfigTab(tk.Frame):
                 self.after(0, lambda err=str(e): self._set_test_result(lbl, False, err[:60]))
         threading.Thread(target=_run, daemon=True).start()
 
-    def _import_config(self):
-        from tkinter import filedialog, messagebox
-        import json
-        path = filedialog.askopenfilename(
-            title="Import Config",
-            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
-        )
-        if not path:
-            return
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            # Validate it looks like our config
-            if not isinstance(data, dict):
-                raise ValueError("Not a valid config file")
-            cfg = self.controller.config_manager
-            cfg.config.update(data)
-            cfg.save()
-            self._load_values()
-            self._show_save_toast("Config imported. Restart to apply all changes.")
-        except Exception as e:
-            self._show_save_toast("Import failed: {}".format(e), error=True)
-
-    def _show_save_toast(self, msg, error=False):
-        t = self.controller.theme
-        color = t.status_stopped if error else t.status_running
-        self.status_lbl.config(text=msg, fg=color)
-        self.after(4000, lambda: self.status_lbl.config(text=""))
-
     def _test_emby(self):
         import threading, urllib.request, urllib.error, json as _json
         lbl = self._emby_test_lbl
@@ -2207,7 +2178,7 @@ class ConfigTab(tk.Frame):
             cfg_path = self.controller.config_manager.config_path
             shutil.copy2(path, cfg_path)
             self.controller.config_manager.load()
-            self._load_config()
+            self.reload()
             self._show_save_toast("Config imported — restart recommended")
         except Exception as e:
             self._show_save_toast("Import failed: {}".format(e))

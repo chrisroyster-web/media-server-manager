@@ -172,7 +172,7 @@ class SystemdTimersTab(tk.Frame):
         except Exception as e:
             msg = str(e)
             self.after(0, lambda: self._status.config(
-                text="Error: {}".format(msg),
+                text="Could not read systemd timers: {}".format(msg),
                 bg=self.theme.surface_dark,
                 fg=self.theme.status_stopped))
         finally:
@@ -315,6 +315,9 @@ class SystemdTimersTab(tk.Frame):
         if not sel:
             return
         unit = sel[0]
+        if action == "disable" and not messagebox.askyesno(
+                "Disable Timer", "Disable {}?".format(unit), parent=self):
+            return
         def _run():
             out, err, code = self.controller.ssh.run_sudo(
                 "systemctl {} {}".format(action, shlex.quote(unit)))

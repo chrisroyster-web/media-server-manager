@@ -17,7 +17,7 @@ import time
 import threading
 import shlex
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox
 
 
 _TYPES = ("service", "docker", "compose")
@@ -364,6 +364,14 @@ class RestartSequenceTab(tk.Frame):
             return
         if not self._sequence:
             self._log("  ⚠  Sequence is empty. Add items first.\n", "warn")
+            return
+
+        names = ", ".join(item["name"] for item in self._sequence)
+        if not messagebox.askyesno(
+                "Run Restart Sequence",
+                "This will stop and restart {} item(s) in order:\n\n{}\n\n"
+                "Continue?".format(len(self._sequence), names),
+                parent=self):
             return
 
         self._running = True

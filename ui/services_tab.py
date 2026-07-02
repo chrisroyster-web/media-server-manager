@@ -1,8 +1,10 @@
 # ui/services_tab.py
 
 import tkinter as tk
+from tkinter import messagebox
 import threading
 import webbrowser
+import shlex
 
 from ui.base_tab import CardConsoleTab
 from ui.log_tail_window import LogTailWindow
@@ -109,12 +111,19 @@ class ServicesTab(CardConsoleTab):
     # ---------------------------------------------------------
     def _action(self, name, action):
         svc = self.cards[name]["service"]
+        if action in ("stop", "restart"):
+            verb = "Stop" if action == "stop" else "Restart"
+            if not messagebox.askyesno(
+                    "{} Service".format(verb),
+                    "{} '{}' ({})?".format(verb, name, svc),
+                    parent=self):
+                return
         self._log("{0} {1}".format(action.upper(), svc), "cmd")
 
         def worker():
             sm = self.controller.service_manager
             if action == "tail":
-                cmd = "journalctl -fu {} --no-pager".format(svc)
+                cmd = "journalctl -fu {} --no-pager".format(shlex.quote(svc))
                 self.after(0, lambda: LogTailWindow(
                     self.controller,
                     title="journalctl -fu {}".format(svc),

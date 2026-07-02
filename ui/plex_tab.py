@@ -5,7 +5,7 @@ Uses the Plex Media Server HTTP API with X-Plex-Token authentication.
 """
 
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox
 import threading
 import urllib.request
 import json
@@ -404,6 +404,9 @@ class PlexTab(tk.Frame):
     # KICK
     # ---------------------------------------------------------
     def _kick_session(self, session_id, username):
+        if not messagebox.askyesno(
+                "Kick User", "Stop playback for {}?".format(username), parent=self):
+            return
         def worker():
             try:
                 cfg   = self.controller.config_manager

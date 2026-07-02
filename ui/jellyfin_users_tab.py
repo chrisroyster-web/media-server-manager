@@ -251,6 +251,10 @@ class JellyfinUsersTab(tk.Frame):
             return
         policy   = dict(user.get("Policy", {}) or {})
         disabled = policy.get("IsDisabled", False)
+        if not disabled and not messagebox.askyesno(
+                "Disable User", "Disable {}? They won't be able to sign in.".format(
+                    user.get("Name", "this user")), parent=self):
+            return
         policy["IsDisabled"] = not disabled
 
         def worker():

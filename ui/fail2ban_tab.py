@@ -296,6 +296,8 @@ class Fail2banTab(tk.Frame):
         item = self._ip_tree.item(sel[0])
         ip, jail = item["values"][0], item["values"][1]
 
+        self._unban_btn.config(state="disabled", text="Unbanning…")
+
         def _worker():
             self._log(f"  $ fail2ban-client set {jail} unbanip {ip}\n", "cmd")
             out, err, code = self.controller.ssh.run_sudo(
@@ -304,6 +306,7 @@ class Fail2banTab(tk.Frame):
                 self._log(f"  ✓  {ip} unbanned from {jail}\n", "ok")
             else:
                 self._log(f"  ✗  {err or out}\n", "error")
+            self.after(0, lambda: self._unban_btn.config(text="↩  Unban Selected"))
             self._fetch_worker()
 
         threading.Thread(target=_worker, daemon=True).start()

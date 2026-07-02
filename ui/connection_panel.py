@@ -140,15 +140,19 @@ class ConnectionPanel(tk.Frame):
             return
 
         def worker():
-            self._log("Sending shutdown command…", "info")
-            msg = self.controller.ssh.shutdown()
-            self._log(msg, "info")
-            time.sleep(1.5)
-            self.controller._stop_reconnect_watchdog()
-            self.controller.ssh.disconnect()
-            self._log("Disconnected.", "info")
-            self.after(0, lambda: self.controller.update_status(False))
+            try:
+                self._log("Sending shutdown command…", "info")
+                msg = self.controller.ssh.shutdown()
+                self._log(msg, "info")
+                time.sleep(1.5)
+                self.controller._stop_reconnect_watchdog()
+                self.controller.ssh.disconnect()
+                self._log("Disconnected.", "info")
+                self.after(0, lambda: self.controller.update_status(False))
+            finally:
+                self.after(0, lambda: self.shutdown_btn.config(state="normal"))
 
+        self.shutdown_btn.config(state="disabled")
         threading.Thread(target=worker, daemon=True).start()
 
     # ---------------------------------------------------------

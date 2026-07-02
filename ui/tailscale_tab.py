@@ -35,9 +35,9 @@ class TailscaleTab(tk.Frame):
         self._rc = RefreshControl(hdr, self.controller, "tailscale",
                                   default=30, on_refresh=self.refresh)
         self._rc.pack(side="right")
-        btn = tk.Button(hdr, text="⟳ Refresh", command=self.refresh)
-        t.style_button(btn)
-        btn.pack(side="right", padx=(0, 8))
+        self._refresh_btn = tk.Button(hdr, text="⟳ Refresh", command=self.refresh)
+        t.style_button(self._refresh_btn)
+        self._refresh_btn.pack(side="right", padx=(0, 8))
         self._last_lbl = tk.Label(hdr, text="", bg=t.bg, fg=t.text_muted,
                                    font=t.font_small)
         self._last_lbl.pack(side="right", padx=12)
@@ -134,6 +134,7 @@ class TailscaleTab(tk.Frame):
             return
         self._status.config(text="Loading Tailscale status…", bg=self.theme.blue, fg="#ffffff")
         self._fetching = True
+        self._refresh_btn.config(state="disabled")
         threading.Thread(target=self._fetch, daemon=True).start()
 
     def _fetch(self):
@@ -163,6 +164,7 @@ class TailscaleTab(tk.Frame):
             self.after(0, self._rc.schedule)
         finally:
             self._fetching = False
+            self.after(0, lambda: self._refresh_btn.config(state="normal"))
 
     def _populate(self, data):
         t = self.theme

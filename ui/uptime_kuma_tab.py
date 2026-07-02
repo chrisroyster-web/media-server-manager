@@ -63,9 +63,9 @@ class UptimeKumaTab(tk.Frame):
         self._rc = RefreshControl(hdr, self.controller, "uptime_kuma",
                                   default=60, on_refresh=self.refresh)
         self._rc.pack(side="right")
-        btn = tk.Button(hdr, text="⟳ Refresh", command=self.refresh)
-        t.style_button(btn)
-        btn.pack(side="right", padx=(0, 8))
+        self._refresh_btn = tk.Button(hdr, text="⟳ Refresh", command=self.refresh)
+        t.style_button(self._refresh_btn)
+        self._refresh_btn.pack(side="right", padx=(0, 8))
         self._last_lbl = tk.Label(hdr, text="", bg=t.bg, fg=t.text_muted,
                                    font=t.font_small)
         self._last_lbl.pack(side="right", padx=12)
@@ -159,6 +159,7 @@ class UptimeKumaTab(tk.Frame):
             return
         self._status.config(text="Loading…", bg=self.theme.blue, fg="#ffffff")
         self._fetching = True
+        self._refresh_btn.config(state="disabled")
         threading.Thread(target=self._fetch, daemon=True).start()
 
     def _fetch(self):
@@ -177,6 +178,7 @@ class UptimeKumaTab(tk.Frame):
             return
         finally:
             self._fetching = False
+            self.after(0, lambda: self._refresh_btn.config(state="normal"))
 
         self.after(0, lambda: self._populate(page, hb, hb_err))
         self.after(0, lambda: self._last_lbl.config(

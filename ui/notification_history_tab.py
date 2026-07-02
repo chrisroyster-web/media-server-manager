@@ -1,6 +1,7 @@
 # ui/notification_history_tab.py
 
 import tkinter as tk
+from tkinter import messagebox
 import time
 
 
@@ -239,6 +240,14 @@ class NotificationHistoryTab(tk.Frame):
     # CLEAR
     # =========================================================
     def _clear(self):
+        if not self._entries:
+            return
+        if not messagebox.askyesno(
+                "Clear Notification History",
+                "Permanently delete all {} notification(s)? This cannot be undone.".format(
+                    len(self._entries)),
+                parent=self):
+            return
         self._entries.clear()
         try:
             self.controller.metrics_store.clear_notifications()

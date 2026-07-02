@@ -584,10 +584,23 @@ class PiholeTab(tk.Frame):
     # -----------------------------------------------------------------------
 
     def _on_enable(self):
+        self._enable_btn.config(state="disabled", text="Enabling…")
+        self._disable_btn.config(state="disabled")
         threading.Thread(target=self._toggle, args=(True,), daemon=True).start()
 
     def _on_disable(self):
+        if not messagebox.askyesno(
+                "Disable Pi-hole",
+                "Disable ad-blocking protection network-wide?",
+                parent=self):
+            return
+        self._enable_btn.config(state="disabled")
+        self._disable_btn.config(state="disabled", text="Disabling…")
         threading.Thread(target=self._toggle, args=(False,), daemon=True).start()
+
+    def _reset_toggle_buttons(self):
+        self._enable_btn.config(state="normal", text="▶ Enable")
+        self._disable_btn.config(state="normal", text="⏸ Disable")
 
     def _toggle(self, enable: bool):
         cfg  = self.controller.config_manager
@@ -613,3 +626,5 @@ class PiholeTab(tk.Frame):
         except Exception as exc:
             msg = "Toggle failed: {}".format(exc)
             self.after(0, lambda m=msg: self._show_error(m))
+        finally:
+            self.after(0, self._reset_toggle_buttons)

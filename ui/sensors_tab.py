@@ -190,7 +190,7 @@ class SensorsTab(tk.Frame):
         except Exception as e:
             msg = str(e)
             self.after(0, lambda: self._status.config(
-                text="Error: {}".format(msg),
+                text="Could not read sensor data: {}".format(msg),
                 bg=self.theme.surface_dark,
                 fg=self.theme.status_stopped))
         finally:

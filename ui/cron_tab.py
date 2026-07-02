@@ -578,6 +578,9 @@ class CronTab(tk.Frame):
         enabled = job.get("enabled", True)
         action  = "disable" if enabled else "enable"
         name    = job.get("unit") or job.get("source", "job")
+        if enabled and not messagebox.askyesno(
+                "Disable Job", f"Disable '{name}'?", parent=self):
+            return
         self._log(f"{'■' if enabled else '▶'}  {action.title()}: {name}", "cmd")
         threading.Thread(target=self._toggle_worker, args=(job, enabled),
                          daemon=True).start()

@@ -7,7 +7,7 @@ Each card carries a server badge and routes kick/message to the correct API.
 """
 
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox
 import threading
 import urllib.request
 import json
@@ -478,6 +478,10 @@ class NowPlayingTab(tk.Frame):
     # ACTIONS
     # ------------------------------------------------------------------
     def _kick(self, s):
+        if not messagebox.askyesno(
+                "Kick User", "Stop playback for {} ({})?".format(s["user"], s["server"]),
+                parent=self):
+            return
         def worker():
             try:
                 srv    = getattr(self, "_active_srv", {})

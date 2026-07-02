@@ -6,6 +6,7 @@ Uses X-Emby-Token header (same key name as Emby).
 """
 
 import tkinter as tk
+from tkinter import messagebox
 import threading
 import urllib.request
 import json
@@ -307,6 +308,9 @@ class JellyfinTab(tk.Frame):
     # ACTIONS
     # ---------------------------------------------------------
     def _kick_session(self, session_id, username):
+        if not messagebox.askyesno(
+                "Kick User", "Stop playback for {}?".format(username), parent=self):
+            return
         def worker():
             try:
                 self._jf_post("/Sessions/{}/Playing/Stop".format(session_id), {})

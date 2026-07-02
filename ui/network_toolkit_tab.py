@@ -240,6 +240,11 @@ class NetworkToolkitTab(tk.Frame):
     def _do_run(self, cmd, t_start):
         try:
             out, err, code = self.controller.ssh.run(cmd)
+            if self._stop_event.is_set():
+                # User already clicked Stop -- ssh.run() can't actually be
+                # interrupted mid-flight, but don't let this late result
+                # overwrite the "Stopped" message it already saw.
+                return
             elapsed = time.time() - t_start
             combined = out + (("\n" + err) if err and err not in out else "")
             self.after(0, lambda: self._write(combined + "\n"))
@@ -270,7 +275,10 @@ class NetworkToolkitTab(tk.Frame):
 
     def _stop(self):
         # SSH run() is blocking — we can't kill it mid-flight without
-        # a new channel, so just mark stopped and update UI
+        # a new channel, so just mark stopped and update UI. The stop
+        # event tells _do_run to discard its result when the blocking
+        # call eventually returns, instead of overwriting this message.
+        self._stop_event.set()
         self._running = False
         self._run_btn.config(state="normal")
         self._stop_btn.config(state="disabled")

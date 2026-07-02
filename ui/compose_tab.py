@@ -332,6 +332,13 @@ class ComposeTab(tk.Frame):
     # ACTIONS
     # ------------------------------------------------------------------
     def _run_action(self, stack_name, config_file, action):
+        if action in ("down", "restart"):
+            verb = "Stop" if action == "down" else "Restart"
+            if not messagebox.askyesno(
+                    "{} Stack".format(verb),
+                    "{} every service in the '{}' stack?".format(verb, stack_name),
+                    parent=self):
+                return
         # Find the card for this stack
         card = None
         for f in self._stack_frames:

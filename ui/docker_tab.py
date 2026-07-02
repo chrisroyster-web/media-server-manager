@@ -385,6 +385,16 @@ class DockerTab(CardConsoleTab):
     # ACTIONS
     # ------------------------------------------------------------------
     def _action(self, name, action):
+        if not self.controller.ssh.connected:
+            self._log("Not connected to server.", "error")
+            return
+        if action in ("stop", "restart"):
+            verb = "Stop" if action == "stop" else "Restart"
+            if not messagebox.askyesno(
+                    "{} Container".format(verb),
+                    "{} container '{}'?".format(verb, name),
+                    parent=self):
+                return
         self._log("{} {}".format(action.upper(), name), "cmd")
 
         def worker():
@@ -394,7 +404,7 @@ class DockerTab(CardConsoleTab):
                 self.after(0, lambda: LogTailWindow(
                     self.controller,
                     title="docker logs -f {}".format(name),
-                    cmd="docker logs -f --tail=200 {}".format(name),
+                    cmd="docker logs -f --tail=200 {}".format(shlex.quote(name)),
                 ))
                 return
 

@@ -19,6 +19,10 @@ error.txt
 play_history_debug.json
 assets/metrics.db
 
+# Trust-on-first-use SSH host key store (see core/ssh_manager.py) —
+# machine-specific trust state, not something to template or share.
+assets/known_hosts
+
 # Editor/OS cruft
 .vscode/
 .idea/

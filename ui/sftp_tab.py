@@ -355,6 +355,9 @@ class SFTPTab(tk.Frame):
 
     # --- Download ---
     def _download(self):
+        if not self.controller.ssh.connected:
+            self._set_status("Not connected", "error")
+            return
         name = self._selected_name()
         if not name or name == "..":
             return
@@ -435,6 +438,9 @@ class SFTPTab(tk.Frame):
 
     # --- Rename ---
     def _rename(self):
+        if not self.controller.ssh.connected:
+            self._set_status("Not connected", "error")
+            return
         name = self._selected_name()
         if not name or name == "..":
             return
@@ -459,6 +465,9 @@ class SFTPTab(tk.Frame):
 
     # --- Delete ---
     def _delete(self):
+        if not self.controller.ssh.connected:
+            self._set_status("Not connected", "error")
+            return
         name = self._selected_name()
         if not name or name == "..":
             return
