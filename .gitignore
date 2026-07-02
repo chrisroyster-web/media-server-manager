@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# PyInstaller build output
+build/
+dist/
+installer_output/
+
+# Local runtime config — contains real server credentials/API keys.
+# assets/config.json is auto-created with safe defaults on first run
+# (see ConfigManager._ensure_config_file); nothing to template here.
+assets/config.json
+
+# Runtime-generated logs/debug dumps
+crash.log
+error.txt
+play_history_debug.json
+
+# Editor/OS cruft
+.vscode/
+.idea/
+Thumbs.db
