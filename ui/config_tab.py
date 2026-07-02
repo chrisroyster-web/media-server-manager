@@ -630,8 +630,23 @@ class ConfigTab(tk.Frame):
             lambda: self._test_watchstate())
 
         # ---- Cloudflare ----
-        self._section_header("Cloudflare",
-                             "DNS records, dynamic-IP sync, WAF events, cache purge, and Tunnel status")
+        cf_hdr_wrap = tk.Frame(self.body, bg=t.bg)
+        cf_hdr_wrap.pack(fill="x", padx=16, pady=(20, 4))
+        tk.Frame(cf_hdr_wrap, bg=t.blue, height=2).pack(fill="x")
+        cf_title_row = tk.Frame(cf_hdr_wrap, bg=t.bg)
+        cf_title_row.pack(fill="x", pady=(4, 0))
+        tk.Label(cf_title_row, text="Cloudflare", bg=t.bg, fg=t.text,
+                 font=t.font_title).pack(side="left")
+        cf_help_btn = tk.Button(cf_title_row, text="?",
+                                 command=self._show_cloudflare_help,
+                                 bg=t.surface_light, fg=t.blue,
+                                 bd=0, relief="flat", font=("Segoe UI", 9, "bold"),
+                                 width=2, cursor="hand2")
+        cf_help_btn.pack(side="left", padx=(8, 0))
+        tk.Label(cf_hdr_wrap,
+                 text="DNS records, dynamic-IP sync, WAF events, cache purge, and Tunnel status",
+                 bg=t.bg, fg=t.text_muted, font=t.font_small).pack(anchor="w")
+
         cf_frame = tk.Frame(self.body, bg=t.surface, padx=12, pady=10)
         cf_frame.pack(fill="x", padx=16, pady=(0, 8))
         cf_frame.columnconfigure(1, weight=1)
@@ -2042,6 +2057,90 @@ class ConfigTab(tk.Frame):
             except Exception as e:
                 self.after(0, lambda err=str(e): self._set_test_result(lbl, False, err[:80]))
         threading.Thread(target=_run, daemon=True).start()
+
+    def _show_cloudflare_help(self):
+        if getattr(self, "_cf_help_win", None) and self._cf_help_win.winfo_exists():
+            self._cf_help_win.lift()
+            return
+        t = self.controller.theme
+        win = tk.Toplevel(self)
+        win.title("Cloudflare Setup")
+        win.configure(bg=t.bg)
+        win.resizable(False, False)
+        win.attributes("-topmost", True)
+        self._cf_help_win = win
+
+        hdr = tk.Frame(win, bg=t.surface, padx=20, pady=14)
+        hdr.pack(fill="x")
+        tk.Label(hdr, text="☁  Cloudflare Setup",
+                 bg=t.surface, fg=t.text, font=t.font_title).pack(side="left")
+        tk.Button(hdr, text="✕", command=win.destroy,
+                  bg=t.surface, fg=t.text_muted, bd=0, relief="flat",
+                  font=("Segoe UI", 14), cursor="hand2").pack(side="right")
+
+        body = tk.Frame(win, bg=t.bg, padx=24, pady=16)
+        body.pack(fill="both")
+
+        tk.Label(body,
+                 text="Create a Custom Token at dash.cloudflare.com/profile/api-tokens\n"
+                      "with these permissions:",
+                 bg=t.bg, fg=t.text, font=t.font_regular, justify="left").grid(
+            row=0, column=0, columnspan=2, sticky="w", pady=(0, 10))
+
+        PERMISSIONS = [
+            ("Zone → Zone",                  "Read",  "Test Connection"),
+            ("Zone → DNS",                   "Edit",  "View + edit records, Sync Dynamic IP"),
+            ("Zone → Cache Purge",           "Purge", "Purge Cache button"),
+            ("Zone → Analytics",             "Read",  "Security events  (optional)"),
+            ("Account → Cloudflare Tunnel",  "Read",  "Tunnel status  (optional)"),
+        ]
+        row_i = 1
+        for perm, level, used_for in PERMISSIONS:
+            tk.Label(body, text=perm, bg=t.bg, fg=t.text,
+                     font=t.font_small).grid(row=row_i, column=0, sticky="w", pady=2)
+            level_lbl = tk.Label(body, text=level,
+                                 bg=t.surface, fg=t.blue,
+                                 font=t.font_mono, padx=6, pady=2,
+                                 highlightbackground=t.card_border, highlightthickness=1)
+            level_lbl.grid(row=row_i, column=1, sticky="w", padx=(10, 10), pady=2)
+            tk.Label(body, text=used_for, bg=t.bg, fg=t.text_muted,
+                     font=t.font_small).grid(row=row_i, column=2, sticky="w", pady=2)
+            row_i += 1
+
+        tk.Label(body,
+                 text="Skip the last two rows if you don't need those sections — the tab\n"
+                      "degrades gracefully and just shows them as unavailable.",
+                 bg=t.bg, fg=t.text_muted, font=t.font_small, justify="left").grid(
+            row=row_i, column=0, columnspan=3, sticky="w", pady=(6, 14))
+        row_i += 1
+
+        tk.Label(body, text="RESOURCE SCOPING", bg=t.bg, fg=t.text_muted,
+                 font=("Segoe UI", 8, "bold")).grid(
+            row=row_i, column=0, columnspan=3, sticky="w", pady=(0, 4))
+        row_i += 1
+        tk.Label(body,
+                 text="Zone Resources → Specific zone → your domain\n"
+                      "Account Resources → Specific account → your account  (only if adding Tunnel Read)",
+                 bg=t.bg, fg=t.text, font=t.font_small, justify="left").grid(
+            row=row_i, column=0, columnspan=3, sticky="w", pady=(0, 14))
+        row_i += 1
+
+        tk.Label(body, text="FINDING YOUR ZONE ID / ACCOUNT ID", bg=t.bg, fg=t.text_muted,
+                 font=("Segoe UI", 8, "bold")).grid(
+            row=row_i, column=0, columnspan=3, sticky="w", pady=(0, 4))
+        row_i += 1
+        tk.Label(body,
+                 text="Cloudflare dashboard → select your domain → Overview page →\n"
+                      "right-hand sidebar, under “API”. Both Zone ID and Account ID\n"
+                      "are listed there with a copy icon next to each.",
+                 bg=t.bg, fg=t.text, font=t.font_small, justify="left").grid(
+            row=row_i, column=0, columnspan=3, sticky="w")
+
+        win.bind("<Escape>", lambda e: win.destroy())
+        win.update_idletasks()
+        x = self.winfo_rootx() + (self.winfo_width() - win.winfo_reqwidth()) // 2
+        y = self.winfo_rooty() + (self.winfo_height() - win.winfo_reqheight()) // 2
+        win.geometry("+{}+{}".format(max(x, 0), max(y, 0)))
 
     def _test_netdata(self):
         import threading, urllib.request, urllib.error, json as _json
