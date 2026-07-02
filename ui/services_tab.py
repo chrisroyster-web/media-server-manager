@@ -160,8 +160,10 @@ class ServicesTab(CardConsoleTab):
 
         def worker():
             sm = self.controller.service_manager
-            for name, card in self.cards.items():
-                status = sm.get_status(card["service"])
+            names = {name: card["service"] for name, card in self.cards.items()}
+            statuses = sm.get_statuses(list(names.values()))
+            for name, service in names.items():
+                status = statuses.get(service, "unknown")
                 self.after(0, lambda n=name, s=status: self._update_card(n, s))
 
         threading.Thread(target=worker, daemon=True).start()

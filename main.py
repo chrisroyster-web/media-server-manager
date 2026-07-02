@@ -1122,8 +1122,10 @@ class MediaServerManager(tk.Tk):
                     continue
                 sm  = self.service_manager
                 cfg = self.config_manager.get_services()
-                for name, data in cfg.items():
-                    status = sm.get_status(data["service"])
+                units    = {name: data["service"] for name, data in cfg.items()}
+                statuses = sm.get_statuses(list(units.values()))
+                for name, service in units.items():
+                    status = statuses.get(service, "unknown")
                     prev   = self._svc_prev_states.get(name)
                     if prev == "running" and status in ("stopped", "failed"):
                         self.after(0, lambda n=name, s=status: self.show_toast(

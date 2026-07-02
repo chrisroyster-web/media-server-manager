@@ -907,10 +907,11 @@ class DashboardTab(tk.Frame):
             # -- Docker health --
             docker_cfg = self.controller.config_manager.get_docker()
             dm = self.controller.docker_manager
-            for name, data in docker_cfg.items():
-                if name not in self.docker_cards:
-                    continue
-                status = dm.get_status(data["container"])
+            docker_names = {name: data["container"] for name, data in docker_cfg.items()
+                            if name in self.docker_cards}
+            docker_statuses = dm.get_statuses(list(docker_names.values()))
+            for name, container in docker_names.items():
+                status = docker_statuses.get(container, "unknown")
                 color  = (self.theme.status_running  if status == "running"   else
                           self.theme.status_stopped  if status == "stopped"   else
                           self.theme.yellow          if status == "paused"    else
@@ -926,9 +927,11 @@ class DashboardTab(tk.Frame):
             # -- Services --
             services_cfg = self.controller.config_manager.get_services()
             sm = self.controller.service_manager
+            service_units = {name: data["service"] for name, data in services_cfg.items()}
+            service_statuses = sm.get_statuses(list(service_units.values()))
             running = stopped = 0
-            for name, data in services_cfg.items():
-                status = sm.get_status(data["service"])
+            for name, unit in service_units.items():
+                status = service_statuses.get(unit, "unknown")
                 if status == "running":
                     running += 1
                     color = self.theme.status_running

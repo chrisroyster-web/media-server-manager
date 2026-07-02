@@ -67,6 +67,49 @@ class DockerManager:
 
         return "unknown"
 
+    def get_statuses(self, container_names):
+        """
+        Batched version of get_status() — one remote round trip instead of
+        up to two per container. Returns {container_name: status}.
+        """
+        if not self.ssh.connected or not container_names:
+            return {name: "unknown" for name in container_names}
+
+        quoted = " ".join(shlex.quote(n) for n in container_names)
+        fmt = "{{.Name}}|{{.State.Status}}|{{range .Config.Env}}{{.}};{{end}}"
+        out, _, _ = self.ssh.run(f"docker inspect -f '{fmt}' {quoted} 2>/dev/null")
+
+        schedule_keys = (
+            "WATCHTOWER_SCHEDULE", "WATCHTOWER_POLL_INTERVAL",
+            "WATCHTOWER_CRON_EXPR", "SCHEDULE", "CRON",
+        )
+        found = {}
+        for line in out.splitlines():
+            parts = line.split("|", 2)
+            if len(parts) < 2:
+                continue
+            # docker inspect always prefixes .Name with "/"
+            name  = parts[0].lstrip("/")
+            state = parts[1]
+            env_str = parts[2] if len(parts) > 2 else ""
+
+            if state == "paused":
+                found[name] = "paused"
+            elif state in ("running", "exited"):
+                env_vars = [e for e in env_str.split(";") if e]
+                is_scheduled = any(
+                    any(e.upper().startswith(k) for k in schedule_keys)
+                    for e in env_vars
+                )
+                found[name] = "scheduled" if is_scheduled else (
+                    "running" if state == "running" else "stopped")
+            else:
+                found[name] = "unknown"
+
+        # Names that never appeared in the output failed to inspect
+        # (container doesn't exist), matching get_status()'s code!=0 case.
+        return {name: found.get(name, "not_installed") for name in container_names}
+
     # ---------------------------------------------------------
     # START
     # ---------------------------------------------------------

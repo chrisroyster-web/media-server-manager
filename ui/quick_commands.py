@@ -315,7 +315,7 @@ class QuickCommandsPanel(tk.Frame):
             self._append("\n", None)
 
             if "systemctl" in cmd or "docker" in cmd:
-                self.controller.services_tab.refresh_all()
+                self.after(0, self.controller.services_tab.refresh_all)
 
         threading.Thread(target=worker, daemon=True).start()
 

@@ -29,14 +29,35 @@ class ServiceManager:
 
         cmd = f"systemctl is-active {shlex.quote(service_name)}"
         out, err, code = self.ssh.run(cmd)
+        return self._parse_status_word(out.strip())
 
-        if "active" in out:
+    def get_statuses(self, service_names):
+        """
+        Batched version of get_status() — one remote round trip instead of
+        one per service. Returns {service_name: status}.
+        """
+        if not self.ssh.connected or not service_names:
+            return {name: "unknown" for name in service_names}
+
+        quoted = " ".join(shlex.quote(name) for name in service_names)
+        out, err, code = self.ssh.run(f"systemctl is-active {quoted}")
+        lines = out.splitlines()
+        return {
+            name: self._parse_status_word(lines[i].strip() if i < len(lines) else "")
+            for i, name in enumerate(service_names)
+        }
+
+    @staticmethod
+    def _parse_status_word(word):
+        # Exact match, not substring — "active" is literally a substring of
+        # "inactive", so a naive `"active" in word` check misreports every
+        # stopped service as running.
+        if word == "active":
             return "running"
-        if "inactive" in out:
+        if word == "inactive":
             return "stopped"
-        if "failed" in out:
+        if word == "failed":
             return "failed"
-
         return "unknown"
 
     # ---------------------------------------------------------

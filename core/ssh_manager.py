@@ -80,7 +80,19 @@ class SSHManager:
     def __init__(self):
         self.client        = None
         self.connected     = False
+        # Guards connect()/disconnect() state transitions only — NOT command
+        # execution. Paramiko's Transport safely multiplexes concurrent
+        # exec_command() calls from multiple threads, each getting its own
+        # Channel, so run()/run_sudo() don't fully serialize on this lock.
         self.lock          = threading.Lock()
+        self._sftp_lock    = threading.Lock()  # guards the cached SFTP client
+        # Bounds how many commands can be in flight at once. Fully unbounded
+        # concurrency runs into sshd's MaxSessions limit (10 by default) and
+        # exec_command() starts failing with "open failed: Connect failed";
+        # 6 gives real parallelism (vs. the old one-at-a-time lock, which is
+        # what let one slow command like `docker pull` stall every other tab
+        # and watchdog) while staying comfortably under that ceiling.
+        self._cmd_semaphore = threading.Semaphore(6)
         self._connect_args = None   # stored on success for reconnect
         self._sftp         = None   # cached SFTP client
 
@@ -88,48 +100,50 @@ class SSHManager:
     # CONNECTION
     # ---------------------------------------------------------
     def connect(self, host, port, username, password=None, key_path=None):
-        try:
-            self.client = paramiko.SSHClient()
-            configure_host_key_verification(self.client)
+        with self.lock:
+            try:
+                client = paramiko.SSHClient()
+                configure_host_key_verification(client)
 
-            if password:
-                self.client.connect(
-                    hostname=host, port=int(port),
-                    username=username, password=password, timeout=10,
+                if password:
+                    client.connect(
+                        hostname=host, port=int(port),
+                        username=username, password=password, timeout=10,
+                    )
+                else:
+                    if key_path is None:
+                        key_path = os.path.expanduser("~/.ssh/id_rsa")
+                    if not os.path.exists(key_path):
+                        raise FileNotFoundError("SSH key not found: " + key_path)
+                    key = paramiko.RSAKey.from_private_key_file(key_path)
+                    client.connect(
+                        hostname=host, port=int(port),
+                        username=username, pkey=key, timeout=10,
+                    )
+
+                persist_host_keys(client)
+
+                self.client         = client
+                self.connected      = True
+                self._connect_args = {
+                    "host": host, "port": port, "username": username,
+                    "password": password, "key_path": key_path,
+                }
+                return True
+
+            except paramiko.BadHostKeyException as e:
+                self.connected = False
+                return (
+                    "SSH HOST KEY MISMATCH for {} — the server's identity does not match "
+                    "the key we trusted previously. This could mean the server was "
+                    "reinstalled, OR that someone is intercepting the connection "
+                    "(man-in-the-middle). Refusing to connect. If you're certain the "
+                    "server's key legitimately changed, clear the saved key for this "
+                    "host before reconnecting.".format(e.hostname)
                 )
-            else:
-                if key_path is None:
-                    key_path = os.path.expanduser("~/.ssh/id_rsa")
-                if not os.path.exists(key_path):
-                    raise FileNotFoundError("SSH key not found: " + key_path)
-                key = paramiko.RSAKey.from_private_key_file(key_path)
-                self.client.connect(
-                    hostname=host, port=int(port),
-                    username=username, pkey=key, timeout=10,
-                )
-
-            persist_host_keys(self.client)
-
-            self.connected     = True
-            self._connect_args = {
-                "host": host, "port": port, "username": username,
-                "password": password, "key_path": key_path,
-            }
-            return True
-
-        except paramiko.BadHostKeyException as e:
-            self.connected = False
-            return (
-                "SSH HOST KEY MISMATCH for {} — the server's identity does not match "
-                "the key we trusted previously. This could mean the server was "
-                "reinstalled, OR that someone is intercepting the connection "
-                "(man-in-the-middle). Refusing to connect. If you're certain the "
-                "server's key legitimately changed, clear the saved key for this "
-                "host before reconnecting.".format(e.hostname)
-            )
-        except Exception as e:
-            self.connected = False
-            return str(e)
+            except Exception as e:
+                self.connected = False
+                return str(e)
 
     # ---------------------------------------------------------
     # LIVENESS + RECONNECT
@@ -153,30 +167,38 @@ class SSHManager:
     # DISCONNECT
     # ---------------------------------------------------------
     def disconnect(self):
-        # Close cached SFTP first
-        try:
-            if self._sftp:
-                self._sftp.close()
-        except Exception:
-            pass
-        finally:
-            self._sftp = None
+        with self.lock:
+            # Close cached SFTP first
+            with self._sftp_lock:
+                try:
+                    if self._sftp:
+                        self._sftp.close()
+                except Exception:
+                    pass
+                finally:
+                    self._sftp = None
 
-        try:
-            if self.client:
-                self.client.close()
-        except Exception:
-            pass
-        finally:
-            self.connected = False
+            try:
+                if self.client:
+                    self.client.close()
+            except Exception:
+                pass
+            finally:
+                self.connected = False
 
     # ---------------------------------------------------------
-    # RUN COMMAND (THREAD-SAFE)
+    # RUN COMMAND
     # ---------------------------------------------------------
     def run(self, command):
+        """
+        Bounded-concurrent, not fully serialized: paramiko multiplexes
+        exec_command() calls over one connection safely (each gets its own
+        Channel), so multiple tabs/watchdogs can have commands in flight at
+        the same time instead of queuing behind whichever one is slowest.
+        """
         if not self.connected:
             return "", "Not connected", 1
-        with self.lock:
+        with self._cmd_semaphore:
             try:
                 stdin, stdout, stderr = self.client.exec_command(command)
                 out  = stdout.read().decode(errors="ignore")
@@ -191,10 +213,11 @@ class SSHManager:
     # ---------------------------------------------------------
     def run_sudo(self, command):
         """Run a command with sudo, feeding the stored password via stdin.
-        Falls back to sudo -n (requires NOPASSWD) when no password is stored."""
+        Falls back to sudo -n (requires NOPASSWD) when no password is stored.
+        Bounded-concurrent, not fully serialized — see run()."""
         if not self.connected:
             return "", "Not connected", 1
-        with self.lock:
+        with self._cmd_semaphore:
             try:
                 password = (self._connect_args or {}).get("password") or ""
                 if password:
@@ -230,38 +253,41 @@ class SSHManager:
         """Write a local file to the server by piping its content via sudo tee."""
         if not self.connected:
             return "", "Not connected", 1
-        try:
-            with open(local_path, "rb") as f:
-                content = f.read()
-            cmd = "sudo tee '{}' > /dev/null && sudo chmod +x '{}'".format(
-                remote_path, remote_path)
-            stdin, stdout, stderr = self.client.exec_command(cmd)
-            stdin.write(content)
-            stdin.channel.shutdown_write()
-            out  = stdout.read().decode(errors="ignore")
-            err  = stderr.read().decode(errors="ignore")
-            code = stdout.channel.recv_exit_status()
-            return out, err, code
-        except Exception as e:
-            return "", str(e), 1
+        with self._cmd_semaphore:
+            try:
+                with open(local_path, "rb") as f:
+                    content = f.read()
+                cmd = "sudo tee '{}' > /dev/null && sudo chmod +x '{}'".format(
+                    remote_path, remote_path)
+                stdin, stdout, stderr = self.client.exec_command(cmd)
+                stdin.write(content)
+                stdin.channel.shutdown_write()
+                out  = stdout.read().decode(errors="ignore")
+                err  = stderr.read().decode(errors="ignore")
+                code = stdout.channel.recv_exit_status()
+                return out, err, code
+            except Exception as e:
+                return "", str(e), 1
 
     # ---------------------------------------------------------
     # SFTP
     # ---------------------------------------------------------
     def get_sftp(self):
-        """Return a cached (or fresh) SFTP client."""
+        """Return a cached (or fresh) SFTP client. Locked so two threads
+        racing on a dead cached client don't both open a replacement."""
         if not self.connected:
             raise Exception("Not connected")
-        try:
-            # Reuse cached client if the channel is still open
-            if self._sftp is not None:
-                self._sftp.stat(".")  # lightweight liveness check
-                return self._sftp
-        except Exception:
-            self._sftp = None
+        with self._sftp_lock:
+            try:
+                # Reuse cached client if the channel is still open
+                if self._sftp is not None:
+                    self._sftp.stat(".")  # lightweight liveness check
+                    return self._sftp
+            except Exception:
+                self._sftp = None
 
-        self._sftp = self.client.open_sftp()
-        return self._sftp
+            self._sftp = self.client.open_sftp()
+            return self._sftp
 
     # ---------------------------------------------------------
     # SHUTDOWN

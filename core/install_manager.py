@@ -957,6 +957,25 @@ class InstallManager:
         code = out.strip()
         return code[:1] in ("2", "3") or code in ("400", "401", "403")
 
+    def _wait_for_health(self, app: dict, timeout: int, interval: int = 2) -> bool:
+        """
+        If the app has a real HTTP health probe configured, poll it every
+        `interval`s up to `timeout`s and return as soon as it passes —
+        usually much faster than always waiting the full timeout, since
+        most containers come back up in a second or two. Apps with no
+        health_path/port have nothing real to poll, so just wait the full
+        settle time once, same as before.
+        """
+        if not app.get("port") or not app.get("health_path"):
+            time.sleep(timeout)
+            return True
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if self._health_check(app):
+                return True
+            time.sleep(interval)
+        return self._health_check(app)
+
     # ── Operations ──────────────────────────────────────────────────────
 
     def _run_cmds(self, cmds: list, log) -> bool:
@@ -1079,8 +1098,7 @@ class InstallManager:
         out, _, code = self.ssh.run(f"docker restart {shlex.quote(container)} 2>&1")
         if (out or "").strip():
             log(out.strip() + "\n")
-        time.sleep(8)
-        if self._health_check(app):
+        if self._wait_for_health(app, timeout=8):
             log("  ✓ Healthy after restart.\n", "ok")
             return True
 
@@ -1089,8 +1107,7 @@ class InstallManager:
         reinstall_ok = self._run_cmds(app.get("reinstall_cmds", []), log)
         if not reinstall_ok:
             return False
-        time.sleep(12)
-        if self._health_check(app):
+        if self._wait_for_health(app, timeout=12):
             log("  ✓ Healthy after image refresh.\n", "ok")
             return True
 
