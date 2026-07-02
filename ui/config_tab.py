@@ -18,6 +18,7 @@ class ConfigTab(tk.Frame):
         self.theme      = controller.theme
 
         self._service_rows = []  # list of dicts: {name, unit, port, frame}
+        self._docker_rows  = []  # list of dicts: {name, container, port, frame}
         self._mount_rows   = []  # list of dicts: {path, frame}
         self._alert_rules  = []  # list of rule dicts (in-memory, saved on Save)
 
@@ -87,6 +88,14 @@ class ConfigTab(tk.Frame):
         self.svc_body = tk.Frame(self.body, bg=t.bg)
         self.svc_body.pack(fill="x", padx=16, pady=(0, 2))
         self._add_btn("+ Add Service", self._add_service_row)
+
+        # ---- Docker Containers ----
+        self._section_header("Docker Containers",
+                             "Status cards shown on the Dashboard and checked on the Updates tab")
+        self._col_header(["Name", "Container", "Port"], [2, 3, 1])
+        self.docker_body = tk.Frame(self.body, bg=t.bg)
+        self.docker_body.pack(fill="x", padx=16, pady=(0, 2))
+        self._add_btn("+ Add Container", self._add_docker_row)
 
         # ---- Storage Mounts ----
         self._section_header("Storage Mounts",
@@ -1123,6 +1132,10 @@ class ConfigTab(tk.Frame):
             row["frame"].destroy()
         self._service_rows.clear()
 
+        for row in self._docker_rows:
+            row["frame"].destroy()
+        self._docker_rows.clear()
+
         for row in self._mount_rows:
             row["frame"].destroy()
         self._mount_rows.clear()
@@ -1148,6 +1161,10 @@ class ConfigTab(tk.Frame):
         # Services
         for name, data in cfg.get_services().items():
             self._add_service_row(name, data["service"], data.get("port", ""))
+
+        # Docker containers
+        for name, data in cfg.get_docker().items():
+            self._add_docker_row(name, data.get("container", ""), data.get("port", ""))
 
         # Storage mounts
         for mount in cfg.get_storage_mounts():
@@ -1316,6 +1333,45 @@ class ConfigTab(tk.Frame):
         self._service_rows.append(row)
         self._scroll_bottom()
 
+    def _add_docker_row(self, name="", container="", port=""):
+        t = self.theme
+        row = {
+            "name":      tk.StringVar(value=name),
+            "container": tk.StringVar(value=container),
+            "port":      tk.StringVar(value=str(port) if port else ""),
+        }
+        frame = tk.Frame(self.docker_body, bg=t.card_bg,
+                         highlightbackground=t.card_border, highlightthickness=1)
+        frame.pack(fill="x", pady=1)
+        frame.columnconfigure(0, weight=2)
+        frame.columnconfigure(1, weight=3)
+        frame.columnconfigure(2, weight=1)
+
+        e_name = tk.Entry(frame, textvariable=row["name"], font=t.font_regular)
+        t.style_entry(e_name)
+        e_name.grid(row=0, column=0, sticky="ew", padx=(6, 3), pady=4)
+
+        e_container = tk.Entry(frame, textvariable=row["container"], font=t.font_mono)
+        t.style_entry(e_container)
+        e_container.grid(row=0, column=1, sticky="ew", padx=3, pady=4)
+
+        e_port = tk.Entry(frame, textvariable=row["port"], font=t.font_regular, width=8)
+        t.style_entry(e_port)
+        e_port.grid(row=0, column=2, sticky="ew", padx=3, pady=4)
+
+        tk.Button(
+            frame, text="✕",
+            command=lambda r=row: self._del_row(r, self._docker_rows),
+            bg=t.card_bg, fg=t.status_stopped,
+            font=t.font_small, bd=0, relief="flat",
+            activebackground=t.surface, activeforeground=t.status_stopped,
+            cursor="hand2",
+        ).grid(row=0, column=3, padx=(3, 6), pady=4)
+
+        row["frame"] = frame
+        self._docker_rows.append(row)
+        self._scroll_bottom()
+
     def _add_mount_row(self, path=""):
         t = self.theme
         row = {"path": tk.StringVar(value=path)}
@@ -1391,6 +1447,19 @@ class ConfigTab(tk.Frame):
                 except ValueError:
                     port_val = None
                 services[name] = {"service": unit, "port": port_val}
+
+        # --- Collect docker containers ---
+        docker = {}
+        for row in self._docker_rows:
+            name      = row["name"].get().strip()
+            container = row["container"].get().strip()
+            port      = row["port"].get().strip()
+            if name and container:
+                try:
+                    port_val = int(port) if port else None
+                except ValueError:
+                    port_val = None
+                docker[name] = {"container": container, "port": port_val}
 
         # --- Collect mounts ---
         mounts = [r["path"].get().strip() for r in self._mount_rows
@@ -1505,6 +1574,7 @@ class ConfigTab(tk.Frame):
         # Per-server settings — written into the active server's settings dict
         cfg.update_server_settings({
             "services":                  services,
+            "docker":                    docker,
             "storage_mounts":            mounts,
             "alert_rules":               self._alert_rules,
             "dashboard_refresh_interval": refresh,

@@ -344,8 +344,15 @@ class ProcessTab(tk.Frame):
                          daemon=True).start()
 
     def _do_kill(self, pid, sig):
+        try:
+            pid = int(pid)
+        except (TypeError, ValueError):
+            self.after(0, lambda: self._status.config(
+                text="Invalid PID: {}".format(pid),
+                bg=self.theme.surface_dark, fg=self.theme.status_stopped))
+            return
         out, err, code = self.controller.ssh.run_sudo(
-            "kill -{} {}".format(sig, pid))
+            "kill -{} {}".format(int(sig), pid))
         if code == 0:
             self.after(0, lambda: self._status.config(
                 text="Sent signal {} to PID {}".format(sig, pid),
@@ -371,8 +378,15 @@ class ProcessTab(tk.Frame):
                          daemon=True).start()
 
     def _do_renice(self, pid, value):
+        try:
+            pid = int(pid)
+        except (TypeError, ValueError):
+            self.after(0, lambda: self._status.config(
+                text="Invalid PID: {}".format(pid),
+                bg=self.theme.surface_dark, fg=self.theme.status_stopped))
+            return
         out, err, code = self.controller.ssh.run_sudo(
-            "renice {} -p {}".format(value, pid))
+            "renice {} -p {}".format(int(value), pid))
         if code == 0:
             self.after(0, lambda: self._status.config(
                 text="Reniced PID {} to nice value {}".format(pid, value),

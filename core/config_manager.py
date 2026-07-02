@@ -3,6 +3,23 @@
 import json
 import os
 import sys
+import copy
+
+from . import secure_storage
+
+
+def _walk_secrets(obj, transform):
+    """Recursively apply transform(value) to every string value whose dict
+    key name looks like a secret (password/apikey/token/...), in place."""
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if isinstance(v, str) and secure_storage.is_sensitive_key(k):
+                obj[k] = transform(v)
+            else:
+                _walk_secrets(v, transform)
+    elif isinstance(obj, list):
+        for item in obj:
+            _walk_secrets(item, transform)
 
 
 class ConfigManager:
@@ -109,12 +126,17 @@ class ConfigManager:
         try:
             with open(self.CONFIG_PATH, "r") as f:
                 self.config = json.load(f)
+            _walk_secrets(self.config, secure_storage.decrypt)
         except Exception:
             self.config = self.DEFAULT_CONFIG.copy()
 
     def save(self):
+        # Encrypt secrets only in the on-disk copy — self.config stays
+        # plaintext in memory so every other call site is unaffected.
+        on_disk = copy.deepcopy(self.config)
+        _walk_secrets(on_disk, secure_storage.encrypt)
         with open(self.CONFIG_PATH, "w") as f:
-            json.dump(self.config, f, indent=4)
+            json.dump(on_disk, f, indent=4)
 
     def load(self):
         self._load()

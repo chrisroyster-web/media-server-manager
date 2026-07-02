@@ -3,6 +3,71 @@
 import paramiko
 import threading
 import os
+import sys
+
+
+def known_hosts_path():
+    """
+    Path to our trust-on-first-use host key store (OpenSSH known_hosts format).
+    Lives next to config.json: assets/ in dev, %APPDATA% when frozen.
+    """
+    if getattr(sys, "frozen", False):
+        appdata = os.environ.get("APPDATA") or os.path.expanduser("~")
+        base = os.path.join(appdata, "All Clear Server Services")
+    else:
+        base = os.path.normpath(
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets"))
+    os.makedirs(base, exist_ok=True)
+    return os.path.join(base, "known_hosts")
+
+
+def configure_host_key_verification(client):
+    """
+    Trust-on-first-use host key checking, shared by SSHManager and any code
+    that opens its own paramiko client (e.g. the multi-server aggregate poll).
+
+    Known keys are persisted to disk and reloaded on every connection, so a
+    host key that changes between connections raises paramiko.BadHostKeyException
+    instead of being silently re-trusted (which is what a bare AutoAddPolicy
+    does — it never compares against a previous connection, so it can't
+    actually detect a MITM). Genuinely new hosts are still auto-trusted on
+    first use, same as a normal SSH client's default behavior.
+    """
+    path = known_hosts_path()
+    if os.path.exists(path):
+        try:
+            client.load_host_keys(path)
+        except Exception:
+            pass
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+
+def persist_host_keys(client):
+    """Save any newly-trusted host keys so future connections can verify against them."""
+    try:
+        client.save_host_keys(known_hosts_path())
+    except Exception:
+        pass
+
+
+def forget_host_key(host, port=22):
+    """
+    Remove a stored host key so the next connection re-trusts on first use.
+    Use only after independently verifying the server's new key out-of-band
+    (e.g. the server's OS/SSH host keys were legitimately regenerated).
+    """
+    path = known_hosts_path()
+    if not os.path.exists(path):
+        return
+    keys = paramiko.hostkeys.HostKeys()
+    try:
+        keys.load(path)
+    except Exception:
+        return
+    lookup = host if int(port) == 22 else "[{}]:{}".format(host, port)
+    if lookup in keys:
+        del keys[lookup]
+        keys.save(path)
 
 
 class SSHManager:
@@ -25,7 +90,7 @@ class SSHManager:
     def connect(self, host, port, username, password=None, key_path=None):
         try:
             self.client = paramiko.SSHClient()
-            self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            configure_host_key_verification(self.client)
 
             if password:
                 self.client.connect(
@@ -43,6 +108,8 @@ class SSHManager:
                     username=username, pkey=key, timeout=10,
                 )
 
+            persist_host_keys(self.client)
+
             self.connected     = True
             self._connect_args = {
                 "host": host, "port": port, "username": username,
@@ -50,6 +117,16 @@ class SSHManager:
             }
             return True
 
+        except paramiko.BadHostKeyException as e:
+            self.connected = False
+            return (
+                "SSH HOST KEY MISMATCH for {} — the server's identity does not match "
+                "the key we trusted previously. This could mean the server was "
+                "reinstalled, OR that someone is intercepting the connection "
+                "(man-in-the-middle). Refusing to connect. If you're certain the "
+                "server's key legitimately changed, clear the saved key for this "
+                "host before reconnecting.".format(e.hostname)
+            )
         except Exception as e:
             self.connected = False
             return str(e)

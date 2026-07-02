@@ -9,6 +9,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import threading
 import time
+import shlex
 
 
 class UpdatesTab(tk.Frame):
@@ -185,11 +186,11 @@ class UpdatesTab(tk.Frame):
                     continue
                 # Get current image name
                 img_out, _, _ = ssh.run(
-                    "docker inspect --format '{{.Config.Image}}' " + container + " 2>/dev/null")
+                    "docker inspect --format '{{.Config.Image}}' " + shlex.quote(container) + " 2>/dev/null")
                 image = img_out.strip() or container
                 # Pull without extracting — just check if "Status: Image is up to date" or "newer"
                 pull_out, _, pull_code = ssh.run_sudo(
-                    "docker pull {}".format(image))
+                    "docker pull {}".format(shlex.quote(image)))
                 pull_line = pull_out.strip()
                 if "up to date" in pull_line.lower():
                     status = "Up to date"

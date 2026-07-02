@@ -51,8 +51,9 @@ def _poll_server(profile: dict, timeout: int = 8) -> dict:
     }
     try:
         import paramiko
+        from core.ssh_manager import configure_host_key_verification, persist_host_keys
         client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        configure_host_key_verification(client)
 
         host     = profile.get("host", "")
         port     = int(profile.get("port", 22) or 22)
@@ -80,6 +81,7 @@ def _poll_server(profile: dict, timeout: int = 8) -> dict:
             connect_kwargs["look_for_keys"] = True
 
         client.connect(**connect_kwargs)
+        persist_host_keys(client)
 
         def _run(cmd):
             try:
@@ -120,6 +122,8 @@ def _poll_server(profile: dict, timeout: int = 8) -> dict:
         client.close()
         result["ok"] = True
 
+    except paramiko.BadHostKeyException:
+        result["error"] = "Host key mismatch — possible MITM, refusing to connect"
     except Exception as exc:
         result["error"] = str(exc)[:80]
 

@@ -5,6 +5,7 @@ next fire time, last trigger, and the service they activate.
 """
 
 import re
+import shlex
 import threading
 import time
 import tkinter as tk
@@ -316,7 +317,7 @@ class SystemdTimersTab(tk.Frame):
         unit = sel[0]
         def _run():
             out, err, code = self.controller.ssh.run_sudo(
-                "systemctl {} {}".format(action, unit))
+                "systemctl {} {}".format(action, shlex.quote(unit)))
             if code == 0:
                 self.after(800, self.refresh)
             else:
@@ -339,7 +340,7 @@ class SystemdTimersTab(tk.Frame):
             return
         def _run():
             out, err, code = self.controller.ssh.run_sudo(
-                "systemctl start {}".format(service))
+                "systemctl start {}".format(shlex.quote(service)))
             if code == 0:
                 self.after(1000, self.refresh)
             else:

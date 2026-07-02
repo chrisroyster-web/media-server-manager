@@ -16,6 +16,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import threading
 import time
+import shlex
 
 from core.install_manager import APP_REGISTRY, CATEGORIES, InstallManager
 
@@ -502,7 +503,7 @@ class InstallTab(tk.Frame):
             container = app.get("container")
             if container:
                 self._log(f"  $ docker restart {container}\n", "cmd")
-                out, _, code = self.controller.ssh.run(f"docker restart {container} 2>&1")
+                out, _, code = self.controller.ssh.run(f"docker restart {shlex.quote(container)} 2>&1")
                 if (out or "").strip():
                     self._log(out.strip() + "\n")
                 ok = (code == 0)

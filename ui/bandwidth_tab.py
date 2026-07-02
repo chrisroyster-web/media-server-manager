@@ -11,6 +11,7 @@ from tkinter import ttk
 import threading
 import time
 import re
+import shlex
 
 from ui.refresh_control import RefreshControl
 
@@ -153,7 +154,7 @@ class BandwidthTab(tk.Frame):
 
         results = {}
         for iface in ifaces[:8]:
-            j_out, _, j_code = ssh.run("vnstat -i {} --json 2>/dev/null".format(iface))
+            j_out, _, j_code = ssh.run("vnstat -i {} --json 2>/dev/null".format(shlex.quote(iface)))
             if j_code == 0 and j_out and j_out.strip():
                 try:
                     results[iface] = json.loads(j_out)

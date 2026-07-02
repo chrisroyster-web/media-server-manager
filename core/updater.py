@@ -7,6 +7,7 @@ The updater expects GitHub releases to have a Windows installer asset whose
 filename ends with .exe  (e.g. AllClearServerServices_v2.0.0_Setup.exe).
 """
 
+import hashlib
 import json
 import os
 import sys
@@ -88,18 +89,32 @@ def find_installer_asset(release: dict) -> dict | None:
 
 def download_to_temp(url: str,
                      total_hint: int = 0,
-                     on_progress=None) -> str | None:
+                     on_progress=None,
+                     expected_digest: str | None = None,
+                     on_error=None) -> str | None:
     """
     Stream-download *url* to a fixed temp path.
     on_progress(bytes_done, total_bytes) is called after every chunk.
     total_hint comes from the GitHub asset metadata (used when the CDN
     redirect drops the Content-Length header).
-    Returns the local file path on success, None on any failure.
-    Never raises.
+
+    expected_digest, when given, is the GitHub release asset's "digest"
+    field (e.g. "sha256:<hex>"). The downloaded file's SHA-256 is checked
+    against it before the path is returned; a mismatch deletes the file
+    and fails the download rather than handing back a possibly-tampered
+    installer. Assets without a published digest are not verified (nothing
+    to check against) — same as before this was added.
+
+    on_error(reason: str), when given, is called with a short human-readable
+    explanation on failure — lets the caller distinguish "network problem"
+    from "integrity check failed" instead of just getting None either way.
+
+    Returns the local file path on success, None on any failure. Never raises.
     """
     dest = os.path.join(tempfile.gettempdir(), "AllClearServerServices_Update.exe")
     try:
         req = urllib.request.Request(url, headers={"User-Agent": _UA})
+        hasher = hashlib.sha256()
         with urllib.request.urlopen(req, timeout=_TIMEOUT_DL) as resp:
             total = int(resp.headers.get("Content-Length") or total_hint or 0)
             done  = 0
@@ -109,15 +124,36 @@ def download_to_temp(url: str,
                     if not chunk:
                         break
                     fh.write(chunk)
+                    hasher.update(chunk)
                     done += len(chunk)
                     if on_progress:
                         on_progress(done, total)
+
+        if expected_digest:
+            algo, _, expected_hex = expected_digest.partition(":")
+            if algo.lower() == "sha256" and expected_hex:
+                if hasher.hexdigest().lower() != expected_hex.lower().strip():
+                    try:
+                        os.unlink(dest)
+                    except Exception:
+                        pass
+                    if on_error:
+                        on_error(
+                            "Downloaded file failed its integrity check "
+                            "(SHA-256 mismatch) — refusing to run it. This "
+                            "could mean a corrupted download or a tampered "
+                            "release asset. Try again, and if it keeps "
+                            "happening, do not install it.")
+                    return None
+
         return dest
     except Exception:
         try:
             os.unlink(dest)
         except Exception:
             pass
+        if on_error:
+            on_error("Download failed.")
         return None
 
 

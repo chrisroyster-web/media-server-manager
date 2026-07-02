@@ -15,6 +15,16 @@ import re
 from ui.refresh_control import RefreshControl
 
 
+def _dq(value):
+    """Escape a value for safe embedding inside a double-quoted bash -c "..."
+    string: host/port fields here come from user-editable config, and are
+    interpolated into an already-double-quoted command, so shlex.quote (which
+    produces single-quoted output) would not protect against embedded double
+    quotes, $, or backticks the way it does for a top-level shell argument."""
+    s = str(value)
+    return s.replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$").replace("`", "\\`")
+
+
 class SSLTab(tk.Frame):
 
     WARN_DAYS  = 30
@@ -285,7 +295,7 @@ class SSLTab(tk.Frame):
                 "bash -c \"timeout 10 openssl s_client "
                 "-connect {c}:{p} -servername {s} </dev/null 2>/dev/null "
                 "| openssl x509 -noout -text 2>/dev/null\""
-                .format(c=connect_host, p=port, s=servername)
+                .format(c=_dq(connect_host), p=_dq(port), s=_dq(servername))
             )
             o, _, _ = ssh.run(cmd)
             return o if (o and "Not After" in o) else None
@@ -302,7 +312,7 @@ class SSLTab(tk.Frame):
             diag, diag_err, _ = ssh.run(
                 "bash -c \"timeout 10 openssl s_client "
                 "-connect {h}:{p} </dev/null 2>&1 | head -3\""
-                .format(h=host, p=port)
+                .format(h=_dq(host), p=_dq(port))
             )
             detail = (diag or diag_err or "no output").strip().splitlines()[0][:80]
             r.update({"status": "error",
@@ -511,7 +521,7 @@ class SSLTab(tk.Frame):
                 "bash -c \"timeout 5 openssl s_client"
                 " -connect {t}:443 -servername {h} </dev/null 2>&1"
                 " | grep -E 'CONNECTED|subject|issuer|Not After|errno|refused'\"".format(
-                    t=target, h=host))
+                    t=_dq(target), h=_dq(host)))
             lines.append("=== openssl probe -> {}:443 ===".format(target))
             lines.append(out.strip() if out.strip() else "(connection refused)")
             lines.append("")

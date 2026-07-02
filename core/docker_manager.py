@@ -1,5 +1,8 @@
 # core/docker_manager.py
 
+import shlex
+
+
 class DockerManager:
     """
     Provides Docker container control via SSH.
@@ -25,7 +28,7 @@ class DockerManager:
         if not self.ssh.connected:
             return "unknown"
 
-        cmd = f"docker inspect -f '{{{{.State.Status}}}}' {container_name}"
+        cmd = f"docker inspect -f '{{{{.State.Status}}}}' {shlex.quote(container_name)}"
         out, err, code = self.ssh.run(cmd)
 
         if code != 0:
@@ -43,7 +46,7 @@ class DockerManager:
             env_cmd = (
                 f"docker inspect -f "
                 f"'{{{{range .Config.Env}}}}{{{{.}}}}|{{{{end}}}}' "
-                f"{container_name}"
+                f"{shlex.quote(container_name)}"
             )
             env_out, _, env_code = self.ssh.run(env_cmd)
             if env_code == 0:
@@ -71,7 +74,7 @@ class DockerManager:
         if not self.ssh.connected:
             return "Not connected"
 
-        return self.ssh.run_sudo(f"docker start {container_name}")
+        return self.ssh.run_sudo(f"docker start {shlex.quote(container_name)}")
 
     # ---------------------------------------------------------
     # STOP
@@ -80,7 +83,7 @@ class DockerManager:
         if not self.ssh.connected:
             return "Not connected"
 
-        return self.ssh.run_sudo(f"docker stop {container_name}")
+        return self.ssh.run_sudo(f"docker stop {shlex.quote(container_name)}")
 
     # ---------------------------------------------------------
     # RESTART
@@ -89,7 +92,7 @@ class DockerManager:
         if not self.ssh.connected:
             return "Not connected"
 
-        return self.ssh.run_sudo(f"docker restart {container_name}")
+        return self.ssh.run_sudo(f"docker restart {shlex.quote(container_name)}")
 
     # ---------------------------------------------------------
     # LOGS
@@ -97,7 +100,7 @@ class DockerManager:
     def logs(self, container_name, lines=200):
         if not self.ssh.connected:
             return "", "Not connected", 1
-        cmd = f"docker logs --tail {lines} {container_name}"
+        cmd = f"docker logs --tail {int(lines)} {shlex.quote(container_name)}"
         return self.ssh.run(cmd)
 
     # ---------------------------------------------------------
@@ -106,7 +109,7 @@ class DockerManager:
     def inspect(self, container_name):
         if not self.ssh.connected:
             return "", "Not connected", 1
-        cmd = f"docker inspect {container_name}"
+        cmd = f"docker inspect {shlex.quote(container_name)}"
         return self.ssh.run(cmd)
 
     # ---------------------------------------------------------
@@ -129,11 +132,11 @@ class DockerManager:
         if not self.ssh.connected:
             return "", "Not connected", 1
         out, _, code = self.ssh.run(
-            f"docker inspect -f '{{{{.Config.Image}}}}' {container_name} 2>/dev/null")
+            f"docker inspect -f '{{{{.Config.Image}}}}' {shlex.quote(container_name)} 2>/dev/null")
         if code != 0 or not out.strip():
             return "", f"Cannot determine image for {container_name}", 1
         image = out.strip()
-        return self.ssh.run(f"docker pull {image} 2>&1")
+        return self.ssh.run(f"docker pull {shlex.quote(image)} 2>&1")
 
     # ---------------------------------------------------------
     # PRUNE
@@ -171,7 +174,7 @@ class DockerManager:
         if not images:
             return images
         # Fetch layer counts with a single inspect call across all image IDs
-        ids_str = " ".join(img["id"] for img in images)
+        ids_str = " ".join(shlex.quote(img["id"]) for img in images)
         layer_out, _, _ = self.ssh.run(
             f"docker image inspect {ids_str} "
             "--format '{{{{.Id}}}}|{{{{len .RootFS.Layers}}}}' 2>/dev/null")

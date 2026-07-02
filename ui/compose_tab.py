@@ -9,6 +9,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import threading
 import time
+import shlex
 
 
 class ComposeTab(tk.Frame):
@@ -145,8 +146,9 @@ class ComposeTab(tk.Frame):
     def _fetch_services(self, ssh, stack_name, config_file):
         """Return list of (service_name, status, image) for a stack."""
         # Use -p (project name) to scope to the stack
+        q = shlex.quote(stack_name)
         cmd = "docker compose -p {} ps --format json 2>/dev/null || docker compose -p {} ps 2>/dev/null".format(
-            stack_name, stack_name)
+            q, q)
         out, _, code = ssh.run(cmd)
         services = []
         if code != 0 or not out.strip():
@@ -332,7 +334,7 @@ class ComposeTab(tk.Frame):
                 self._append_console(card, "Not connected.\n")
                 return
 
-            cmd = "docker compose -p {} {} 2>&1".format(stack_name, action)
+            cmd = "docker compose -p {} {} 2>&1".format(shlex.quote(stack_name), action)
             self._append_console(card, "$ {}\n".format(cmd))
             out, _, _ = ssh.run(cmd)
             self._append_console(card, out + "\n")
@@ -364,7 +366,7 @@ class ComposeTab(tk.Frame):
 
         def _fetch():
             out, err, code = self.controller.ssh.run(
-                "cat '{}' 2>&1".format(config_file))
+                "cat {} 2>&1".format(shlex.quote(config_file)))
             if code != 0:
                 self.after(0, lambda e=err: messagebox.showerror(
                     "Edit Compose",
@@ -439,8 +441,8 @@ class ComposeTab(tk.Frame):
             def _worker():
                 import base64
                 b64 = base64.b64encode(new_content.encode("utf-8")).decode("ascii")
-                cmd = "echo '{}' | base64 -d | sudo tee '{}' > /dev/null 2>&1".format(
-                    b64, config_file)
+                cmd = "echo {} | base64 -d | sudo tee {} > /dev/null 2>&1".format(
+                    shlex.quote(b64), shlex.quote(config_file))
                 _, err, code = self.controller.ssh.run(cmd)
 
                 def _done():

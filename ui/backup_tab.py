@@ -13,6 +13,7 @@ import time
 import re
 import json
 import os
+import shlex
 
 from ui.refresh_control import RefreshControl
 
@@ -164,7 +165,8 @@ class BackupTab(tk.Frame):
                 "grep -o 'RESTIC_REPOSITORY=[^ ]*' | head -6")
             repos = re.findall(r'RESTIC_REPOSITORY=(\S+)', repos_out or "")
             for repo in repos or ["(default)"]:
-                env = "RESTIC_REPOSITORY={} RESTIC_PASSWORD_FILE=~/.restic-password".format(repo) if repo != "(default)" else ""
+                env = "RESTIC_REPOSITORY={} RESTIC_PASSWORD_FILE=~/.restic-password".format(
+                    shlex.quote(repo)) if repo != "(default)" else ""
                 snap_out, _, snap_code = ssh.run(
                     "{} restic snapshots --last --json 2>/dev/null".format(env))
                 if snap_code == 0 and snap_out.strip():
@@ -205,7 +207,7 @@ class BackupTab(tk.Frame):
                           "/var/log/unattended", "/var/log/dpkg")
             if any(log_path.startswith(s) for s in skip_paths):
                 continue
-            tail, _, _ = ssh.run("tail -40 '{}'".format(log_path))
+            tail, _, _ = ssh.run("tail -40 {}".format(shlex.quote(log_path)))
             job = self._parse_rsync_log(log_path, tail or "")
             if job:
                 jobs.append(job)
@@ -220,7 +222,7 @@ class BackupTab(tk.Frame):
                 continue
             status_out, _, _ = ssh.run(
                 "systemctl show {} --property=ActiveState,ExecMainStatus,"
-                "InactiveEnterTimestamp 2>/dev/null".format(svc))
+                "InactiveEnterTimestamp 2>/dev/null".format(shlex.quote(svc)))
             props = dict(re.findall(r'(\w+)=(.*)', status_out or ""))
             active = props.get("ActiveState", "unknown")
             code   = props.get("ExecMainStatus", "")
@@ -245,7 +247,7 @@ class BackupTab(tk.Frame):
             if not log_path:
                 continue
             tail, _, _ = ssh.run(
-                "grep -a '=== Backup' '{}' 2>/dev/null | tail -20".format(log_path))
+                "grep -a '=== Backup' {} 2>/dev/null | tail -20".format(shlex.quote(log_path)))
             job = self._parse_cron_backup_log(log_path, tail or "")
             if job:
                 jobs.append(job)

@@ -9,6 +9,7 @@ import tkinter as tk
 from tkinter import ttk
 import threading
 import re
+import shlex
 
 
 # ── Detection helpers ─────────────────────────────────────────────────────────
@@ -249,9 +250,10 @@ class ReverseProxyTab(tk.Frame):
             if ptype == "Nginx":
                 conf_text = ""
                 for path in _NGINX_CONF_PATHS:
+                    qp = shlex.quote(path)
                     out, _, _ = ssh.run(
                         "cat {p} 2>/dev/null || "
-                        "find {p} -name '*.conf' -exec cat {{}} \\; 2>/dev/null".format(p=path))
+                        "find {p} -name '*.conf' -exec cat {{}} \\; 2>/dev/null".format(p=qp))
                     if out and out.strip():
                         conf_text += out + "\n"
                 if conf_text:
@@ -268,7 +270,7 @@ class ReverseProxyTab(tk.Frame):
             elif ptype == "Caddy":
                 conf_text = ""
                 for path in _CADDY_CONF_PATHS:
-                    out, _, _ = ssh.run("cat {p} 2>/dev/null".format(p=path))
+                    out, _, _ = ssh.run("cat {p} 2>/dev/null".format(p=shlex.quote(path)))
                     if out and out.strip():
                         conf_text = out
                         break
@@ -289,7 +291,7 @@ class ReverseProxyTab(tk.Frame):
             elif ptype == "Traefik":
                 conf_text = ""
                 for path in _TRAEFIK_CONF_PATHS:
-                    out, _, _ = ssh.run("cat {p} 2>/dev/null".format(p=path))
+                    out, _, _ = ssh.run("cat {p} 2>/dev/null".format(p=shlex.quote(path)))
                     if out and out.strip():
                         conf_text = out
                         break

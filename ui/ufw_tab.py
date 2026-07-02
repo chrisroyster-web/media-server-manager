@@ -2,6 +2,7 @@
 """UFW firewall manager — view rules, add/delete, enable/disable."""
 
 import re
+import shlex
 import threading
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
@@ -376,14 +377,15 @@ class _AddRuleDialog(tk.Toplevel):
             messagebox.showwarning("Missing", "Enter a port or service name.", parent=self)
             return
 
-        # Build ufw command
+        # Build ufw command — action/direction/proto are radio-button-constrained
+        # to fixed literals, but port/from_ip are free-typed, so quote them.
         parts = ["ufw", action, direction]
         if from_ip != "any":
-            parts += ["from", from_ip]
+            parts += ["from", shlex.quote(from_ip)]
         parts += ["to", "any"]
         if proto != "any":
-            parts += ["proto", proto, "port", port]
+            parts += ["proto", proto, "port", shlex.quote(port)]
         else:
-            parts += ["port", port]
+            parts += ["port", shlex.quote(port)]
         self.result = " ".join(parts)
         self.destroy()

@@ -5,6 +5,7 @@ Shows output of `who` and `w`, lets you send SIGHUP to a pts to kick a user.
 """
 
 import re
+import shlex
 import tkinter as tk
 from tkinter import ttk, messagebox
 import threading
@@ -492,7 +493,7 @@ class SessionsTab(tk.Frame):
             ssh = self.controller.ssh
             # pkill -SIGHUP -t pts/N  (works for pts sessions)
             out, err, code = ssh.run(
-                "sudo pkill -SIGHUP -t {} 2>&1".format(tty))
+                "sudo pkill -SIGHUP -t {} 2>&1".format(shlex.quote(tty)))
             def _done(code=code):
                 if code == 0:
                     self._set_status("Kicked {} on {}".format(user, tty), "ok")

@@ -267,16 +267,25 @@ class UpdateDialog(tk.Toplevel):
             self.after(0, lambda p=pct, d=done_mb, tt=total_mb:
                        self._update_progress(p, d, tt))
 
+        error_reason = []
+
+        def _on_error(reason):
+            error_reason.append(reason)
+
         def _worker():
             if self._cancelled:
                 return
-            path = updater.download_to_temp(url, total_hint, _on_progress)
+            path = updater.download_to_temp(
+                url, total_hint, _on_progress,
+                expected_digest=self._asset.get("digest"),
+                on_error=_on_error)
             if self._cancelled:
                 return
             if path:
                 self.after(0, lambda p=path: self._download_done(p))
             else:
-                self.after(0, lambda: self._show_error("Download failed. Check your connection."))
+                msg = error_reason[0] if error_reason else "Download failed. Check your connection."
+                self.after(0, lambda m=msg: self._show_error(m))
 
         threading.Thread(target=_worker, daemon=True).start()
 

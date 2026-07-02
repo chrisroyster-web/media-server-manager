@@ -11,6 +11,7 @@ import time
 import tkinter as tk
 from tkinter import ttk, messagebox
 import threading
+import shlex
 
 from ui.base_tab import CardConsoleTab
 from ui.refresh_control import RefreshControl
@@ -166,7 +167,7 @@ class DockerTab(CardConsoleTab):
             ids = ids_out.strip().split() if ids_out.strip() else []
 
             if ids:
-                ids_str = " ".join(ids)
+                ids_str = " ".join(shlex.quote(i) for i in ids)
 
                 # One inspect call — pipe-delimited: name|status|image|compose-project|ports
                 fmt = (
@@ -219,7 +220,7 @@ class DockerTab(CardConsoleTab):
                     stats_out, _, _ = ssh.run(
                         "docker stats --no-stream --format "
                         "'{{{{.Name}}}}|{{{{.CPUPerc}}}}|{{{{.MemPerc}}}}|{{{{.RunningFor}}}}'"
-                        " {} 2>/dev/null".format(" ".join(running)))
+                        " {} 2>/dev/null".format(" ".join(shlex.quote(n) for n in running)))
                     for line in stats_out.strip().splitlines():
                         p = line.split("|")
                         if len(p) == 4:

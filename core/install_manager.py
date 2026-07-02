@@ -13,6 +13,7 @@ Safe-by-design:
 """
 
 import time
+import shlex
 
 CATEGORIES = [
     "Infrastructure",
@@ -889,7 +890,7 @@ class InstallManager:
         # ── Docker container check ───────────────────────────────────
         fmt = "{{.State.Status}}|{{.Config.Image}}|{{.RestartCount}}"
         out, _, _ = self.ssh.run(
-            f"docker inspect --format '{fmt}' {container} 2>/dev/null || echo not_found")
+            f"docker inspect --format '{fmt}' {shlex.quote(container)} 2>/dev/null || echo not_found")
         raw = out.strip()
 
         if raw == "not_found" or not raw:
@@ -899,8 +900,9 @@ class InstallManager:
             # positives (log-rotation jobs, other apps on the same port,
             # leftover unit files with unrelated processes).
             for svc in _KNOWN_SERVICES.get(key, []):
+                q = shlex.quote(svc)
                 out2, _, _ = self.ssh.run(
-                    f"systemctl is-active {svc} 2>/dev/null; true")
+                    f"systemctl is-active {q} 2>/dev/null; true")
                 svc_state = out2.strip()
                 if svc_state == "active":
                     return {"state": "running", "version": "", "method": "service", "restart_count": 0}
@@ -908,8 +910,8 @@ class InstallManager:
                     # Confirm the unit file actually exists so we don't
                     # misread systemd's generic "inactive" for unknown units.
                     chk, _, _ = self.ssh.run(
-                        f"systemctl list-unit-files {svc}.service 2>/dev/null "
-                        f"| grep -q '{svc}' && echo found || echo no")
+                        f"systemctl list-unit-files {q}.service 2>/dev/null "
+                        f"| grep -q {shlex.quote(svc)} && echo found || echo no")
                     if chk.strip() == "found":
                         return {"state": "stopped", "version": "", "method": "service", "restart_count": 0}
 
@@ -995,7 +997,7 @@ class InstallManager:
             return
         log(f"  Opening firewall port(s) for {app['name']}: {', '.join(ports)}\n")
         for spec in ports:
-            out, err, code = self.ssh.run_sudo(f"ufw allow {spec}")
+            out, err, code = self.ssh.run_sudo(f"ufw allow {shlex.quote(spec)}")
             if code != 0:
                 log(f"  ✗ ufw allow {spec} failed: {(err or out).strip()}\n", "warn")
 
@@ -1022,11 +1024,12 @@ class InstallManager:
 
         # Try Docker first — only if the container actually exists
         if container:
+            qc = shlex.quote(container)
             _, _, inspect_code = self.ssh.run(
-                f"docker inspect {container} >/dev/null 2>&1")
+                f"docker inspect {qc} >/dev/null 2>&1")
             if inspect_code == 0:
                 log(f"  $ docker start {container}\n", "cmd")
-                out, _, code = self.ssh.run(f"docker start {container} 2>&1")
+                out, _, code = self.ssh.run(f"docker start {qc} 2>&1")
                 if (out or "").strip():
                     log(out.strip() + "\n")
                 if code != 0:
@@ -1035,12 +1038,13 @@ class InstallManager:
 
         # Fall back to systemctl for native installs
         for svc in _KNOWN_SERVICES.get(key, []):
+            q = shlex.quote(svc)
             chk, _, _ = self.ssh.run(
-                f"systemctl list-unit-files {svc}.service 2>/dev/null | grep -q {svc} && echo found || echo no")
+                f"systemctl list-unit-files {q}.service 2>/dev/null | grep -q {q} && echo found || echo no")
             if chk.strip() != "found":
                 continue
             log(f"  $ sudo systemctl start {svc}\n", "cmd")
-            out, _, code = self.ssh.run_sudo(f"systemctl start {svc}")
+            out, _, code = self.ssh.run_sudo(f"systemctl start {q}")
             if (out or "").strip():
                 log(out.strip() + "\n")
             if code != 0:
@@ -1072,7 +1076,7 @@ class InstallManager:
 
         # Tier 1: restart
         log(f"  [Tier 1] Restarting {container}…\n")
-        out, _, code = self.ssh.run(f"docker restart {container} 2>&1")
+        out, _, code = self.ssh.run(f"docker restart {shlex.quote(container)} 2>&1")
         if (out or "").strip():
             log(out.strip() + "\n")
         time.sleep(8)
@@ -1092,7 +1096,7 @@ class InstallManager:
 
         # Fallback: show logs for manual diagnosis
         log("\n  Still unhealthy — recent container logs:\n", "warn")
-        log_out, _, _ = self.ssh.run(f"docker logs --tail=40 {container} 2>&1")
+        log_out, _, _ = self.ssh.run(f"docker logs --tail=40 {shlex.quote(container)} 2>&1")
         log((log_out or "").strip() + "\n")
         return False
 
@@ -1104,7 +1108,7 @@ class InstallManager:
         image = app.get("image", "")
         if image:
             log(f"  Pulling latest image: {image}\n")
-            self._run_cmds([f"docker pull {image}"], log)
+            self._run_cmds([f"docker pull {shlex.quote(image)}"], log)
         cmds = app.get("reinstall_cmds", [])
         if not cmds:
             log("  No reinstall commands defined.\n", "warn")
@@ -1123,16 +1127,17 @@ class InstallManager:
         key = app["key"]
 
         if container:
+            qc = shlex.quote(container)
             _, _, inspect_code = self.ssh.run(
-                f"docker inspect {container} >/dev/null 2>&1")
+                f"docker inspect {qc} >/dev/null 2>&1")
             if inspect_code == 0:
                 log(f"  $ docker stop {container}\n", "cmd")
-                out, _, _ = self.ssh.run(f"docker stop {container} 2>&1")
+                out, _, _ = self.ssh.run(f"docker stop {qc} 2>&1")
                 if (out or "").strip():
                     log(out.strip() + "\n")
 
                 log(f"  $ docker rm {container}\n", "cmd")
-                out, _, code = self.ssh.run(f"docker rm {container} 2>&1")
+                out, _, code = self.ssh.run(f"docker rm {qc} 2>&1")
                 if (out or "").strip():
                     log(out.strip() + "\n")
                 if code == 0:
@@ -1143,13 +1148,14 @@ class InstallManager:
             log(f"  Docker container '{container}' not found — checking native service.\n", "warn")
 
         for svc in _KNOWN_SERVICES.get(key, []):
+            q = shlex.quote(svc)
             chk, _, _ = self.ssh.run(
-                f"systemctl list-unit-files {svc}.service 2>/dev/null "
-                f"| grep -q {svc} && echo found || echo no")
+                f"systemctl list-unit-files {q}.service 2>/dev/null "
+                f"| grep -q {q} && echo found || echo no")
             if chk.strip() != "found":
                 continue
             log(f"  $ sudo systemctl disable --now {svc}\n", "cmd")
-            out, _, code = self.ssh.run_sudo(f"systemctl disable --now {svc}")
+            out, _, code = self.ssh.run_sudo(f"systemctl disable --now {q}")
             if (out or "").strip():
                 log(out.strip() + "\n")
             if code == 0:

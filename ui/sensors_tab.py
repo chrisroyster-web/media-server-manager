@@ -9,6 +9,7 @@ Keeps a rolling history (last 60 readings) per sensor for sparklines.
 
 import json
 import math
+import shlex
 import time
 import threading
 import tkinter as tk
@@ -168,7 +169,8 @@ class SensorsTab(tk.Frame):
                 if not disk:
                     continue
                 t_out, _, t_code = ssh.run_sudo(
-                    "smartctl -A /dev/{} 2>/dev/null | grep -i 'temperature'".format(disk))
+                    "smartctl -A {} 2>/dev/null | grep -i 'temperature'".format(
+                        shlex.quote("/dev/" + disk)))
                 temp = None
                 if t_code == 0:
                     for l in t_out.splitlines():

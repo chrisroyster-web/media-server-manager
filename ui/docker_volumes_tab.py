@@ -6,6 +6,7 @@ Docker volumes and networks via SSH.
 
 import json
 import re
+import shlex
 import threading
 import time
 import tkinter as tk
@@ -270,7 +271,7 @@ class DockerVolumesTab(tk.Frame):
                 c_out, _, _ = ssh.run(
                     "docker network inspect {} --format "
                     "'{{{{range $k,$v := .Containers}}}}{{{{$v.Name}}}} {{{{end}}}}'"
-                    " 2>/dev/null".format(name))
+                    " 2>/dev/null".format(shlex.quote(name)))
                 net["containers"] = ", ".join(c_out.split()) if c_out.strip() else ""
 
             self._networks = networks
@@ -357,7 +358,7 @@ class DockerVolumesTab(tk.Frame):
         name = sel[0]
         def _run():
             out, err, code = self.controller.ssh.run(
-                "docker volume inspect {} 2>&1".format(name))
+                "docker volume inspect {} 2>&1".format(shlex.quote(name)))
             self.after(0, lambda: messagebox.showinfo(
                 "Volume: {}".format(name), (out or err)[:2000], parent=self))
         threading.Thread(target=_run, daemon=True).start()
@@ -374,7 +375,7 @@ class DockerVolumesTab(tk.Frame):
         def _run():
             self._log("$ docker volume rm {}".format(name), "cmd")
             out, err, code = self.controller.ssh.run(
-                "docker volume rm {} 2>&1".format(name))
+                "docker volume rm {} 2>&1".format(shlex.quote(name)))
             combined = (out or "") + (err or "")
             if code == 0:
                 self._log("Removed: {}".format(name), "ok")
@@ -409,7 +410,7 @@ class DockerVolumesTab(tk.Frame):
         name = sel[0]
         def _run():
             out, err, code = self.controller.ssh.run(
-                "docker network inspect {} 2>&1".format(name))
+                "docker network inspect {} 2>&1".format(shlex.quote(name)))
             self.after(0, lambda: messagebox.showinfo(
                 "Network: {}".format(name), (out or err)[:2000], parent=self))
         threading.Thread(target=_run, daemon=True).start()
@@ -431,7 +432,7 @@ class DockerVolumesTab(tk.Frame):
         def _run():
             self._log("$ docker network rm {}".format(name), "cmd")
             out, err, code = self.controller.ssh.run(
-                "docker network rm {} 2>&1".format(name))
+                "docker network rm {} 2>&1".format(shlex.quote(name)))
             combined = (out or "") + (err or "")
             if code == 0:
                 self._log("Removed: {}".format(name), "ok")

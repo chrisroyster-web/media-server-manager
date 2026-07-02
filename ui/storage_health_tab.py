@@ -8,6 +8,7 @@ from tkinter import ttk
 import threading
 import time
 import re
+import shlex
 import traceback
 
 from ui.refresh_control import RefreshControl
@@ -164,7 +165,7 @@ class StorageHealthTab(tk.Frame):
                 if len(parts) >= 5:
                     name, health, size, used, free = parts[:5]
                     scrub_out, _, _ = ssh.run(
-                        "zpool status {} 2>/dev/null | grep -E 'scrub:|scan:'".format(name))
+                        "zpool status {} 2>/dev/null | grep -E 'scrub:|scan:'".format(shlex.quote(name)))
                     scrub_lines = (scrub_out or "").strip().splitlines()
                     scrub = scrub_lines[0].strip() if scrub_lines else "no scrub data"
                     scrub = re.sub(r'^(scrub|scan):\s*', '', scrub)
@@ -340,6 +341,7 @@ class StorageHealthTab(tk.Frame):
 
         def _fetch_detail():
             ssh = self.controller.ssh
+            q = shlex.quote(name)
             out, _, _ = ssh.run(
                 "df -hT {0} 2>/dev/null; "
                 "echo; "
@@ -347,8 +349,8 @@ class StorageHealthTab(tk.Frame):
                 "echo; "
                 "src=$(findmnt -n -o SOURCE {0} 2>/dev/null | head -1); "
                 "if [ -n \"$src\" ]; then "
-                "  sudo smartctl -a $src 2>/dev/null | head -50 || true; "
-                "fi".format(name))
+                "  sudo smartctl -a \"$src\" 2>/dev/null | head -50 || true; "
+                "fi".format(q))
             self.after(0, lambda o=out: self._set_detail(o or "No detail available."))
 
         threading.Thread(target=_fetch_detail, daemon=True).start()

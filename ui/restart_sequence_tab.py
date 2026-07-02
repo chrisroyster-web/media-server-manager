@@ -15,6 +15,7 @@ Config is persisted under config["restart_sequence"] as a list of dicts:
 
 import time
 import threading
+import shlex
 import tkinter as tk
 from tkinter import ttk
 
@@ -402,12 +403,13 @@ class RestartSequenceTab(tk.Frame):
         name  = item.get("name", item.get("identifier", "?"))
         ident = item.get("identifier", "")
 
+        q = shlex.quote(ident)
         if itype == "service":
-            cmd = f"systemctl stop {ident}"
+            cmd = f"systemctl stop {q}"
         elif itype == "docker":
-            cmd = f"docker stop {ident}"
+            cmd = f"docker stop {q}"
         else:  # compose
-            cmd = f"docker compose -p {ident} down"
+            cmd = f"docker compose -p {q} down"
 
         self._log(f"  STOP  {name}  →  $ {cmd}\n", "cmd")
         out, err, code = ssh.run_sudo(cmd) if itype == "service" else ssh.run(f"{cmd} 2>&1")
@@ -421,12 +423,13 @@ class RestartSequenceTab(tk.Frame):
         name  = item.get("name", item.get("identifier", "?"))
         ident = item.get("identifier", "")
 
+        q = shlex.quote(ident)
         if itype == "service":
-            cmd = f"systemctl start {ident}"
+            cmd = f"systemctl start {q}"
         elif itype == "docker":
-            cmd = f"docker start {ident}"
+            cmd = f"docker start {q}"
         else:  # compose
-            cmd = f"docker compose -p {ident} up -d"
+            cmd = f"docker compose -p {q} up -d"
 
         self._log(f"  START {name}  →  $ {cmd}\n", "cmd")
         out, err, code = ssh.run_sudo(cmd) if itype == "service" else ssh.run(f"{cmd} 2>&1")

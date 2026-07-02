@@ -15,6 +15,7 @@ import threading
 import base64
 import json
 import re
+import shlex
 
 
 # ---------------------------------------------------------------------------
@@ -373,9 +374,10 @@ class CronTab(tk.Frame):
 
             out, _, _ = ssh.run("ls /etc/cron.d/ 2>/dev/null")
             for fname in out.split():
-                content, _, fc = ssh.run(f"cat /etc/cron.d/{fname.strip()} 2>/dev/null")
+                fname = fname.strip()
+                content, _, fc = ssh.run(f"cat {shlex.quote('/etc/cron.d/' + fname)} 2>/dev/null")
                 if fc == 0 and content.strip():
-                    jobs += _parse_crontab_lines(content, f"/etc/cron.d/{fname.strip()}")
+                    jobs += _parse_crontab_lines(content, f"/etc/cron.d/{fname}")
 
             # ── Systemd timers ────────────────────────────────────────────
             out, _, _ = ssh.run("systemctl list-timers --all --no-pager 2>/dev/null")
@@ -556,15 +558,15 @@ class CronTab(tk.Frame):
             cmd = job["command"]
             is_root = "root" in job.get("source", "")
             if is_root:
-                out, err, code = ssh.run_sudo(f"sh -c {repr(cmd)}")
+                out, err, code = ssh.run_sudo(f"sh -c {shlex.quote(cmd)}")
             else:
                 out, err, code = ssh.run(cmd)
         elif jtype == "systemd":
             svc = job.get("activates") or job["unit"].replace(".timer", ".service")
-            out, err, code = ssh.run_sudo(f"systemctl start {svc}")
+            out, err, code = ssh.run_sudo(f"systemctl start {shlex.quote(svc)}")
         elif jtype == "docker":
             unit = job.get("unit", "")
-            out, err, code = ssh.run(f"docker restart {unit} 2>&1")
+            out, err, code = ssh.run(f"docker restart {shlex.quote(unit)} 2>&1")
         else:
             out, err, code = "", "Unknown job type", 1
         self._log_result("run", out, err, code)
@@ -588,15 +590,15 @@ class CronTab(tk.Frame):
         elif jtype == "systemd":
             unit = job["unit"]
             if currently_enabled:
-                out, err, code = ssh.run_sudo(f"systemctl stop {unit}")
+                out, err, code = ssh.run_sudo(f"systemctl stop {shlex.quote(unit)}")
             else:
-                out, err, code = ssh.run_sudo(f"systemctl start {unit}")
+                out, err, code = ssh.run_sudo(f"systemctl start {shlex.quote(unit)}")
         elif jtype == "docker":
             unit = job.get("unit", "")
             if currently_enabled:
-                out, err, code = ssh.run(f"docker stop {unit} 2>&1")
+                out, err, code = ssh.run(f"docker stop {shlex.quote(unit)} 2>&1")
             else:
-                out, err, code = ssh.run(f"docker start {unit} 2>&1")
+                out, err, code = ssh.run(f"docker start {shlex.quote(unit)} 2>&1")
         else:
             out, err, code = "", "Unknown job type", 1
         self._log_result("toggle", out, err, code)
@@ -626,11 +628,11 @@ class CronTab(tk.Frame):
             out, err, code = self._cron_remove(job)
         elif jtype == "systemd":
             unit = job["unit"]
-            out, err, code = ssh.run_sudo(f"systemctl disable --now {unit} 2>&1; true")
+            out, err, code = ssh.run_sudo(f"systemctl disable --now {shlex.quote(unit)} 2>&1; true")
         elif jtype == "docker":
             unit = job.get("unit", "")
-            o1, e1, _  = ssh.run(f"docker stop {unit} 2>&1")
-            o2, e2, c2 = ssh.run(f"docker rm   {unit} 2>&1")
+            o1, e1, _  = ssh.run(f"docker stop {shlex.quote(unit)} 2>&1")
+            o2, e2, c2 = ssh.run(f"docker rm   {shlex.quote(unit)} 2>&1")
             out, err, code = o1 + o2, e1 + e2, c2
         else:
             out, err, code = "", "Unknown job type", 1
@@ -655,7 +657,7 @@ class CronTab(tk.Frame):
             return ssh.run(cmd)
         if source.startswith("/etc/cron.d/") or source == "/etc/crontab":
             path = source if source != "/etc/crontab" else "/etc/crontab"
-            cmd  = f"echo '{encoded}' | base64 -d | sudo tee {path} > /dev/null"
+            cmd  = f"echo '{encoded}' | base64 -d | sudo tee {shlex.quote(path)} > /dev/null"
             return ssh.run(cmd)
         return "", f"Cannot edit source: {source}", 1
 
@@ -667,7 +669,7 @@ class CronTab(tk.Frame):
             out, _, _ = ssh.run_sudo("crontab -l 2>/dev/null")
         else:
             path = source if source.startswith("/") else f"/etc/crontab"
-            out, _, _ = ssh.run(f"cat {path} 2>/dev/null")
+            out, _, _ = ssh.run(f"cat {shlex.quote(path)} 2>/dev/null")
         return out.splitlines()
 
     def _cron_set_enabled(self, job, enable: bool):

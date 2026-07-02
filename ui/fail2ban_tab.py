@@ -2,6 +2,7 @@
 
 import re
 import threading
+import shlex
 import tkinter as tk
 from tkinter import ttk
 
@@ -196,7 +197,7 @@ class Fail2banTab(tk.Frame):
             jails = {}
             for jail in jail_names:
                 self._log(f"  $ fail2ban-client status {jail}\n", "cmd")
-                out2, _, code2 = ssh.run_sudo(f"fail2ban-client status {jail}")
+                out2, _, code2 = ssh.run_sudo(f"fail2ban-client status {shlex.quote(jail)}")
                 if code2 == 0:
                     jails[jail] = self._parse_jail_detail(out2)
 
@@ -298,7 +299,7 @@ class Fail2banTab(tk.Frame):
         def _worker():
             self._log(f"  $ fail2ban-client set {jail} unbanip {ip}\n", "cmd")
             out, err, code = self.controller.ssh.run_sudo(
-                f"fail2ban-client set {jail} unbanip {ip}")
+                f"fail2ban-client set {shlex.quote(jail)} unbanip {shlex.quote(ip)}")
             if code == 0:
                 self._log(f"  ✓  {ip} unbanned from {jail}\n", "ok")
             else:

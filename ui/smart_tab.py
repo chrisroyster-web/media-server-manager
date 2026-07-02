@@ -4,6 +4,7 @@ import tkinter as tk
 from tkinter import ttk
 import threading
 import time
+import shlex
 
 
 class SmartTab(tk.Frame):
@@ -186,12 +187,12 @@ class SmartTab(tk.Frame):
 
         def _run_with_flag(flag, args, device):
             """Run 'sudo smartctl [flag] args device', return (stdout, stderr)."""
-            cmd = "sudo smartctl {} {} {}".format(flag, args, device).strip()
+            cmd = "sudo smartctl {} {} {}".format(flag, args, shlex.quote(device)).strip()
             o, e, _ = ssh.run(cmd)
             return o or "", e or ""
 
         # -i: identity — discover which (if any) device flag is needed
-        info_out, info_err = ssh.run("sudo smartctl -i {}".format(dev))[0:2]
+        info_out, info_err = ssh.run("sudo smartctl -i {}".format(shlex.quote(dev)))[0:2]
         info_out, info_err = info_out or "", info_err or ""
         _dev_flag = ""
         _usb_unsupported = False
@@ -378,7 +379,7 @@ class SmartTab(tk.Frame):
 
         def worker():
             # Try plain first
-            out, err, _ = ssh.run("sudo smartctl -a {}".format(dev))
+            out, err, _ = ssh.run("sudo smartctl -a {}".format(shlex.quote(dev)))
             combined = (out or "") + ("\n" + err if err and err.strip() else "")
 
             # USB bridge auto-detection: try device types in order
@@ -386,7 +387,7 @@ class SmartTab(tk.Frame):
                 for dtype in ("-d sat", "-d sat,12", "-d usbsunplus",
                               "-d usbprolific", "-d usbjmicron"):
                     o2, e2, _ = ssh.run(
-                        "sudo smartctl {} -a {}".format(dtype, dev))
+                        "sudo smartctl {} -a {}".format(dtype, shlex.quote(dev)))
                     c2 = (o2 or "") + ("\n" + e2 if e2 and e2.strip() else "")
                     if not _needs_flag(c2):
                         combined = "[Retried with {}]\n\n".format(dtype) + c2
