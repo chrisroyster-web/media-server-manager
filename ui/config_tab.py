@@ -1996,13 +1996,17 @@ class ConfigTab(tk.Frame):
             try:
                 url = "http://{}:{}/v1/api/system/healthcheck".format(host, port)
                 req = urllib.request.Request(url, headers={"Accept": "application/json"})
-                try:
-                    with urllib.request.urlopen(req, timeout=6) as r:
-                        code = r.status
-                except urllib.error.HTTPError as e:
-                    code = e.code  # any response at all means it's up
+                with urllib.request.urlopen(req, timeout=6) as r:
+                    code = r.status
                 self.after(0, lambda: self._set_test_result(
                     lbl, True, "Connected  ·  HTTP {}".format(code)))
+            except urllib.error.HTTPError as e:
+                # Something answered on this host:port, but not with a healthy
+                # response from Watchstate's own endpoint -- e.g. a 404 usually
+                # means a different service (or a proxy's default page) is
+                # sitting on that port, not Watchstate.
+                self.after(0, lambda err=e: self._set_test_result(
+                    lbl, False, "No Watchstate here — HTTP {}".format(err.code)))
             except Exception as e:
                 self.after(0, lambda err=str(e): self._set_test_result(lbl, False, err[:60]))
         threading.Thread(target=_run, daemon=True).start()

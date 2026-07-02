@@ -138,8 +138,10 @@ class WatchstateTab(tk.Frame):
             code = _check_health(cfg.watchstate_host, cfg.watchstate_port)
             ok, detail = True, "HTTP {}".format(code)
         except urllib.error.HTTPError as e:
-            # Any HTTP response at all means the service is up and answering.
-            ok, detail = True, "HTTP {}".format(e.code)
+            # A 4xx/5xx means *something* answered on this host:port, but not
+            # Watchstate's own healthcheck endpoint -- e.g. a 404 usually means
+            # a different service (or a proxy's default page) is on that port.
+            ok, detail = False, "No Watchstate here — HTTP {}".format(e.code)
         except Exception as e:
             ok, detail = False, str(e)
         finally:
