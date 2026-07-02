@@ -17,6 +17,7 @@ assets/config.json
 crash.log
 error.txt
 play_history_debug.json
+assets/metrics.db
 
 # Editor/OS cruft
 .vscode/
