@@ -1185,12 +1185,13 @@ class ConfigTab(tk.Frame):
         self._mount_rows.clear()
 
         for lbl in (
-            self._sab_test_lbl, self._emby_test_lbl, self._plex_test_lbl,
+            self._sab_test_lbl, self._qb_test_lbl, self._ph_test_lbl,
+            self._emby_test_lbl, self._plex_test_lbl,
             self._jf_test_lbl, self._sonarr_test_lbl, self._radarr_test_lbl,
             self._prowlarr_test_lbl, self._overseerr_test_lbl,
             self._jellyseerr_test_lbl, self._tautulli_test_lbl,
             self._uk_test_lbl, self._nd_test_lbl, self._gl_test_lbl,
-            self._wud_test_lbl, self._cf_test_lbl,
+            self._wud_test_lbl, self._ws_test_lbl, self._cf_test_lbl,
         ):
             lbl.config(text="", fg=self.theme.text_muted)
 

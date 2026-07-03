@@ -156,132 +156,133 @@ class BackupTab(tk.Frame):
     def _fetch(self):
         ssh  = self.controller.ssh
         jobs = []
+        try:
+            # ── restic ──────────────────────────────────────────────────────
+            rout, _, rcode = ssh.run(
+                "command -v restic >/dev/null 2>&1 && echo FOUND || echo MISSING")
+            if "FOUND" in (rout or ""):
+                repos_out, _, _ = ssh.run(
+                    "cat ~/.config/restic-repos 2>/dev/null || "
+                    "grep -r 'RESTIC_REPOSITORY' /etc/cron* /etc/systemd/system "
+                    "~/.local/share/systemd/user 2>/dev/null | "
+                    "grep -o 'RESTIC_REPOSITORY=[^ ]*' | head -6")
+                repos = re.findall(r'RESTIC_REPOSITORY=(\S+)', repos_out or "")
+                for repo in repos or ["(default)"]:
+                    env = "RESTIC_REPOSITORY={} RESTIC_PASSWORD_FILE=~/.restic-password".format(
+                        shlex.quote(repo)) if repo != "(default)" else ""
+                    snap_out, _, snap_code = ssh.run(
+                        "{} restic snapshots --last --json 2>/dev/null".format(env))
+                    if snap_code == 0 and snap_out.strip():
+                        try:
+                            snaps = json.loads(snap_out)
+                            last = snaps[-1] if snaps else {}
+                            ts   = last.get("time", "")
+                            if ts:
+                                dt   = datetime.datetime.fromisoformat(ts[:19])
+                                age  = (datetime.datetime.utcnow() - dt).total_seconds()
+                                days = age / 86400
+                                st   = "ok" if days < 2 else ("warn" if days < 7 else "fail")
+                                jobs.append({
+                                    "tool": "restic", "name": repo.split("/")[-1] or "repo",
+                                    "status": st, "last_run": dt.strftime("%Y-%m-%d %H:%M"),
+                                    "duration": "--", "size": "--",
+                                    "files": str(last.get("summary", {}).get("total_files_processed", "--")),
+                                    "dest": repo, "log": str(last),
+                                })
+                        except Exception:
+                            pass
 
-        # ── restic ──────────────────────────────────────────────────────
-        rout, _, rcode = ssh.run(
-            "command -v restic >/dev/null 2>&1 && echo FOUND || echo MISSING")
-        if "FOUND" in (rout or ""):
-            repos_out, _, _ = ssh.run(
-                "cat ~/.config/restic-repos 2>/dev/null || "
-                "grep -r 'RESTIC_REPOSITORY' /etc/cron* /etc/systemd/system "
-                "~/.local/share/systemd/user 2>/dev/null | "
-                "grep -o 'RESTIC_REPOSITORY=[^ ]*' | head -6")
-            repos = re.findall(r'RESTIC_REPOSITORY=(\S+)', repos_out or "")
-            for repo in repos or ["(default)"]:
-                env = "RESTIC_REPOSITORY={} RESTIC_PASSWORD_FILE=~/.restic-password".format(
-                    shlex.quote(repo)) if repo != "(default)" else ""
-                snap_out, _, snap_code = ssh.run(
-                    "{} restic snapshots --last --json 2>/dev/null".format(env))
-                if snap_code == 0 and snap_out.strip():
-                    try:
-                        snaps = json.loads(snap_out)
-                        last = snaps[-1] if snaps else {}
-                        ts   = last.get("time", "")
-                        if ts:
-                            dt   = datetime.datetime.fromisoformat(ts[:19])
-                            age  = (datetime.datetime.utcnow() - dt).total_seconds()
-                            days = age / 86400
-                            st   = "ok" if days < 2 else ("warn" if days < 7 else "fail")
-                            jobs.append({
-                                "tool": "restic", "name": repo.split("/")[-1] or "repo",
-                                "status": st, "last_run": dt.strftime("%Y-%m-%d %H:%M"),
-                                "duration": "--", "size": "--",
-                                "files": str(last.get("summary", {}).get("total_files_processed", "--")),
-                                "dest": repo, "log": str(last),
-                            })
-                    except Exception:
-                        pass
+            # ── rsync (via log files) ────────────────────────────────────────
+            # Only look in directories likely to contain real backup logs.
+            # Exclude /var/log/apt, /var/log/installer, /var/log/unattended-upgrades
+            # which contain system package logs that mention rsync incidentally.
+            log_dirs = ["/var/log/rsync", "/home", "/root", "/opt", "/srv"]
+            rsync_logs, _, _ = ssh.run(
+                "find {} -maxdepth 4 -name '*.log' 2>/dev/null "
+                "| xargs grep -l '^rsync:' 2>/dev/null | head -6".format(
+                    " ".join(log_dirs)))
+            for log_path in (rsync_logs or "").splitlines():
+                log_path = log_path.strip()
+                if not log_path:
+                    continue
+                # Skip system/package-manager log paths
+                skip_paths = ("/var/log/apt", "/var/log/installer",
+                              "/var/log/unattended", "/var/log/dpkg")
+                if any(log_path.startswith(s) for s in skip_paths):
+                    continue
+                tail, _, _ = ssh.run("tail -40 {}".format(shlex.quote(log_path)))
+                job = self._parse_rsync_log(log_path, tail or "")
+                if job:
+                    jobs.append(job)
 
-        # ── rsync (via log files) ────────────────────────────────────────
-        # Only look in directories likely to contain real backup logs.
-        # Exclude /var/log/apt, /var/log/installer, /var/log/unattended-upgrades
-        # which contain system package logs that mention rsync incidentally.
-        log_dirs = ["/var/log/rsync", "/home", "/root", "/opt", "/srv"]
-        rsync_logs, _, _ = ssh.run(
-            "find {} -maxdepth 4 -name '*.log' 2>/dev/null "
-            "| xargs grep -l '^rsync:' 2>/dev/null | head -6".format(
-                " ".join(log_dirs)))
-        for log_path in (rsync_logs or "").splitlines():
-            log_path = log_path.strip()
-            if not log_path:
-                continue
-            # Skip system/package-manager log paths
-            skip_paths = ("/var/log/apt", "/var/log/installer",
-                          "/var/log/unattended", "/var/log/dpkg")
-            if any(log_path.startswith(s) for s in skip_paths):
-                continue
-            tail, _, _ = ssh.run("tail -40 {}".format(shlex.quote(log_path)))
-            job = self._parse_rsync_log(log_path, tail or "")
-            if job:
-                jobs.append(job)
+            # ── systemd backup units ─────────────────────────────────────────
+            svc_out, _, _ = ssh.run(
+                "systemctl list-units --type=service --all --no-pager --no-legend 2>/dev/null | "
+                "grep -iE 'backup|rsync|restic|borg|rclone|duplicati' | awk '{print $1}'")
+            for svc in (svc_out or "").splitlines():
+                svc = svc.strip()
+                if not svc:
+                    continue
+                status_out, _, _ = ssh.run(
+                    "systemctl show {} --property=ActiveState,ExecMainStatus,"
+                    "InactiveEnterTimestamp 2>/dev/null".format(shlex.quote(svc)))
+                props = dict(re.findall(r'(\w+)=(.*)', status_out or ""))
+                active = props.get("ActiveState", "unknown")
+                code   = props.get("ExecMainStatus", "")
+                ts     = props.get("InactiveEnterTimestamp", "").strip()
+                st     = "ok" if (active in ("active", "inactive") and code == "0") else (
+                         "fail" if code not in ("0", "") else "none")
+                jobs.append({
+                    "tool": "systemd", "name": svc.replace(".service", ""),
+                    "status": st, "last_run": ts[:16] if ts else "--",
+                    "duration": "--", "size": "--", "files": "--",
+                    "dest": svc, "log": status_out or "",
+                })
 
-        # ── systemd backup units ─────────────────────────────────────────
-        svc_out, _, _ = ssh.run(
-            "systemctl list-units --type=service --all --no-pager --no-legend 2>/dev/null | "
-            "grep -iE 'backup|rsync|restic|borg|rclone|duplicati' | awk '{print $1}'")
-        for svc in (svc_out or "").splitlines():
-            svc = svc.strip()
-            if not svc:
-                continue
-            status_out, _, _ = ssh.run(
-                "systemctl show {} --property=ActiveState,ExecMainStatus,"
-                "InactiveEnterTimestamp 2>/dev/null".format(shlex.quote(svc)))
-            props = dict(re.findall(r'(\w+)=(.*)', status_out or ""))
-            active = props.get("ActiveState", "unknown")
-            code   = props.get("ExecMainStatus", "")
-            ts     = props.get("InactiveEnterTimestamp", "").strip()
-            st     = "ok" if (active in ("active", "inactive") and code == "0") else (
-                     "fail" if code not in ("0", "") else "none")
-            jobs.append({
-                "tool": "systemd", "name": svc.replace(".service", ""),
-                "status": st, "last_run": ts[:16] if ts else "--",
-                "duration": "--", "size": "--", "files": "--",
-                "dest": svc, "log": status_out or "",
-            })
+            # ── Cron backup scripts (structured log format) ──────────────────
+            # Finds any *backup*.log in /var/log that uses our timestamped format:
+            #   [YYYY-MM-DD HH:MM:SS] === Backup started ===
+            #   [YYYY-MM-DD HH:MM:SS] === Backup completed OK — SIZE written to PATH ===
+            cron_logs, _, _ = ssh.run(
+                "find /var/log -maxdepth 1 -name '*backup*.log' 2>/dev/null")
+            for log_path in (cron_logs or "").splitlines():
+                log_path = log_path.strip()
+                if not log_path:
+                    continue
+                tail, _, _ = ssh.run(
+                    "grep -a '=== Backup' {} 2>/dev/null | tail -20".format(shlex.quote(log_path)))
+                job = self._parse_cron_backup_log(log_path, tail or "")
+                if job:
+                    jobs.append(job)
 
-        # ── Cron backup scripts (structured log format) ──────────────────
-        # Finds any *backup*.log in /var/log that uses our timestamped format:
-        #   [YYYY-MM-DD HH:MM:SS] === Backup started ===
-        #   [YYYY-MM-DD HH:MM:SS] === Backup completed OK — SIZE written to PATH ===
-        cron_logs, _, _ = ssh.run(
-            "find /var/log -maxdepth 1 -name '*backup*.log' 2>/dev/null")
-        for log_path in (cron_logs or "").splitlines():
-            log_path = log_path.strip()
-            if not log_path:
-                continue
-            tail, _, _ = ssh.run(
-                "grep -a '=== Backup' {} 2>/dev/null | tail -20".format(shlex.quote(log_path)))
-            job = self._parse_cron_backup_log(log_path, tail or "")
-            if job:
-                jobs.append(job)
+            # ── Duplicati REST API ───────────────────────────────────────────
+            dup_out, _, dup_code = ssh.run(
+                "curl -sf http://localhost:8200/api/v1/backups 2>/dev/null")
+            if dup_code == 0 and dup_out.strip():
+                try:
+                    dup_data = json.loads(dup_out)
+                    for bk in (dup_data if isinstance(dup_data, list) else []):
+                        backup = bk.get("Backup", {})
+                        prog   = bk.get("Progress", {})
+                        name   = backup.get("Name", "--")
+                        dest   = backup.get("TargetURL", "--")
+                        last   = prog.get("LastEventID", "--")
+                        jobs.append({
+                            "tool": "duplicati", "name": name,
+                            "status": "ok", "last_run": "--",
+                            "duration": "--", "size": "--", "files": "--",
+                            "dest": dest, "log": json.dumps(prog, indent=2),
+                        })
+                except Exception:
+                    pass
 
-        # ── Duplicati REST API ───────────────────────────────────────────
-        dup_out, _, dup_code = ssh.run(
-            "curl -sf http://localhost:8200/api/v1/backups 2>/dev/null")
-        if dup_code == 0 and dup_out.strip():
-            try:
-                dup_data = json.loads(dup_out)
-                for bk in (dup_data if isinstance(dup_data, list) else []):
-                    backup = bk.get("Backup", {})
-                    prog   = bk.get("Progress", {})
-                    name   = backup.get("Name", "--")
-                    dest   = backup.get("TargetURL", "--")
-                    last   = prog.get("LastEventID", "--")
-                    jobs.append({
-                        "tool": "duplicati", "name": name,
-                        "status": "ok", "last_run": "--",
-                        "duration": "--", "size": "--", "files": "--",
-                        "dest": dest, "log": json.dumps(prog, indent=2),
-                    })
-            except Exception:
-                pass
-
-        self.after(0, lambda: self._populate(jobs))
-        self.after(0, lambda: self._last_lbl.config(
-            text="Updated {}".format(time.strftime("%H:%M"))))
-        self.after(0, self._rc.schedule)
-        self._fetching = False
-        self.after(0, lambda: self._refresh_btn.config(state="normal"))
+            self.after(0, lambda: self._populate(jobs))
+            self.after(0, lambda: self._last_lbl.config(
+                text="Updated {}".format(time.strftime("%H:%M"))))
+            self.after(0, self._rc.schedule)
+        finally:
+            self._fetching = False
+            self.after(0, lambda: self._refresh_btn.config(state="normal"))
 
     def _parse_rsync_log(self, path, text):
         name = re.sub(r'\.log$', '', path.split("/")[-1])

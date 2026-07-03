@@ -1,6 +1,7 @@
 # ui/dashboard_tab.py
 
 import collections
+import shlex
 import tkinter as tk
 from tkinter import ttk
 import threading
@@ -385,6 +386,7 @@ class DashboardTab(tk.Frame):
         try:
             cfg       = self.controller.config_manager
             server_id = (cfg.get_active_server() or {}).get("name", "default")
+            self._server_id = server_id
             rows = self.controller.metrics_store.query_metrics(
                 server_id, limit=self._history.maxlen)
             for r in rows:
@@ -646,6 +648,12 @@ class DashboardTab(tk.Frame):
         if not self.controller.ssh.connected:
             self._set_disconnected()
             return
+        server_id = (self.controller.config_manager.get_active_server() or {}).get("name", "default")
+        if getattr(self, "_server_id", None) != server_id:
+            self._history.clear()
+            self._net_history.clear()
+            self._net_prev = None
+            self._seed_history_from_db()
         self._disconn_overlay.place_forget()
         self.refresh_btn.config(state="disabled", text="Refreshing…")
         self._spinner.start()
@@ -872,7 +880,7 @@ class DashboardTab(tk.Frame):
 
             # -- Storage breakdown (per-mount df for reliable parsing) --
             mounts = self.controller.config_manager.get_storage_mounts()
-            mount_args = " ".join('"{0}"'.format(m.replace('"', '\\"')) for m in mounts)
+            mount_args = " ".join(shlex.quote(m) for m in mounts)
             out, _, _ = ssh.run(
                 'for m in {0}; do '
                 'r=$(df -h "$m" 2>/dev/null | awk \'NR==2{{print $3"|"$2"|"$5}}\'); '

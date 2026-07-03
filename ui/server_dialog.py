@@ -188,13 +188,19 @@ class ServerDialog(tk.Toplevel):
                                    "Delete profile for '{}'?".format(name),
                                    parent=self):
             return
-        cfg     = self.controller.config_manager
-        servers = [s for s in cfg.get_servers()
+        cfg         = self.controller.config_manager
+        all_servers = cfg.get_servers()
+        del_idx     = next((i for i, s in enumerate(all_servers)
+                            if s.get("host") == self._profile.get("host")), None)
+        servers = [s for s in all_servers
                    if s.get("host") != self._profile.get("host")]
         cfg.set_servers(servers)
         active = cfg.get_active_server_index()
+        if del_idx is not None and del_idx < active:
+            active -= 1
         if active >= len(servers):
-            cfg.set_active_server_index(max(0, len(servers) - 1))
+            active = max(0, len(servers) - 1)
+        cfg.set_active_server_index(active)
         self.controller._update_server_sidebar()
         if hasattr(self.controller, "server_tab"):
             self.controller.server_tab._load()

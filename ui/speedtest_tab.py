@@ -340,7 +340,7 @@ class SpeedtestTab(tk.Frame):
         self.after(0, lambda: self._prog_lbl.config(
             text="Measuring latency ({})...".format(ep_name)))
         ping_out, _, _ = ssh.run(
-            "curl -o /dev/null -s -w '%%{time_connect}' "
+            "curl -o /dev/null -s -w '%{{time_connect}}' "
             "--max-time 10 '{}' 2>/dev/null".format(ping_url))
         try:
             ping_ms = round(float(ping_out.strip()) * 1000, 1)
@@ -350,7 +350,7 @@ class SpeedtestTab(tk.Frame):
         self.after(0, lambda: self._prog_lbl.config(
             text="Measuring download ({})...".format(ep_name)))
         dl_out, _, _ = ssh.run(
-            "curl -o /dev/null -s -w '%%{speed_download}' "
+            "curl -o /dev/null -s -w '%{{speed_download}}' "
             "--max-time 60 '{}' 2>/dev/null".format(dl_url))
         try:
             dl_mbps = round(float(dl_out.strip()) * 8 / 1_000_000, 2)

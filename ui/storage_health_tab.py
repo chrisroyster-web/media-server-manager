@@ -311,7 +311,7 @@ class StorageHealthTab(tk.Frame):
             else:
                 tag = "unknown"
             iid = p["name"]
-            if iid in seen_iids:
+            while iid in seen_iids:
                 iid = iid + "_dup"
             seen_iids.add(iid)
             self._pool_tree.insert("", "end", iid=iid,

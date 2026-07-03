@@ -301,11 +301,11 @@ class NetdataTab(tk.Frame):
             return
         finally:
             self._fetching = False
+            self.after(0, self._rc.schedule)
 
         self.after(0, lambda: self._populate(payload))
         self.after(0, lambda: self._last_lbl.config(
             text="Updated {}".format(time.strftime("%H:%M:%S"))))
-        self.after(0, self._rc.schedule)
 
     # =========================================================
     # POPULATE

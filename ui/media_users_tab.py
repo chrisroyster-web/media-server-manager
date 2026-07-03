@@ -268,10 +268,10 @@ class MediaUsersTab(tk.Frame):
             return
         finally:
             self._fetching = False
+            self.after(0, self._rc.schedule)
         self.after(0, lambda: self._populate(server, users))
         self.after(0, lambda: self._last_lbl.config(
             text="{} · {}".format(server, time.strftime("%H:%M"))))
-        self.after(0, self._rc.schedule)
 
     # ------------------------------------------------------------------
     # POPULATE

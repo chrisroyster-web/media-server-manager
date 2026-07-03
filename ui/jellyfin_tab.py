@@ -343,12 +343,14 @@ class JellyfinTab(tk.Frame):
             msg = msg_var.get().strip()
             if not msg:
                 return
-            try:
-                self._jf_post("/Sessions/{}/Message".format(session_id),
-                              {"Header": "Admin", "Text": msg, "TimeoutMs": 8000})
-            except Exception:
-                pass
-            dlg.destroy()
+            def worker():
+                try:
+                    self._jf_post("/Sessions/{}/Message".format(session_id),
+                                  {"Header": "Admin", "Text": msg, "TimeoutMs": 8000})
+                except Exception:
+                    pass
+                self.after(0, dlg.destroy)
+            threading.Thread(target=worker, daemon=True).start()
 
         entry.bind("<Return>", lambda e: _send())
         btn_row = tk.Frame(dlg, bg=t.bg)
@@ -395,19 +397,23 @@ class JellyfinTab(tk.Frame):
             msg = msg_box.get("1.0", "end").strip()
             if not msg:
                 return
-            ok = err = 0
-            for s in self._active_sessions:
-                try:
-                    self._jf_post("/Sessions/{}/Message".format(s.get("Id", "")),
-                                  {"Header": hdr, "Text": msg, "TimeoutMs": 8000})
-                    ok += 1
-                except Exception:
-                    err += 1
-            st_lbl.config(
-                text="Sent to {} session(s){}.".format(
-                    ok, " ({} failed)".format(err) if err else ""),
-                fg=t.status_running if not err else t.yellow)
-            dlg.after(2000, dlg.destroy)
+            def worker():
+                ok = err = 0
+                for s in self._active_sessions:
+                    try:
+                        self._jf_post("/Sessions/{}/Message".format(s.get("Id", "")),
+                                      {"Header": hdr, "Text": msg, "TimeoutMs": 8000})
+                        ok += 1
+                    except Exception:
+                        err += 1
+                def _done():
+                    st_lbl.config(
+                        text="Sent to {} session(s){}.".format(
+                            ok, " ({} failed)".format(err) if err else ""),
+                        fg=t.status_running if not err else t.yellow)
+                    dlg.after(2000, dlg.destroy)
+                self.after(0, _done)
+            threading.Thread(target=worker, daemon=True).start()
 
         btn_row = tk.Frame(dlg, bg=t.bg)
         btn_row.pack(pady=10)

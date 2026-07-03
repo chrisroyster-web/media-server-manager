@@ -220,7 +220,7 @@ class DockerManager:
         ids_str = " ".join(shlex.quote(img["id"]) for img in images)
         layer_out, _, _ = self.ssh.run(
             f"docker image inspect {ids_str} "
-            "--format '{{{{.Id}}}}|{{{{len .RootFS.Layers}}}}' 2>/dev/null")
+            f"--format '{{{{.Id}}}}|{{{{len .RootFS.Layers}}}}' 2>/dev/null")
         layer_map = {}
         for line in layer_out.strip().splitlines():
             parts = line.split("|")

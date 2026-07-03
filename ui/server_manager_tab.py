@@ -232,10 +232,14 @@ class ServerManagerTab(tk.Frame):
                             "Delete profile for '{}'?".format(name)):
             return
         servers.pop(idx)
-        # Clamp active index
+        # Keep active index pointing at the same server (shift left past the
+        # removed one), clamping if it fell out of range.
         active = cfg.get_active_server_index()
+        if idx < active:
+            active -= 1
         if active >= len(servers):
-            cfg.set_active_server_index(max(0, len(servers) - 1))
+            active = max(0, len(servers) - 1)
+        cfg.set_active_server_index(active)
         cfg.set_servers(servers)
         self._selected = None
         self._show_empty_state()

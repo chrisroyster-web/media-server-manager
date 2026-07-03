@@ -4,6 +4,7 @@ Network Toolkit tab — runs ping, traceroute, nslookup, curl -I, and
 port-check (nc) FROM the server via SSH, not from the local machine.
 """
 
+import shlex
 import threading
 import time
 import tkinter as tk
@@ -11,13 +12,13 @@ from tkinter import ttk
 
 
 _TOOLS = [
-    ("ping",       "Ping",        "ping -c 4 -W 2 '{host}' 2>&1"),
-    ("traceroute", "Traceroute",  "traceroute -w 2 -q 1 '{host}' 2>&1"),
-    ("nslookup",   "DNS Lookup",  "nslookup '{host}' 2>&1"),
-    ("curl",       "HTTP HEAD",   "curl -sI --max-time 8 --connect-timeout 5 '{url}' 2>&1"),
-    ("port",       "Port Check",  "nc -zv -w 5 '{host}' {port} 2>&1"),
-    ("whois",      "Whois",       "whois '{host}' 2>/dev/null | head -40"),
-    ("mtr",        "MTR (brief)", "mtr --report --report-cycles 3 '{host}' 2>&1"),
+    ("ping",       "Ping",        "ping -c 4 -W 2 {host} 2>&1"),
+    ("traceroute", "Traceroute",  "traceroute -w 2 -q 1 {host} 2>&1"),
+    ("nslookup",   "DNS Lookup",  "nslookup {host} 2>&1"),
+    ("curl",       "HTTP HEAD",   "curl -sI --max-time 8 --connect-timeout 5 {url} 2>&1"),
+    ("port",       "Port Check",  "nc -zv -w 5 {host} {port} 2>&1"),
+    ("whois",      "Whois",       "whois {host} 2>/dev/null | head -40"),
+    ("mtr",        "MTR (brief)", "mtr --report --report-cycles 3 {host} 2>&1"),
 ]
 _TOOL_IDS = [t[0] for t in _TOOLS]
 
@@ -214,7 +215,8 @@ class NetworkToolkitTab(tk.Frame):
               else "http://{}".format(host)
 
         cmd_tpl = next((c for i, _, c in _TOOLS if i == tid), "")
-        cmd = cmd_tpl.format(host=host, url=url, port=port)
+        cmd = cmd_tpl.format(host=shlex.quote(host), url=shlex.quote(url),
+                             port=shlex.quote(port))
 
         self._clear_output()
         self._write("$ {}\n".format(cmd), "cmd")
@@ -304,22 +306,21 @@ class NetworkToolkitTab(tk.Frame):
         if not sel:
             return
         entry = self._history[sel[0]]
-        # Try to parse "Tool host:port" or "Tool host"
-        parts = entry.split(" ", 1)
-        if len(parts) == 2:
-            label = parts[0]
-            target = parts[1]
-            if ":" in target:
-                host, _, port = target.rpartition(":")
-                self._port_var.set(port)
-                target = host
-            self._host_var.set(target)
-            # Set tool if recognized
-            for tid, lbl, _ in _TOOLS:
-                if lbl == label:
-                    self._tool_var.set(lbl)
-                    self._on_tool_change(lbl)
-                    break
+        # Try to parse "Tool host:port" or "Tool host" -- tool labels can
+        # contain spaces (e.g. "Port Check"), so match against the known
+        # labels rather than splitting on the first space.
+        for tid, lbl, _ in _TOOLS:
+            prefix = lbl + " "
+            if entry.startswith(prefix):
+                target = entry[len(prefix):]
+                if tid == "port" and ":" in target:
+                    host, _, port = target.rpartition(":")
+                    self._port_var.set(port)
+                    target = host
+                self._host_var.set(target)
+                self._tool_var.set(lbl)
+                self._on_tool_change(lbl)
+                break
 
     def _clear_history(self):
         self._history.clear()

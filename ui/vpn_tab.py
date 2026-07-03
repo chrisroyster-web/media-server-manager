@@ -135,7 +135,7 @@ class VPNTab(tk.Frame):
                 svc_out, _, _ = ssh.run(
                     "systemctl is-active protonvpn 2>/dev/null; "
                     "systemctl is-active protonvpn-cli 2>/dev/null")
-                if "active" in (svc_out or ""):
+                if any(line.strip() == "active" for line in (svc_out or "").splitlines()):
                     result["state"] = "Connected"
 
                 # ── 3. Try wg show ────────────────────────────────
@@ -228,7 +228,9 @@ class VPNTab(tk.Frame):
         import time
         t      = self.theme
         state  = result.get("state", "Unknown")
-        is_con = any(x in state.lower() for x in ("connected", "active"))
+        low    = state.lower()
+        is_con = (any(x in low for x in ("connected", "active"))
+                 and "disconnected" not in low and "inactive" not in low)
 
         # Icon + color
         icon  = "🔒" if is_con else "🔓"

@@ -209,9 +209,9 @@ class JellyseerrTab(tk.Frame):
             self.after(0, lambda: self._populate(counts, requests, users))
             self.after(0, lambda: self._last_lbl.config(
                 text="Updated {}".format(time.strftime("%H:%M"))))
-            self.after(0, self._rc.schedule)
         finally:
             self._fetching = False
+            self.after(0, self._rc.schedule)
 
     # =========================================================
     # POPULATE

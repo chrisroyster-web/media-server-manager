@@ -35,6 +35,7 @@ class SSLTab(tk.Frame):
         self.controller = controller
         self.theme      = controller.theme
         self._results   = []
+        self._loaded_host = None
         self._build_ui()
 
     # =========================================================
@@ -188,6 +189,7 @@ class SSLTab(tk.Frame):
         """
         cfg  = self.controller.config_manager
         host = cfg.last_host or "localhost"
+        self._loaded_host = host
         if not host or host == "localhost":
             return
 
@@ -238,6 +240,9 @@ class SSLTab(tk.Frame):
         if not self.controller.ssh.connected:
             self._set_status("Not connected to SSH", "error")
             return
+        if self.controller.config_manager.last_host != self._loaded_host:
+            self._results = []
+            self._load_hosts_from_config()
         if not self._results:
             self._set_status("No hosts configured — add a host below", "info")
             return

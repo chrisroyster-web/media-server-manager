@@ -307,7 +307,7 @@ class Fail2banTab(tk.Frame):
             else:
                 self._log(f"  ✗  {err or out}\n", "error")
             self.after(0, lambda: self._unban_btn.config(text="↩  Unban Selected"))
-            self._fetch_worker()
+            self.after(0, self._fetch)
 
         threading.Thread(target=_worker, daemon=True).start()
 

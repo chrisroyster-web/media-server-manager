@@ -403,17 +403,22 @@ class ArrTab(tk.Frame):
             missing_data = data.get("missing", {})
             for item in missing_data.get("records", []):
                 if app == "sonarr":
-                    ep  = item.get("episodeNumber", "?")
-                    sea = item.get("seasonNumber", "?")
+                    ep  = item.get("episodeNumber")
+                    sea = item.get("seasonNumber")
                     series_id    = item.get("seriesId")
                     series_title = (
                         series_map.get(series_id)
                         or item.get("series", {}).get("title")
                         or item.get("seriesTitle", "?")
                     )
-                    title = "{} S{:02d}E{:02d}".format(
-                        series_title, int(sea), int(ep))
-                    airdate = item.get("airDateUtc", "--")[:10]
+                    if sea is not None and ep is not None:
+                        title = "{} S{:02d}E{:02d}".format(
+                            series_title, int(sea), int(ep))
+                    else:
+                        title = series_title
+                    airdate = item.get("airDateUtc") or "--"
+                    if airdate != "--":
+                        airdate = airdate[:10]
                 else:
                     title   = item.get("title", "?")
                     airdate = item.get("digitalRelease") or item.get("physicalRelease") or "--"
@@ -442,9 +447,12 @@ class ArrTab(tk.Frame):
                         or item.get("series", {}).get("title")
                         or item.get("seriesTitle", "?")
                     )
-                    ep  = item.get("episodeNumber", "?")
-                    sea = item.get("seasonNumber",  "?")
-                    title   = "{} S{:02d}E{:02d}".format(series_title, int(sea), int(ep))
+                    ep  = item.get("episodeNumber")
+                    sea = item.get("seasonNumber")
+                    if sea is not None and ep is not None:
+                        title = "{} S{:02d}E{:02d}".format(series_title, int(sea), int(ep))
+                    else:
+                        title = series_title
                     network = item.get("series", {}).get("network", "--")
                     quality = item.get("series", {}).get("qualityProfileId", "--")
                 else:

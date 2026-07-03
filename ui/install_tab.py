@@ -55,7 +55,7 @@ class InstallTab(tk.Frame):
         self._statuses   = {}            # key → status dict
         self._checks     = {}            # key → BooleanVar (checkbox)
         self._busy       = False
-        self._auto_scanned = False
+        self._scanned_host = None
         self._build_ui()
 
     # ──────────────────────────────────────────────────────────────────────
@@ -591,6 +591,8 @@ class InstallTab(tk.Frame):
 
     def on_show(self):
         """Called when the tab is selected via _trigger_tab_refresh."""
-        if not self._auto_scanned and self.controller.ssh.connected:
-            self._auto_scanned = True
+        connect_args = getattr(self.controller.ssh, "_connect_args", None) or {}
+        host = connect_args.get("host")
+        if self.controller.ssh.connected and host != self._scanned_host:
+            self._scanned_host = host
             self._scan_all()

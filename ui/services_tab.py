@@ -146,7 +146,7 @@ class ServicesTab(CardConsoleTab):
                         level="error",
                     )
                 ))
-            self.refresh_all()
+            self.after(0, self.refresh_all)
 
         threading.Thread(target=worker, daemon=True).start()
 

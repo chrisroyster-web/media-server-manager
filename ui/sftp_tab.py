@@ -259,6 +259,8 @@ class SFTPTab(tk.Frame):
         self.after(0, lambda: self._populate_tree(path, dirs, files))
 
     def _populate_tree(self, path, dirs, files):
+        if path != self._current_path:
+            return
         self.tree.delete(*self.tree.get_children())
         self._item_is_dir = {}
 

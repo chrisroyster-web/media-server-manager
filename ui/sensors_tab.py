@@ -193,6 +193,7 @@ class SensorsTab(tk.Frame):
                 text="Could not read sensor data: {}".format(msg),
                 bg=self.theme.surface_dark,
                 fg=self.theme.status_stopped))
+            self.after(0, self._rc.schedule)
         finally:
             self._fetching = False
 

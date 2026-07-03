@@ -954,6 +954,7 @@ class MediaServerManager(tk.Tk):
 
         def _do():
             self.after(0, lambda: self.update_status(False))
+            self.alert_engine.reset()
             try:
                 if self.ssh.connected:
                     self.ssh.disconnect()
@@ -989,7 +990,8 @@ class MediaServerManager(tk.Tk):
                     self.after(0, lambda: self.connection_panel._log(
                         "Connected to {} ({})".format(label, host), "success"))
                     self.after(0, self.apply_config)
-                    self.after(100, self.dashboard_tab.refresh)
+                    self.after(100, lambda: self._trigger_tab_refresh(
+                        self.tabs.index(self.tabs.select())))
                 else:
                     self.after(0, lambda m=result: self.show_toast(
                         "Connection Failed", m, level="error"))

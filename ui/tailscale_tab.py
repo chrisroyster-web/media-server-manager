@@ -174,7 +174,9 @@ class TailscaleTab(tk.Frame):
         self._card_self.config(text=self_name[:16] if self_name else "--")
 
         peers = data.get("Peer", {})
-        self._peers = list(peers.values())
+        self._peers = sorted(peers.values(),
+                             key=lambda p: (0 if p.get("Online") else 1,
+                                            p.get("HostName", "")))
 
         online  = sum(1 for p in self._peers if p.get("Online"))
         offline = len(self._peers) - online
@@ -188,9 +190,7 @@ class TailscaleTab(tk.Frame):
                                  fg=t.purple if exits else t.text_muted)
 
         self._tree.delete(*self._tree.get_children())
-        for peer in sorted(self._peers,
-                           key=lambda p: (0 if p.get("Online") else 1,
-                                          p.get("HostName", ""))):
+        for peer in self._peers:
             is_online = peer.get("Online", False)
             is_exit   = peer.get("ExitNodeOption", False)
             tag = "exit" if is_exit else ("online" if is_online else "offline")
