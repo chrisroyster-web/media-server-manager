@@ -528,14 +528,6 @@ class Sidebar(tk.Frame):
         servers    = cfg.get_servers()
         active_idx = cfg.get_active_server_index()
 
-        if not servers:
-            self._server_section_frame.pack_forget()
-            return
-
-        names = [s.get("name") or s.get("host", "Server {}".format(i + 1))
-                 for i, s in enumerate(servers)]
-        active_name = names[active_idx] if 0 <= active_idx < len(names) else names[0]
-
         pad = tk.Frame(self._server_section_frame, bg=t.sidebar_bg)
         pad.pack(fill="x", padx=10, pady=(10, 8))
         pad.bind("<MouseWheel>", self._on_mousewheel)
@@ -565,33 +557,51 @@ class Sidebar(tk.Frame):
         add_btn.bind("<Leave>", lambda e: add_btn.configure(fg=t.text_dim))
         self._create_tooltip(add_btn, "Add server")
 
-        picker_row = tk.Frame(pad, bg=t.sidebar_bg)
-        picker_row.pack(fill="x", pady=(4, 0))
-        picker_row.bind("<MouseWheel>", self._on_mousewheel)
+        if not servers:
+            empty_btn = tk.Button(
+                pad, text="+ Add a server to get started",
+                command=lambda: self.controller.open_server_dialog(),
+                bg=t.sidebar_bg, fg=t.text_dim,
+                bd=0, relief="flat",
+                font=("Segoe UI", 9), anchor="w",
+                padx=0, pady=6,
+                cursor="hand2",
+            )
+            empty_btn.pack(fill="x", pady=(4, 0))
+            empty_btn.bind("<Enter>", lambda e: empty_btn.configure(fg=t.sidebar_icon_hover))
+            empty_btn.bind("<Leave>", lambda e: empty_btn.configure(fg=t.text_dim))
+        else:
+            names = [s.get("name") or s.get("host", "Server {}".format(i + 1))
+                     for i, s in enumerate(servers)]
+            active_name = names[active_idx] if 0 <= active_idx < len(names) else names[0]
 
-        self._server_var = tk.StringVar(value=active_name)
-        cb = ttk.Combobox(
-            picker_row, textvariable=self._server_var,
-            values=names, state="readonly",
-            font=("Segoe UI", 10),
-        )
-        cb.pack(side="left", fill="x", expand=True)
-        cb.bind("<<ComboboxSelected>>",
-                lambda e: self._server_selected(servers, names))
+            picker_row = tk.Frame(pad, bg=t.sidebar_bg)
+            picker_row.pack(fill="x", pady=(4, 0))
+            picker_row.bind("<MouseWheel>", self._on_mousewheel)
 
-        edit_btn = tk.Button(
-            picker_row, text="\u270e",
-            command=lambda: self._edit_selected_server(servers, names),
-            bg=t.sidebar_bg, fg=t.text_dim,
-            bd=0, relief="flat",
-            font=("Segoe UI", 10),
-            padx=6, pady=0,
-            cursor="hand2",
-        )
-        edit_btn.pack(side="left", padx=(4, 0))
-        edit_btn.bind("<Enter>", lambda e: edit_btn.configure(fg=t.sidebar_icon_hover))
-        edit_btn.bind("<Leave>", lambda e: edit_btn.configure(fg=t.text_dim))
-        self._create_tooltip(edit_btn, "Edit / delete server")
+            self._server_var = tk.StringVar(value=active_name)
+            cb = ttk.Combobox(
+                picker_row, textvariable=self._server_var,
+                values=names, state="readonly",
+                font=("Segoe UI", 10),
+            )
+            cb.pack(side="left", fill="x", expand=True)
+            cb.bind("<<ComboboxSelected>>",
+                    lambda e: self._server_selected(servers, names))
+
+            edit_btn = tk.Button(
+                picker_row, text="\u270e",
+                command=lambda: self._edit_selected_server(servers, names),
+                bg=t.sidebar_bg, fg=t.text_dim,
+                bd=0, relief="flat",
+                font=("Segoe UI", 10),
+                padx=6, pady=0,
+                cursor="hand2",
+            )
+            edit_btn.pack(side="left", padx=(4, 0))
+            edit_btn.bind("<Enter>", lambda e: edit_btn.configure(fg=t.sidebar_icon_hover))
+            edit_btn.bind("<Leave>", lambda e: edit_btn.configure(fg=t.text_dim))
+            self._create_tooltip(edit_btn, "Edit / delete server")
 
         # Separator to visually detach the picker from the CORE nav below it
         tk.Frame(self._server_section_frame, bg="#1a1a1a", height=1).pack(
