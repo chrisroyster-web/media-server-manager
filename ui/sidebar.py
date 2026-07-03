@@ -1,6 +1,7 @@
 # ui/sidebar.py
 
 import tkinter as tk
+from tkinter import ttk
 
 
 class Sidebar(tk.Frame):
@@ -20,7 +21,6 @@ class Sidebar(tk.Frame):
 
     # Accent color for each sidebar section header bar + label
     _SECTION_COLORS = {
-        "SERVERS":    "#5b8ef0",
         "CORE":       "#5b8ef0",
         "MEDIA":      "#a855f7",
         "REQUESTS":   "#f97316",
@@ -509,11 +509,11 @@ class Sidebar(tk.Frame):
     # ------------------------------------------------------------------
     def rebuild_servers(self, cfg):
         """
-        Rebuild the SERVERS sidebar section from the server profiles in cfg.
-        Uses a dedicated _server_section_frame that is always at the top of
-        the nav — avoids any pack(before=...) complexity.
-        Server buttons use virtual indices 1000+ and call switch_server()
-        instead of selecting a tab.
+        Rebuild the server picker at the top of the sidebar from the server
+        profiles in cfg. A single dropdown (not a per-server nav-style list)
+        so it reads as a standalone control rather than another entry in the
+        CORE section directly below it. Uses a dedicated
+        _server_section_frame that is always at the top of the nav.
         """
         t = self.theme
 
@@ -528,74 +528,68 @@ class Sidebar(tk.Frame):
             self._server_section_frame.pack_forget()
             return
 
-        # Section label + spacer
-        spacer = tk.Frame(self._server_section_frame, bg=t.sidebar_bg, height=8)
-        spacer.pack(fill="x")
-        spacer.bind("<MouseWheel>", self._on_mousewheel)
+        names = [s.get("name") or s.get("host", "Server {}".format(i + 1))
+                 for i, s in enumerate(servers)]
+        active_name = names[active_idx] if 0 <= active_idx < len(names) else names[0]
 
-        color = self._SECTION_COLORS.get("SERVERS", t.blue)
-        sec_frame = tk.Frame(self._server_section_frame, bg=t.sidebar_bg)
-        sec_frame.pack(fill="x", pady=(0, 2))
-        sec_frame.bind("<MouseWheel>", self._on_mousewheel)
+        pad = tk.Frame(self._server_section_frame, bg=t.sidebar_bg)
+        pad.pack(fill="x", padx=10, pady=(10, 8))
+        pad.bind("<MouseWheel>", self._on_mousewheel)
 
-        tk.Frame(sec_frame, bg=color, width=3).pack(side="left", fill="y")
-        sec_lbl = tk.Label(
-            sec_frame,
-            text="SERVERS",
-            bg=t.sidebar_bg, fg=color,
-            font=("Segoe UI", 7, "bold"),
-            anchor="w", padx=10,
-        )
-        sec_lbl.pack(side="left", fill="x", expand=True, pady=3)
-        sec_lbl.bind("<MouseWheel>", self._on_mousewheel)
+        hdr_row = tk.Frame(pad, bg=t.sidebar_bg)
+        hdr_row.pack(fill="x")
+        hdr_row.bind("<MouseWheel>", self._on_mousewheel)
+        tk.Label(
+            hdr_row, text="SERVER",
+            bg=t.sidebar_bg, fg=t.text_dim,
+            font=("Segoe UI", 7, "bold"), anchor="w",
+        ).pack(side="left")
 
         add_btn = tk.Button(
-            sec_frame, text="+",
+            hdr_row, text="+",
             command=lambda: self.controller.open_server_dialog(),
-            bg=t.sidebar_bg, fg=color,
+            bg=t.sidebar_bg, fg=t.text_dim,
             bd=0, relief="flat",
-            font=("Segoe UI", 13, "bold"),
-            padx=8, pady=0,
+            font=("Segoe UI", 12, "bold"),
+            padx=4, pady=0,
             cursor="hand2",
         )
-        add_btn.pack(side="right", padx=(0, 4))
-        add_btn.bind("<Enter>",
-            lambda e: add_btn.configure(fg=t.sidebar_icon_hover, bg=t.surface_light))
-        add_btn.bind("<Leave>",
-            lambda e: add_btn.configure(fg=color, bg=t.sidebar_bg))
-        add_btn.bind("<MouseWheel>", self._on_mousewheel)
+        add_btn.pack(side="right")
+        add_btn.bind("<Enter>", lambda e: add_btn.configure(fg=t.sidebar_icon_hover))
+        add_btn.bind("<Leave>", lambda e: add_btn.configure(fg=t.text_dim))
+        self._create_tooltip(add_btn, "Add server")
 
-        for i, srv in enumerate(servers):
-            virtual_idx = 1000 + i
-            is_active   = (i == active_idx)
-            name        = srv.get("name") or srv.get("host", "Server {}".format(i + 1))
-            icon        = "\u2713" if is_active else "\U0001f5a5"
+        picker_row = tk.Frame(pad, bg=t.sidebar_bg)
+        picker_row.pack(fill="x", pady=(4, 0))
+        picker_row.bind("<MouseWheel>", self._on_mousewheel)
 
-            row = tk.Frame(self._server_section_frame, bg=t.sidebar_bg)
-            row.pack(fill="x", padx=6, pady=1)
-            row.bind("<MouseWheel>", self._on_mousewheel)
+        self._server_var = tk.StringVar(value=active_name)
+        cb = ttk.Combobox(
+            picker_row, textvariable=self._server_var,
+            values=names, state="readonly",
+            font=("Segoe UI", 10),
+        )
+        cb.pack(side="left", fill="x", expand=True)
+        cb.bind("<<ComboboxSelected>>",
+                lambda e: self._server_selected(servers, names))
 
-            btn = tk.Button(
-                row,
-                text="{0}  {1}".format(icon, name),
-                anchor="w",
-                command=lambda s=srv, ii=i: self._server_click(s, ii),
-                bg=t.sidebar_active_bg if is_active else t.sidebar_bg,
-                fg=t.sidebar_icon_active if is_active else t.sidebar_icon,
-                bd=0, relief="flat",
-                font=("Segoe UI", 11),
-                padx=10, pady=6,
-                cursor="hand2",
-            )
-            btn.pack(fill="x", expand=True)
-            btn.bind("<Enter>",
-                lambda e, b=btn, r=row, ii=virtual_idx: self._on_hover(b, r, ii, True))
-            btn.bind("<Leave>",
-                lambda e, b=btn, r=row, ii=virtual_idx: self._on_hover(b, r, ii, False))
-            btn.bind("<MouseWheel>", self._on_mousewheel)
-            btn.bind("<Button-3>",
-                lambda e, s=srv, ii=i: self._server_right_click(e, s, ii))
-            self._create_tooltip(btn, name)
+        edit_btn = tk.Button(
+            picker_row, text="\u270e",
+            command=lambda: self._edit_selected_server(servers, names),
+            bg=t.sidebar_bg, fg=t.text_dim,
+            bd=0, relief="flat",
+            font=("Segoe UI", 10),
+            padx=6, pady=0,
+            cursor="hand2",
+        )
+        edit_btn.pack(side="left", padx=(4, 0))
+        edit_btn.bind("<Enter>", lambda e: edit_btn.configure(fg=t.sidebar_icon_hover))
+        edit_btn.bind("<Leave>", lambda e: edit_btn.configure(fg=t.text_dim))
+        self._create_tooltip(edit_btn, "Edit / delete server")
+
+        # Separator to visually detach the picker from the CORE nav below it
+        tk.Frame(self._server_section_frame, bg="#1a1a1a", height=1).pack(
+            fill="x", pady=(0, 2))
 
         # Show the frame (was hidden if no servers before). before= restores
         # it to the top instead of appending it after every other section
@@ -606,52 +600,23 @@ class Sidebar(tk.Frame):
         else:
             self._server_section_frame.pack(fill="x")
 
-    def _server_click(self, profile, idx):
+    def _server_selected(self, servers, names):
+        name = self._server_var.get()
+        try:
+            idx = names.index(name)
+        except ValueError:
+            return
         try:
             self.controller.config_manager.set_active_server_index(idx)
-            self.rebuild_servers(self.controller.config_manager)
-            self.controller.switch_server(profile)
+            self.controller.switch_server(servers[idx])
         except Exception:
             pass
 
-    def _server_right_click(self, event, srv, idx):
-        t = self.theme
-        menu = tk.Menu(self, tearoff=0,
-                       bg=t.surface, fg=t.text,
-                       activebackground=t.blue, activeforeground="#fff",
-                       font=("Segoe UI", 10), bd=0, relief="flat")
-        menu.add_command(
-            label="  Connect",
-            command=lambda: self._server_click(srv, idx))
-        menu.add_separator()
-        menu.add_command(
-            label="  Edit…",
-            command=lambda: self.controller.open_server_dialog(srv))
-        menu.add_command(
-            label="  Delete",
-            command=lambda: self._delete_server(srv))
-        try:
-            menu.tk_popup(event.x_root, event.y_root)
-        finally:
-            menu.grab_release()
-
-    def _delete_server(self, srv):
-        import tkinter.messagebox as mb
-        name = srv.get("name") or srv.get("host", "this server")
-        if not mb.askyesno("Delete Server",
-                           "Delete profile for '{}'?".format(name),
-                           parent=self):
-            return
-        cfg     = self.controller.config_manager
-        servers = [s for s in cfg.get_servers()
-                   if s.get("host") != srv.get("host")]
-        cfg.set_servers(servers)
-        active = cfg.get_active_server_index()
-        if active >= len(servers):
-            cfg.set_active_server_index(max(0, len(servers) - 1))
-        self.rebuild_servers(cfg)
-        if hasattr(self.controller, "server_tab"):
-            self.controller.server_tab._load()
+    def _edit_selected_server(self, servers, names):
+        name = self._server_var.get()
+        idx  = names.index(name) if name in names else 0
+        if 0 <= idx < len(servers):
+            self.controller.open_server_dialog(servers[idx])
 
     # ------------------------------------------------------------------
     # TOGGLE / ANIMATION
