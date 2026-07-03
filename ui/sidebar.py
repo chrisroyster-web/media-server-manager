@@ -21,6 +21,7 @@ class Sidebar(tk.Frame):
 
     # Accent color for each sidebar section header bar + label
     _SECTION_COLORS = {
+        "SERVERS":    "#38bdf8",
         "CORE":       "#5b8ef0",
         "MEDIA":      "#a855f7",
         "REQUESTS":   "#f97316",
@@ -230,8 +231,9 @@ class Sidebar(tk.Frame):
         self._nav_frame.bind("<MouseWheel>", self._on_mousewheel)
 
         # ── Build nav items ───────────────────────────────────────────
-        self._section_widgets = []
-        self._first_nav_row   = None   # anchor for _server_section_frame re-pack
+        self._section_widgets     = []
+        self._first_nav_row       = None   # anchor for collapse/expand re-pack
+        self._first_section_spacer = None  # anchor for _server_section_frame re-pack
         current_section = None
         pending_section = None
 
@@ -244,6 +246,8 @@ class Sidebar(tk.Frame):
                 spacer = tk.Frame(self._nav_frame, bg=t.sidebar_bg, height=6)
                 spacer.pack(fill="x")
                 spacer.bind("<MouseWheel>", self._on_mousewheel)
+                if self._first_section_spacer is None:
+                    self._first_section_spacer = spacer
 
                 sec_frame = tk.Frame(self._nav_frame, bg=sec_bg)
                 sec_frame.pack(fill="x", pady=(0, 2))
@@ -536,13 +540,15 @@ class Sidebar(tk.Frame):
         pad.pack(fill="x", padx=10, pady=(10, 8))
         pad.bind("<MouseWheel>", self._on_mousewheel)
 
+        color = self._SECTION_COLORS.get("SERVERS", t.blue)
+
         hdr_row = tk.Frame(pad, bg=t.sidebar_bg)
         hdr_row.pack(fill="x")
         hdr_row.bind("<MouseWheel>", self._on_mousewheel)
         tk.Label(
-            hdr_row, text="SERVER",
-            bg=t.sidebar_bg, fg=t.text_dim,
-            font=("Segoe UI", 7, "bold"), anchor="w",
+            hdr_row, text="SERVERS",
+            bg=t.sidebar_bg, fg=color,
+            font=("Segoe UI", 9, "bold"), anchor="w",
         ).pack(side="left")
 
         add_btn = tk.Button(
@@ -592,11 +598,15 @@ class Sidebar(tk.Frame):
             fill="x", pady=(0, 2))
 
         # Show the frame (was hidden if no servers before). before= restores
-        # it to the top instead of appending it after every other section
-        # if this runs after _build_sidebar already packed the rest of the
-        # nav (e.g. adding the first server after startup).
-        if self._first_nav_row is not None:
-            self._server_section_frame.pack(fill="x", before=self._first_nav_row)
+        # it to the very top of the nav instead of appending it after every
+        # other section if this runs after _build_sidebar already packed the
+        # rest of the nav (e.g. adding the first server after startup).
+        # Anchor on the first section's spacer (packed before its colored
+        # header bar) rather than its first item row — anchoring on the row
+        # would insert this frame after the CORE header but before CORE's
+        # first row, splitting the CORE section in two.
+        if self._first_section_spacer is not None:
+            self._server_section_frame.pack(fill="x", before=self._first_section_spacer)
         else:
             self._server_section_frame.pack(fill="x")
 
