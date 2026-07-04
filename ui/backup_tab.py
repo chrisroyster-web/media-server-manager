@@ -43,17 +43,28 @@ class BackupTab(tk.Frame):
         self._refresh_btn = tk.Button(hdr, text="⟳ Refresh", command=self.refresh)
         t.style_button(self._refresh_btn)
         self._refresh_btn.pack(side="right", padx=(0, 8))
-
-        self._run_btn = tk.Button(hdr, text="▶ Run Now", command=self._run_backup)
-        t.style_button(self._run_btn)
-        self._run_btn.pack(side="right", padx=(0, 8))
-
-        self._deploy_btn = tk.Button(hdr, text="⬆ Deploy Script", command=self._deploy_script)
-        t.style_button(self._deploy_btn)
-        self._deploy_btn.pack(side="right", padx=(0, 8))
         self._last_lbl = tk.Label(hdr, text="", bg=t.bg, fg=t.text_muted,
                                    font=t.font_small)
         self._last_lbl.pack(side="right", padx=12)
+
+        # One row of Deploy/Run controls per script, so a second backup can
+        # be added without reworking the deploy/run plumbing.
+        ctrl_frame = tk.Frame(self, bg=t.bg)
+        ctrl_frame.pack(fill="x", padx=16, pady=(0, 8))
+
+        self._script_row(
+            ctrl_frame, "Config Backup",
+            local_name="backup.sh", remote_path="/opt/media/backup.sh",
+            confirm_msg="Run backup.sh on the server now?\n"
+                        "This may take several minutes.")
+
+        self._script_row(
+            ctrl_frame, "Full System Backup",
+            local_name="full-system-backup.sh",
+            remote_path="/opt/media/full-system-backup.sh",
+            confirm_msg="Run full-system-backup.sh on the server now?\n"
+                        "This backs up the entire root filesystem and can "
+                        "take significantly longer than the config backup.")
 
         # Summary cards
         s_row = tk.Frame(self, bg=t.bg)
@@ -126,6 +137,27 @@ class BackupTab(tk.Frame):
                                 bg=t.surface_dark, fg=t.text_muted,
                                 font=t.font_small, anchor="w")
         self._status.pack(fill="x", padx=16, pady=(0, 8))
+
+    def _script_row(self, parent, label, local_name, remote_path, confirm_msg):
+        t = self.theme
+        row = tk.Frame(parent, bg=t.bg)
+        row.pack(fill="x", pady=(0, 4))
+        tk.Label(row, text=label, bg=t.bg, fg=t.text_muted,
+                 font=t.font_small, width=18, anchor="w").pack(side="left")
+
+        deploy_btn = tk.Button(row, text="⬆ Deploy Script")
+        t.style_button(deploy_btn)
+        deploy_btn.pack(side="left", padx=(0, 8))
+        deploy_btn.config(command=lambda: self._deploy_script(
+            local_name, remote_path, deploy_btn))
+
+        run_btn = tk.Button(row, text="▶ Run Now")
+        t.style_button(run_btn)
+        run_btn.pack(side="left")
+        run_btn.config(command=lambda: self._run_backup(
+            remote_path, confirm_msg, run_btn))
+
+        return run_btn, deploy_btn
 
     def _stat_card(self, parent, label, value, color):
         t = self.theme
@@ -397,56 +429,54 @@ class BackupTab(tk.Frame):
     # =========================================================
     # DEPLOY SCRIPT
     # =========================================================
-    def _deploy_script(self):
+    def _deploy_script(self, local_name, remote_path, btn):
         if not self.controller.ssh.connected:
             messagebox.showerror("Not Connected", "Connect to a server first.")
             return
         local_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "backup.sh"
+            local_name
         )
         if not os.path.exists(local_path):
             messagebox.showerror("File Not Found",
-                                 "backup.sh not found at:\n{}".format(local_path))
+                                 "{} not found at:\n{}".format(local_name, local_path))
             return
 
         def worker():
             try:
                 out, err, code = self.controller.ssh.put_file(
-                    local_path, "/opt/media/backup.sh")
+                    local_path, remote_path)
                 if code == 0:
                     self.after(0, lambda: self._status.config(
-                        text="Script deployed to /opt/media/backup.sh",
+                        text="Script deployed to {}".format(remote_path),
                         bg=self.theme.surface_dark, fg=self.theme.status_running))
                     self.after(0, lambda: messagebox.showinfo(
-                        "Deployed", "backup.sh uploaded to /opt/media/backup.sh"))
+                        "Deployed", "{} uploaded to {}".format(local_name, remote_path)))
                 else:
                     msg = (err or "Unknown error").strip()
                     self.after(0, lambda: messagebox.showerror("Deploy Failed", msg))
             finally:
-                self.after(0, lambda: self._deploy_btn.config(state="normal"))
+                self.after(0, lambda: btn.config(state="normal"))
 
-        self._deploy_btn.config(state="disabled")
+        btn.config(state="disabled")
         self._status.config(text="Deploying script…", bg=self.theme.blue, fg="#ffffff")
         threading.Thread(target=worker, daemon=True).start()
 
     # =========================================================
     # RUN BACKUP NOW
     # =========================================================
-    def _run_backup(self):
+    def _run_backup(self, remote_path, confirm_msg, btn):
         if not self.controller.ssh.connected:
             messagebox.showerror("Not Connected", "Connect to a server first.")
             return
-        if not messagebox.askyesno("Run Backup",
-                                   "Run backup.sh on the server now?\n"
-                                   "This may take several minutes."):
+        if not messagebox.askyesno("Run Backup", confirm_msg):
             return
 
         def worker():
             try:
                 self.after(0, lambda: self._status.config(
                     text="Backup running…", bg=self.theme.blue, fg="#ffffff"))
-                _, err, code = self.controller.ssh.run("sudo /opt/media/backup.sh")
+                _, err, code = self.controller.ssh.run("sudo {}".format(remote_path))
                 if code == 0:
                     self.after(0, lambda: self._status.config(
                         text="Backup completed successfully",
@@ -458,9 +488,9 @@ class BackupTab(tk.Frame):
                         text="Backup failed (exit {}): {}".format(code, msg),
                         bg=self.theme.surface_dark, fg=self.theme.status_stopped))
             finally:
-                self.after(0, lambda: self._run_btn.config(state="normal"))
+                self.after(0, lambda: btn.config(state="normal"))
 
-        self._run_btn.config(state="disabled")
+        btn.config(state="disabled")
         threading.Thread(target=worker, daemon=True).start()
 
     # =========================================================
