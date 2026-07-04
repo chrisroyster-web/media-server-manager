@@ -16,6 +16,7 @@ import os
 import shlex
 
 from ui.refresh_control import RefreshControl
+from ui.restore_dialog import RestoreDialog
 
 
 class BackupTab(tk.Frame):
@@ -65,6 +66,17 @@ class BackupTab(tk.Frame):
             confirm_msg="Run full-system-backup.sh on the server now?\n"
                         "This backs up the entire root filesystem and can "
                         "take significantly longer than the config backup.")
+
+        restore_row = tk.Frame(ctrl_frame, bg=t.bg)
+        restore_row.pack(fill="x", pady=(4, 0))
+        tk.Label(restore_row, text="Bare-Metal Restore", bg=t.bg,
+                 fg=t.text_muted, font=t.font_small, width=18,
+                 anchor="w").pack(side="left")
+        self._restore_launch_btn = tk.Button(
+            restore_row, text="⚠ Restore from Snapshot…",
+            command=self._open_restore_dialog)
+        t.style_button(self._restore_launch_btn, "danger")
+        self._restore_launch_btn.pack(side="left")
 
         # Summary cards
         s_row = tk.Frame(self, bg=t.bg)
@@ -158,6 +170,12 @@ class BackupTab(tk.Frame):
             remote_path, confirm_msg, run_btn))
 
         return run_btn, deploy_btn
+
+    def _open_restore_dialog(self):
+        if not self.controller.ssh.connected:
+            messagebox.showerror("Not Connected", "Connect to a server first.")
+            return
+        RestoreDialog(self, self.controller)
 
     def _stat_card(self, parent, label, value, color):
         t = self.theme

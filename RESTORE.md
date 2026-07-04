@@ -6,6 +6,15 @@ For everyday config-level recovery (an app's settings got corrupted, etc.),
 use `backup.sh`'s snapshots at `/mnt/nas/wsbackup/mediaserver/<date>/`
 instead — this document is for "the server itself is gone."
 
+**Preferred path:** after installing the fresh minimal Ubuntu server (step 1
+below) and connecting to it from Media Server Manager like any other server,
+use the Backup tab's **"⚠ Restore from Snapshot…"** button — it runs steps
+3-4 for you, with a safety check that refuses to run against a server that
+isn't actually fresh, and a typed confirmation before it touches anything.
+The app runs on your workstation, not on the media server, so it survives
+the server being gone. The manual steps below are the fallback if the app
+itself isn't available.
+
 ## What's in a snapshot
 
 ```
