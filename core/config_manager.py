@@ -371,6 +371,12 @@ class ConfigManager:
     @sabnzbd_port.setter
     def sabnzbd_port(self, v): self._ss("sabnzbd_port", str(v))
 
+    # --- Backup ---
+    @property
+    def restic_password(self): return self._gs("restic_password", "")
+    @restic_password.setter
+    def restic_password(self, v): self._ss("restic_password", v)
+
     @property
     def sabnzbd_host(self): return self._gs("sabnzbd_host", "localhost")
     @sabnzbd_host.setter

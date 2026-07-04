@@ -6,14 +6,19 @@ connection, instead of the user typing the commands by hand.
 
 Opens from the Backup tab's "Restore from Snapshot..." button. Gated by a
 safety check that refuses to proceed if the connected server already looks
-configured (i.e. isn't actually a fresh install) — this runs `tar -xzf ... -C /`
-against the target, which would badly damage a live system if pointed at the
-wrong box.
+configured (i.e. isn't actually a fresh install) — this runs
+`restic restore ... --target /` against the target, which would badly
+damage a live system if pointed at the wrong box.
 """
+import json
 import shlex
 import threading
 import tkinter as tk
 from tkinter import ttk, messagebox
+
+from ui.backup_tab import RESTIC_REPO
+
+INFO_DIR = "/var/lib/media-fullbackup-info"
 
 
 class RestoreDialog(tk.Toplevel):
@@ -24,7 +29,6 @@ class RestoreDialog(tk.Toplevel):
         self.theme      = controller.theme
         self.ssh        = controller.ssh
 
-        self._snapshots  = []   # list of snapshot date strings, newest first
         self._safety_ok  = False
         self._mounted    = False
 
@@ -105,15 +109,35 @@ class RestoreDialog(tk.Toplevel):
                                       font=t.font_small)
         self._mount_status.pack(anchor="w", pady=(4, 0))
 
+        # ── Restic password ──────────────────────────────────────────
+        self._pw_frame = tk.Frame(outer, bg=t.surface, padx=14, pady=10)
+        self._pw_frame.pack(fill="x", pady=(0, 10))
+        tk.Label(self._pw_frame, text="3. Restic repo password", bg=t.surface,
+                 fg=t.text, font=t.font_regular).pack(anchor="w")
+        pw_row = tk.Frame(self._pw_frame, bg=t.surface)
+        pw_row.pack(fill="x", pady=(6, 0))
+        self._restic_pw_var = tk.StringVar(
+            value=self.controller.config_manager.restic_password)
+        self._pw_entry = tk.Entry(pw_row, textvariable=self._restic_pw_var,
+                                  show="*", width=20, font=t.font_regular,
+                                  state="disabled")
+        t.style_entry(self._pw_entry)
+        self._pw_entry.pack(side="left", padx=(0, 8))
+        self._list_snap_btn = tk.Button(pw_row, text="List Snapshots",
+                                        command=self._list_snapshots,
+                                        state="disabled")
+        t.style_button(self._list_snap_btn)
+        self._list_snap_btn.pack(side="left")
+
         # ── Snapshot picker ────────────────────────────────────────
         self._snap_frame = tk.Frame(outer, bg=t.surface, padx=14, pady=10)
         self._snap_frame.pack(fill="x", pady=(0, 10))
-        tk.Label(self._snap_frame, text="3. Pick a snapshot", bg=t.surface,
+        tk.Label(self._snap_frame, text="4. Pick a snapshot", bg=t.surface,
                  fg=t.text, font=t.font_regular).pack(anchor="w")
         self._snap_var = tk.StringVar()
         self._snap_combo = ttk.Combobox(self._snap_frame,
                                         textvariable=self._snap_var,
-                                        state="disabled", width=20)
+                                        state="disabled", width=32)
         self._snap_combo.pack(anchor="w", pady=(6, 0))
         self._snap_combo.bind("<<ComboboxSelected>>", self._on_snapshot_selected)
         self._snap_info_lbl = tk.Label(self._snap_frame, text="",
@@ -126,7 +150,7 @@ class RestoreDialog(tk.Toplevel):
         self._confirm_frame.pack(fill="x", pady=(0, 10))
         self._confirm_host = (self.controller.config_manager.last_host or "").strip()
         tk.Label(self._confirm_frame,
-                 text="4. Type the server address ({}) to confirm:".format(
+                 text="5. Type the server address ({}) to confirm:".format(
                      self._confirm_host),
                  bg=t.surface, fg=t.text, font=t.font_regular,
                  wraplength=420, justify="left").pack(anchor="w")
@@ -219,7 +243,7 @@ class RestoreDialog(tk.Toplevel):
         def worker():
             cmd = (
                 "if mountpoint -q /mnt/nas/wsbackup; then echo ALREADY_MOUNTED; else "
-                "sudo apt-get install -y cifs-utils >/dev/null 2>&1; "
+                "sudo apt-get install -y cifs-utils restic >/dev/null 2>&1; "
                 "sudo mkdir -p /mnt/nas/wsbackup && "
                 "printf 'username=%s\\npassword=%s\\n' {user} {password} "
                 "| sudo tee /etc/nas-credentials-temp >/dev/null && "
@@ -249,51 +273,80 @@ class RestoreDialog(tk.Toplevel):
         self._mounted = True
         self._mount_status.config(text="Mounted.", fg=t.status_running)
         self._log_line("NAS mounted at /mnt/nas/wsbackup.")
-        self._list_snapshots()
+        self._pw_entry.config(state="normal")
+        self._list_snap_btn.config(state="normal")
+
+    def _restic_env(self):
+        """RESTIC_PASSWORD is passed inline per-command (never written to
+        disk on the target) since it's typed fresh for this restore rather
+        than coming from a file that may not exist yet on a bare box."""
+        return "RESTIC_REPOSITORY={} RESTIC_PASSWORD={}".format(
+            shlex.quote(RESTIC_REPO), shlex.quote(self._restic_pw_var.get()))
 
     # ------------------------------------------------------------------
-    # STEP 3 — SNAPSHOT PICKER
+    # STEPS 3-4 — RESTIC PASSWORD & SNAPSHOT PICKER
     # ------------------------------------------------------------------
     def _list_snapshots(self):
+        if not self._restic_pw_var.get():
+            messagebox.showerror("Missing Password",
+                                 "Enter the restic repo password first.",
+                                 parent=self)
+            return
+        self._list_snap_btn.config(state="disabled")
+        self._log_line("Listing snapshots…")
+
         def worker():
-            out, _, _ = self.ssh.run(
-                "find /mnt/nas/wsbackup/fullsystem -maxdepth 1 -mindepth 1 "
-                "-type d -printf '%T@ %f\\n' 2>/dev/null | sort -rn | cut -d' ' -f2-")
-            names = [l.strip() for l in (out or "").splitlines() if l.strip()]
-            self.after(0, lambda: self._on_snapshots_listed(names))
+            out, err, code = self.ssh.run(
+                "sudo env {env} restic snapshots --tag fullsystem --json 2>&1".format(
+                    env=self._restic_env()))
+            self.after(0, lambda: self._on_snapshots_listed(out, err, code))
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _on_snapshots_listed(self, names):
-        self._snapshots = names
-        self._snap_combo.config(values=names, state="readonly" if names else "disabled")
-        if names:
-            self._snap_var.set(names[0])
+    def _on_snapshots_listed(self, out, err, code):
+        self._list_snap_btn.config(state="normal")
+        entries = []
+        try:
+            if code == 0:
+                for snap in json.loads(out or "[]"):
+                    entries.append("{}  {}".format(
+                        snap.get("short_id", "?"), snap.get("time", "")[:16]))
+        except (ValueError, TypeError):
+            entries = []
+
+        self._snap_combo.config(values=entries,
+                                state="readonly" if entries else "disabled")
+        if entries:
+            self._snap_var.set(entries[0])
             self._on_snapshot_selected()
-            self._log_line("Found {} snapshot(s).".format(len(names)))
+            self._log_line("Found {} snapshot(s).".format(len(entries)))
         else:
-            self._log_line("No snapshots found under /mnt/nas/wsbackup/fullsystem.")
+            self._log_line(
+                "No snapshots found (or wrong password): {}".format(
+                    (err or out or "").strip()[:200]))
 
     def _on_snapshot_selected(self, _event=None):
         snap = self._snap_var.get()
         if not snap:
             return
-        base = "/mnt/nas/wsbackup/fullsystem/{}".format(shlex.quote(snap))
+        snap_id = snap.split()[0]
 
         def worker():
             out, _, _ = self.ssh.run(
-                "wc -l < {base}/system-info/dpkg-selections.txt 2>/dev/null; "
-                "du -sh {base} 2>/dev/null | cut -f1".format(base=base))
-            lines = (out or "").splitlines()
-            pkg_count = lines[0].strip() if len(lines) > 0 else "?"
-            size = lines[1].strip() if len(lines) > 1 else "?"
-            self.after(0, lambda: self._snap_info_lbl.config(
-                text="{} packages recorded, {} total".format(pkg_count, size)))
+                "sudo env {env} restic stats {sid} --json 2>/dev/null".format(
+                    env=self._restic_env(), sid=shlex.quote(snap_id)))
+            try:
+                stats = json.loads(out or "{}")
+                size_gb = stats.get("total_size", 0) / 1e9
+                text = "{:.2f} GB".format(size_gb)
+            except (ValueError, TypeError):
+                text = "size unavailable"
+            self.after(0, lambda: self._snap_info_lbl.config(text=text))
 
         threading.Thread(target=worker, daemon=True).start()
 
     # ------------------------------------------------------------------
-    # STEP 4 — CONFIRM
+    # STEP 5 — CONFIRM
     # ------------------------------------------------------------------
     def _check_confirm(self, *_args):
         typed = self._confirm_var.get().strip()
@@ -302,25 +355,37 @@ class RestoreDialog(tk.Toplevel):
         self._restore_btn.config(state="normal" if ready else "disabled")
 
     # ------------------------------------------------------------------
-    # STEP 5 — RUN
+    # STEP 6 — RUN
     # ------------------------------------------------------------------
     def _run_restore(self):
         snap = self._snap_var.get()
         if not snap:
             return
+        snap_id = snap.split()[0]
         if not messagebox.askyesno(
                 "Confirm Restore",
-                "This will reinstall packages and extract {}'s root.tar.gz "
-                "onto / on {}.\n\nThis cannot be undone. Continue?".format(
-                    snap, self._confirm_host),
+                "This will restore restic snapshot {} onto / on {} "
+                "(excluding /boot — the fresh install's own bootloader is "
+                "left alone).\n\nThis cannot be undone. Continue?".format(
+                    snap_id, self._confirm_host),
                 parent=self):
             return
 
         self._restore_btn.config(state="disabled")
-        base = "/mnt/nas/wsbackup/fullsystem/{}".format(shlex.quote(snap))
+        env = self._restic_env()
 
         def worker():
             self.after(0, lambda: self._log_line("--- Restore started ---"))
+
+            self.after(0, lambda: self._log_line(
+                "Restoring system manifest…"))
+            out, err, code = self.ssh.run(
+                "sudo env {env} restic restore {sid} --target / "
+                "--include {info} 2>&1".format(
+                    env=env, sid=shlex.quote(snap_id),
+                    info=shlex.quote(INFO_DIR)))
+            self.after(0, lambda: self._log_line(
+                "Manifest restore: exit {}".format(code)))
 
             self.after(0, lambda: self._log_line("Updating package index…"))
             out, err, code = self.ssh.run("sudo apt-get update 2>&1")
@@ -329,21 +394,22 @@ class RestoreDialog(tk.Toplevel):
 
             self.after(0, lambda: self._log_line("Reinstalling packages from manifest…"))
             out, err, code = self.ssh.run(
-                "sudo xargs -a {base}/system-info/apt-manual-packages.txt "
-                "apt-get install -y 2>&1".format(base=base))
+                "sudo xargs -a {info}/apt-manual-packages.txt "
+                "apt-get install -y 2>&1".format(info=INFO_DIR))
             self.after(0, lambda: self._log_line(
                 "Package reinstall: exit {}".format(code)))
 
             self.after(0, lambda: self._log_line(
-                "Extracting root.tar.gz onto / (this is the main step)…"))
+                "Restoring everything else (excluding /boot) — this is the main step…"))
             out, err, code = self.ssh.run(
-                "sudo tar --acls --xattrs -xzf {base}/root.tar.gz -C / 2>&1".format(base=base))
-            if code in (0, 1):
+                "sudo env {env} restic restore {sid} --target / "
+                "--exclude /boot 2>&1".format(env=env, sid=shlex.quote(snap_id)))
+            if code == 0:
                 self.after(0, lambda: self._log_line(
-                    "Extraction OK (exit {}).".format(code)))
+                    "Restore OK (exit {}).".format(code)))
             else:
                 self.after(0, lambda: self._log_line(
-                    "EXTRACTION FAILED (exit {}): {}".format(
+                    "RESTORE FAILED (exit {}): {}".format(
                         code, (err or out or "")[-500:])))
 
             self.after(0, self._on_restore_done)
@@ -353,10 +419,11 @@ class RestoreDialog(tk.Toplevel):
     def _on_restore_done(self):
         self._log_line("--- Restore finished ---")
         self._log_line(
-            "Next: reboot, confirm services come up, then redeploy "
-            "backup.sh / full-system-backup.sh from the Backup tab to "
-            "resume scheduled backups. boot.tar.gz was NOT extracted "
-            "automatically — see RESTORE.md if you need anything from it.")
+            "Next: reboot, confirm services come up, then use the Backup "
+            "tab's 'Save & Init Repo' and redeploy backup.sh / "
+            "full-system-backup.sh to resume scheduled backups. /boot was "
+            "NOT restored automatically — see RESTORE.md if you need "
+            "anything from it.")
         messagebox.showinfo(
             "Restore Complete",
             "Restore finished. Reboot the server, then check services and "

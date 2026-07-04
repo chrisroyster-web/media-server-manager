@@ -16,6 +16,12 @@ import os
 import shlex
 
 from ui.refresh_control import RefreshControl
+
+# Defined before importing RestoreDialog (which imports this back) so the
+# circular import resolves: by the time restore_dialog.py asks for
+# RESTIC_REPO, this module already has it bound.
+RESTIC_REPO = "/mnt/nas/wsbackup/fullsystem-restic"
+
 from ui.restore_dialog import RestoreDialog
 
 
@@ -66,6 +72,23 @@ class BackupTab(tk.Frame):
             confirm_msg="Run full-system-backup.sh on the server now?\n"
                         "This backs up the entire root filesystem and can "
                         "take significantly longer than the config backup.")
+
+        restic_row = tk.Frame(ctrl_frame, bg=t.bg)
+        restic_row.pack(fill="x", pady=(4, 0))
+        tk.Label(restic_row, text="Restic Repo", bg=t.bg,
+                 fg=t.text_muted, font=t.font_small, width=18,
+                 anchor="w").pack(side="left")
+        self._restic_pw_var = tk.StringVar(
+            value=self.controller.config_manager.restic_password)
+        pw_entry = tk.Entry(restic_row, textvariable=self._restic_pw_var,
+                            show="*", width=20, font=t.font_regular)
+        t.style_entry(pw_entry)
+        pw_entry.pack(side="left", padx=(0, 8))
+        self._restic_init_btn = tk.Button(
+            restic_row, text="Save & Init Repo",
+            command=self._save_and_init_restic)
+        t.style_button(self._restic_init_btn)
+        self._restic_init_btn.pack(side="left")
 
         restore_row = tk.Frame(ctrl_frame, bg=t.bg)
         restore_row.pack(fill="x", pady=(4, 0))
@@ -176,6 +199,83 @@ class BackupTab(tk.Frame):
             messagebox.showerror("Not Connected", "Connect to a server first.")
             return
         RestoreDialog(self, self.controller)
+
+    # =========================================================
+    # RESTIC REPO SETUP
+    # =========================================================
+    def _save_and_init_restic(self):
+        if not self.controller.ssh.connected:
+            messagebox.showerror("Not Connected", "Connect to a server first.")
+            return
+        password = self._restic_pw_var.get()
+        if not password:
+            messagebox.showerror("Missing Password",
+                                 "Enter a repo password first.")
+            return
+        if not messagebox.askyesno(
+                "Save & Init Repo",
+                "This saves the password to this app's config and, on the "
+                "server, installs restic and initializes the full-system "
+                "backup repo if it doesn't already exist. Continue?"):
+            return
+
+        self.controller.config_manager.restic_password = password
+        self._restic_init_btn.config(state="disabled")
+        self._status.config(text="Setting up restic repo…",
+                            bg=self.theme.blue, fg="#ffffff")
+
+        def worker():
+            # The password file and repo pointer live under this SSH login
+            # user's own home (not /root), and the actual restic commands
+            # run unprivileged: the wsbackup CIFS share is mounted
+            # dir_mode=0777/file_mode=0777, so no sudo is needed to read or
+            # write the repo itself. Only installing the restic package
+            # needs root. full-system-backup.sh's cron job (which does run
+            # as root) can still read this same file fine, since root
+            # bypasses ordinary permission checks — see that script's
+            # header comment for the full reasoning.
+            cmd = (
+                "if ! mountpoint -q /mnt/nas/wsbackup; then echo NAS_NOT_MOUNTED; else "
+                "sudo apt-get install -y restic >/dev/null 2>&1; "
+                "printf '%s' {pw} > ~/.restic-password && "
+                "chmod 600 ~/.restic-password && "
+                "mkdir -p ~/.config && "
+                "printf 'RESTIC_REPOSITORY=%s\\n' {repo} > ~/.config/restic-repos && "
+                "(env RESTIC_REPOSITORY={repo} RESTIC_PASSWORD_FILE=~/.restic-password "
+                "restic snapshots >/dev/null 2>&1 || "
+                "env RESTIC_REPOSITORY={repo} RESTIC_PASSWORD_FILE=~/.restic-password "
+                "restic init) "
+                "&& echo REPO_OK || echo REPO_FAILED; "
+                "fi"
+            ).format(pw=shlex.quote(password), repo=shlex.quote(RESTIC_REPO))
+            out, err, code = self.controller.ssh.run(cmd)
+            self.after(0, lambda: self._on_restic_init_done(out, err))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_restic_init_done(self, out, err):
+        self._restic_init_btn.config(state="normal")
+        out = out or ""
+        if "REPO_OK" in out:
+            self._status.config(text="Restic repo ready.",
+                                bg=self.theme.surface_dark,
+                                fg=self.theme.status_running)
+            messagebox.showinfo(
+                "Repo Ready",
+                "restic is installed and the backup repo is initialized.")
+        elif "NAS_NOT_MOUNTED" in out:
+            self._status.config(text="Restic setup failed: NAS not mounted",
+                                bg=self.theme.surface_dark,
+                                fg=self.theme.status_stopped)
+            messagebox.showerror("Setup Failed",
+                                 "/mnt/nas/wsbackup is not mounted. Mount "
+                                 "the NAS share before initializing the repo.")
+        else:
+            msg = (err or out or "Unknown error").strip()[:400]
+            self._status.config(
+                text="Restic setup failed: {}".format(msg[:120]),
+                bg=self.theme.surface_dark, fg=self.theme.status_stopped)
+            messagebox.showerror("Setup Failed", msg)
 
     def _stat_card(self, parent, label, value, color):
         t = self.theme
