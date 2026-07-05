@@ -12,8 +12,17 @@ use the Backup tab's **"⚠ Restore from Snapshot…"** button — it runs steps
 3-5 for you, with a safety check that refuses to run against a server that
 isn't actually fresh, and a typed confirmation before it touches anything.
 The app runs on your workstation, not on the media server, so it survives
-the server being gone. The manual steps below are the fallback if the app
-itself isn't available.
+the server being gone.
+
+**If the workstation itself isn't available either**, `rebuild-server.sh`
+(in this repo, and also copied onto the NAS at
+`/mnt/nas/wsbackup/rebuild-server.sh`) does the same thing as a standalone
+script — copy it to the fresh box and run `sudo bash rebuild-server.sh`.
+It only needs NAS credentials and the restic repo password, typed in when
+it prompts. Same safety check, same phases, no app or GUI required.
+
+The fully manual steps below are the last-resort fallback if neither the
+app nor the script is available or working.
 
 ## What's in a snapshot
 
