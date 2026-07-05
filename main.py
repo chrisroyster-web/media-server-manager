@@ -73,7 +73,7 @@ from core.scheduler import TaskScheduler
 from ui.theme import Theme
 
 
-APP_VERSION = "2.0.0"
+APP_VERSION = "3.0.0"
 
 _TAB_NAMES = {
     0: "Connect", 1: "Quick Commands", 2: "Dashboard",
