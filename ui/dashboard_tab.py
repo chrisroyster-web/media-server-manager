@@ -218,6 +218,32 @@ class DashboardTab(tk.Frame):
         )
         self.backup_text.pack(fill="x")
 
+        # ---- Cloudflare Tunnel ----
+        # Only shown if Cloudflare is configured — hidden via pack_forget()
+        # in _fetch() otherwise, same "only show if configured" convention
+        # as the rest of the app's optional integrations.
+        self._tunnel_section_lbl = tk.Label(
+            self.body, text="Cloudflare Tunnel", bg=self.theme.bg,
+            fg=self.theme.text_secondary, font=self.theme.font_title)
+        self._tunnel_wrap = tk.Frame(self.body, bg=self.theme.surface_dark)
+
+        th = tk.Frame(self._tunnel_wrap, bg=self.theme.surface_dark)
+        th.pack(fill="x", padx=8, pady=(6, 2))
+        self.tunnel_dot = tk.Canvas(th, width=12, height=12,
+                                    bg=self.theme.surface_dark, highlightthickness=0)
+        self.tunnel_dot.pack(side="left", padx=(0, 6))
+        self.tunnel_status_lbl = tk.Label(th, text="unknown",
+                                           bg=self.theme.surface_dark,
+                                           fg=self.theme.text_secondary, font=self.theme.font_small)
+        self.tunnel_status_lbl.pack(side="left")
+
+        self.tunnel_text = tk.Text(
+            self._tunnel_wrap, bg=self.theme.surface_dark, fg=self.theme.console_output,
+            font=self.theme.font_mono, height=3, state="disabled",
+            relief="flat", padx=8, pady=4, wrap="none",
+        )
+        self.tunnel_text.pack(fill="x")
+
     # =========================================================
     # WIDGET BUILDERS
     # =========================================================
@@ -1021,6 +1047,65 @@ class DashboardTab(tk.Frame):
                 self.backup_text.insert("end", log)
                 self.backup_text.configure(state="disabled")
             self.after(0, _upd_backup)
+
+            # -- Cloudflare Tunnel health --
+            # Reuses the same list_tunnels() call ui/cloudflare_tab.py
+            # already makes — the Tunnel is what took hours of manual
+            # debugging this session (the Emby/streaming issue), and its
+            # health was otherwise only visible if you happened to open
+            # that specific tab.
+            cfg = self.controller.config_manager
+            token, account_id = cfg.cloudflare_api_token, cfg.cloudflare_account_id
+            if token and account_id:
+                from core import cloudflare_manager as _cf
+                try:
+                    tunnels = _cf.list_tunnels(token, account_id)
+                except Exception as e:
+                    tunnels = None
+                    tunnel_err = str(e)
+                else:
+                    tunnel_err = None
+
+                if tunnels is None:
+                    t_status, t_color = "Unknown", self.theme.text_muted
+                    t_text = "Could not check tunnel status: {}".format(tunnel_err)
+                elif not tunnels:
+                    t_status, t_color = "Unknown", self.theme.text_muted
+                    t_text = "No tunnels found on this Cloudflare account."
+                else:
+                    rank = {"down": 0, "degraded": 1, "healthy": 2}
+                    def _tag(status):
+                        return "healthy" if status == "healthy" else (
+                               "down" if status in ("down", "inactive") else "degraded")
+                    worst = min(tunnels, key=lambda tu: rank.get(_tag(tu["status"]), 1))
+                    worst_tag = _tag(worst["status"])
+                    t_status = {"healthy": "Healthy", "down": "Down",
+                                "degraded": "Degraded"}[worst_tag]
+                    t_color = {"healthy": self.theme.status_running,
+                               "down": self.theme.status_stopped,
+                               "degraded": self.theme.yellow}[worst_tag]
+                    t_text = "\n".join(
+                        "{}: {} ({} connection{})".format(
+                            tu["name"], tu["status"], tu["connections"],
+                            "" if tu["connections"] == 1 else "s")
+                        for tu in tunnels)
+
+                def _upd_tunnel(text=t_text, dc=t_color, st=t_status):
+                    self._tunnel_section_lbl.pack(anchor="w", padx=16, pady=(16, 4))
+                    self._tunnel_wrap.pack(fill="x", padx=16, pady=(0, 20))
+                    self.tunnel_dot.delete("all")
+                    self.tunnel_dot.create_oval(1, 1, 11, 11, fill=dc, outline=dc)
+                    self.tunnel_status_lbl.config(text=st, fg=dc)
+                    self.tunnel_text.configure(state="normal")
+                    self.tunnel_text.delete("1.0", "end")
+                    self.tunnel_text.insert("end", text)
+                    self.tunnel_text.configure(state="disabled")
+                self.after(0, _upd_tunnel)
+            else:
+                def _hide_tunnel():
+                    self._tunnel_section_lbl.pack_forget()
+                    self._tunnel_wrap.pack_forget()
+                self.after(0, _hide_tunnel)
 
             # -- Alert rule evaluation --
             _temp_c = 0.0

@@ -50,9 +50,8 @@ class ConfigTab(tk.Frame):
         import_btn.pack(side="right", padx=(0, 6))
 
         export_btn = tk.Button(header, text="Export Config", command=self._export_config,
-                               bg=t.surface_light, fg=t.text,
-                               bd=0, relief="flat", font=t.font_small, padx=10, pady=5,
                                cursor="hand2")
+        t.style_button(export_btn, "danger")
         export_btn.pack(side="right", padx=(0, 6))
 
         self.status_lbl = tk.Label(header, text="", bg=t.bg,
@@ -2308,7 +2307,22 @@ class ConfigTab(tk.Frame):
 
     def _export_config(self):
         from tkinter import filedialog
-        import json, shutil
+        import json
+        # config.json on disk is DPAPI-encrypted to this specific Windows
+        # user/machine — a raw file copy would be permanently unreadable
+        # garbage if ever restored elsewhere, which defeats the entire
+        # point of an "export for safekeeping" button. The in-memory
+        # config dict is already fully decrypted (ConfigManager.load()
+        # walks it through secure_storage.decrypt), so export that instead.
+        if not messagebox.askyesno(
+                "Export Config",
+                "This file will contain your API keys and passwords in "
+                "PLAIN TEXT (not encrypted), so it's actually usable if "
+                "you ever need to restore it on another machine.\n\n"
+                "Store it somewhere secure (e.g. a password manager) and "
+                "delete it once you're done.\n\nContinue?",
+                parent=self):
+            return
         path = filedialog.asksaveasfilename(
             title="Export Config",
             defaultextension=".json",
@@ -2318,8 +2332,8 @@ class ConfigTab(tk.Frame):
         if not path:
             return
         try:
-            cfg_path = self.controller.config_manager.config_path
-            shutil.copy2(cfg_path, path)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(self.controller.config_manager.config, f, indent=2)
             self._show_save_toast("Config exported to {}".format(path))
         except Exception as e:
             self._show_save_toast("Export failed: {}".format(e))
@@ -2339,6 +2353,11 @@ class ConfigTab(tk.Frame):
             cfg_path = self.controller.config_manager.config_path
             shutil.copy2(path, cfg_path)
             self.controller.config_manager.load()
+            # The imported file may be a plaintext export (see
+            # _export_config) — save() immediately re-encrypts the on-disk
+            # copy for this machine, instead of leaving config.json sitting
+            # in plaintext at the real config path until some later save.
+            self.controller.config_manager.save()
             self.reload()
             self._show_save_toast("Config imported — restart recommended")
         except Exception as e:

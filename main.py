@@ -1,5 +1,6 @@
 import getpass
 import os
+import sys
 import threading
 import tkinter as tk
 from tkinter import ttk
@@ -76,6 +77,39 @@ from ui.theme import Theme
 
 
 APP_VERSION = "3.0.0"
+
+
+def _crash_log_path():
+    """Mirrors ConfigManager's own frozen/dev path resolution — can't
+    depend on ConfigManager existing yet, since sys.excepthook needs to be
+    installed before MediaServerManager() is constructed."""
+    if getattr(sys, "frozen", False):
+        base = os.path.join(
+            os.environ.get("APPDATA") or os.path.expanduser("~"),
+            "All Clear Server Services")
+    else:
+        base = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
+    os.makedirs(base, exist_ok=True)
+    return os.path.join(base, "crash.log")
+
+
+def _log_crash(exc_type, exc_value, exc_tb):
+    import traceback, time as _time
+    try:
+        with open(_crash_log_path(), "a", encoding="utf-8") as f:
+            f.write("\n=== {} ===\n".format(_time.strftime("%Y-%m-%d %H:%M:%S")))
+            traceback.print_exception(exc_type, exc_value, exc_tb, file=f)
+    except Exception:
+        pass
+
+
+def _global_excepthook(exc_type, exc_value, exc_tb):
+    """Catches anything outside Tkinter's event loop (e.g. a startup
+    crash before mainloop() runs). console=False means this would
+    otherwise vanish with zero trace."""
+    _log_crash(exc_type, exc_value, exc_tb)
+    sys.__excepthook__(exc_type, exc_value, exc_tb)
+
 
 _TAB_NAMES = {
     0: "Connect", 1: "Quick Commands", 2: "Dashboard",
@@ -1053,6 +1087,30 @@ class MediaServerManager(tk.Tk):
         self.after(0, lambda: self.sidebar.set_badge(41, pending_count))
 
     # ---------------------------------------------------------
+    # CRASH HANDLING
+    # ---------------------------------------------------------
+    def report_callback_exception(self, exc, val, tb):
+        """Tkinter calls this automatically (it's a recognized method name
+        on the root Tk instance — named report_callback_error in older
+        Python versions, renamed to report_callback_exception; verified
+        against this project's actual Python 3.14 interpreter, since the
+        old name silently never fires there at all) for any exception
+        raised inside a bound callback/command — mainloop() catches these
+        itself and never lets them reach sys.excepthook, which is where
+        most real runtime errors in this app actually happen. Overriding
+        it means the app survives instead of the button silently doing
+        nothing, and there's now a visible signal plus a log entry instead
+        of total silence."""
+        _log_crash(exc, val, tb)
+        try:
+            self.show_toast(
+                "Something went wrong",
+                "{}: {}".format(exc.__name__, val),
+                level="error")
+        except Exception:
+            pass
+
+    # ---------------------------------------------------------
     # ADMIN ACTION AUDIT LOG
     # ---------------------------------------------------------
     def audit_log(self, action, target, detail="", result="ok"):
@@ -1472,5 +1530,6 @@ class MediaServerManager(tk.Tk):
 
     # --------------------------------------------------
 if __name__ == "__main__":
+    sys.excepthook = _global_excepthook
     app = MediaServerManager()
     app.mainloop()
