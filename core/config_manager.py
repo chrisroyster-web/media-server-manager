@@ -85,6 +85,7 @@ class ConfigManager:
     DEFAULT_CONFIG = {
         "sidebar_collapsed":          False,
         "sidebar_auto_collapse":      True,
+        "sidebar_section_collapsed":  {},
         "last_host":                  "",
         "last_username":              "",
         "dashboard_refresh_interval": 30,
@@ -287,6 +288,13 @@ class ConfigManager:
     @sidebar_collapsed.setter
     def sidebar_collapsed(self, value):
         self.config["sidebar_collapsed"] = value; self.save()
+
+    @property
+    def sidebar_section_collapsed(self):
+        return self.config.get("sidebar_section_collapsed", {})
+    @sidebar_section_collapsed.setter
+    def sidebar_section_collapsed(self, value):
+        self.config["sidebar_section_collapsed"] = value; self.save()
 
     @property
     def sidebar_auto_collapse(self):

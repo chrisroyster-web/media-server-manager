@@ -137,6 +137,58 @@ def _parse_crontab_lines(raw, source):
 
 
 # ---------------------------------------------------------------------------
+# Systemd timer parsing (folded in from the retired systemd_timers_tab.py)
+# ---------------------------------------------------------------------------
+
+_TIMER_LINE_RE = re.compile(
+    r'^(?P<next>-|\w{3} \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \S+)\s+'
+    r'(?P<left>-|.*?)\s+'
+    r'(?P<last>-|\w{3} \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \S+)\s+'
+    r'(?P<passed>-|.*? ago)\s+'
+    r'(?P<unit>\S+\.timer)\s+'
+    r'(?P<activates>\S+)$'
+)
+
+
+def _parse_systemd_timers(output):
+    """
+    Parse `systemctl list-timers --all` output into structured dicts.
+    Columns: NEXT  LEFT  LAST  PASSED  UNIT  ACTIVATES
+
+    NEXT/LEFT/LAST/PASSED are right-aligned with variable-width padding —
+    slicing by the header label's character position (what the retired
+    systemd_timers_tab.py did) silently misaligns values, since a
+    right-aligned value's start position shifts with its own content
+    width, not the label's. Anchoring on the two fixed, unambiguous
+    markers instead — the "Www YYYY-MM-DD HH:MM:SS TZ" date format for
+    NEXT/LAST, and the literal " ago" suffix on PASSED — lets regex
+    backtracking correctly capture LEFT/PASSED's own variable-width,
+    sometimes-multi-word values (e.g. "1h 33min", "1 day 13h ago").
+    Verified against real `systemctl list-timers --all` output.
+    """
+    timers = []
+    for line in output.splitlines():
+        s = line.strip()
+        if not s or ("NEXT" in s and "UNIT" in s) or "timers listed" in s or "timer listed" in s:
+            continue
+        m = _TIMER_LINE_RE.match(s)
+        if not m:
+            continue
+        is_active = m["next"] != "-"
+        timers.append({
+            "unit":      m["unit"],
+            "activates": m["activates"],
+            "next":      m["next"],
+            "left":      m["left"],
+            "last":      m["last"],
+            "passed":    m["passed"],
+            "active":    is_active,
+            "raw":       s,
+        })
+    return timers
+
+
+# ---------------------------------------------------------------------------
 # Tab class
 # ---------------------------------------------------------------------------
 
@@ -159,6 +211,9 @@ class CronTab(tk.Frame):
         ("Source",  160,  "w"),
         ("Schedule",170,  "w"),
         ("Next Run", 130, "w"),
+        ("Left",      80, "w"),
+        ("Last Run", 130, "w"),
+        ("Passed",    80, "w"),
         ("Command",   0,  "w"),
     ]
 
@@ -226,6 +281,17 @@ class CronTab(tk.Frame):
                 activebackground=t.surface, activeforeground=color,
                 font=t.font_small, bd=0,
             ).pack(side="left", padx=8)
+
+        # Folded in from the retired systemd_timers_tab.py, which had the
+        # same "show inactive" toggle for timer units.
+        self._show_inactive_timers = tk.BooleanVar(value=True)
+        tk.Checkbutton(
+            fbar, text="Inactive Timers", variable=self._show_inactive_timers,
+            command=self._apply_filter,
+            bg=t.surface, fg=t.text_muted, selectcolor=t.surface_light,
+            activebackground=t.surface, activeforeground=t.text_muted,
+            font=t.font_small, bd=0,
+        ).pack(side="left", padx=8)
 
         # Vertical split: list + actions (top) / console (bottom)
         pane = tk.PanedWindow(self, orient="vertical",
@@ -380,36 +446,35 @@ class CronTab(tk.Frame):
                     jobs += _parse_crontab_lines(content, f"/etc/cron.d/{fname}")
 
             # ── Systemd timers ────────────────────────────────────────────
+            # Column-position parsing (not whitespace-split) so LEFT/LAST/
+            # PASSED — folded in from the retired systemd_timers_tab.py —
+            # parse correctly even though date fields contain spaces.
             out, _, _ = ssh.run("systemctl list-timers --all --no-pager 2>/dev/null")
-            for line in out.splitlines():
-                s = line.strip()
-                if not s or "NEXT" in s[:10] or "timer" not in s:
-                    continue
-                if "timers listed" in s or "timer listed" in s:
-                    continue
-                parts = s.split()
-                unit = next((p for p in reversed(parts) if p.endswith(".timer")), None)
-                if not unit:
-                    continue
-                idx = parts.index(unit)
-                activates = parts[idx + 1] if idx + 1 < len(parts) else ""
-                pre = parts[:idx]
-                if pre and pre[0].lower() == "n/a":
-                    next_run = "n/a"
-                elif len(pre) >= 4:
-                    next_run = " ".join(pre[:4])
-                else:
-                    next_run = " ".join(pre) if pre else "n/a"
+            timers = _parse_systemd_timers(out)
+            units = [tm["unit"] for tm in timers]
+            enabled_map = {}
+            if units:
+                en_out, _, _ = ssh.run(
+                    "systemctl is-enabled {} 2>/dev/null".format(
+                        " ".join(shlex.quote(u) for u in units)))
+                for u, state in zip(units, en_out.splitlines()):
+                    enabled_map[u] = (state.strip() == "enabled")
+            for tm in timers:
+                unit, activates = tm["unit"], tm["activates"]
                 jobs.append({
                     "type":     "systemd",
                     "source":   "systemd",
                     "unit":     unit,
                     "activates": activates,
                     "schedule": activates.replace(".service", "") or unit.replace(".timer", ""),
-                    "next_run": next_run,
+                    "next_run": tm["next"],
+                    "left":     tm["left"],
+                    "last":     tm["last"],
+                    "passed":   tm["passed"],
+                    "timer_active": tm["active"],
                     "command":  activates or unit,
-                    "enabled":  True,
-                    "raw":      s,
+                    "enabled":  enabled_map.get(unit, True),
+                    "raw":      tm["raw"],
                 })
 
             # ── Docker schedulers ─────────────────────────────────────────
@@ -470,6 +535,7 @@ class CronTab(tk.Frame):
         show_cron  = self._show_cron.get()
         show_timer = self._show_systemd.get()
         show_dock  = self._show_docker.get()
+        show_inactive_timers = self._show_inactive_timers.get()
 
         self._tree.delete(*self._tree.get_children())
         self._iid_map.clear()
@@ -479,6 +545,9 @@ class CronTab(tk.Frame):
             if jtype == "cron"    and not show_cron:  continue
             if jtype == "systemd" and not show_timer: continue
             if jtype == "docker"  and not show_dock:  continue
+            if (jtype == "systemd" and not show_inactive_timers
+                    and not job.get("timer_active", True)):
+                continue
 
             text_blob = (job.get("command", "") + job.get("schedule", "") +
                          job.get("source",  "") + job.get("raw", "")).lower()
@@ -489,10 +558,13 @@ class CronTab(tk.Frame):
             src   = job.get("source", job.get("unit", ""))
             sched = job.get("schedule", "")
             nxt   = job.get("next_run", "")
+            left  = job.get("left", "--")
+            last  = job.get("last", "--")
+            passed= job.get("passed", "--")
             cmd   = job.get("command", "")
 
             iid = self._tree.insert("", "end", tags=(jtype,), values=(
-                badge, src, sched, nxt, cmd))
+                badge, src, sched, nxt, left, last, passed, cmd))
             self._iid_map[iid] = job
 
         t = self.theme
@@ -595,11 +667,16 @@ class CronTab(tk.Frame):
         if jtype == "cron":
             out, err, code = self._cron_set_enabled(job, not currently_enabled)
         elif jtype == "systemd":
+            # enable/disable (not stop/start) — this toggles whether the
+            # timer is enabled to start on boot, matching what the
+            # retired systemd_timers_tab.py's Enable/Disable buttons
+            # actually did; stop/start would only affect the timer's
+            # current run state, not what this button implies.
             unit = job["unit"]
             if currently_enabled:
-                out, err, code = ssh.run_sudo(f"systemctl stop {shlex.quote(unit)}")
+                out, err, code = ssh.run_sudo(f"systemctl disable {shlex.quote(unit)}")
             else:
-                out, err, code = ssh.run_sudo(f"systemctl start {shlex.quote(unit)}")
+                out, err, code = ssh.run_sudo(f"systemctl enable {shlex.quote(unit)}")
         elif jtype == "docker":
             unit = job.get("unit", "")
             if currently_enabled:

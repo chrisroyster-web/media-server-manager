@@ -62,17 +62,13 @@ class Sidebar(tk.Frame):
         ("\U0001f9e9", "Services",        3,  "INFRA"),
         ("\U0001f504", "Restart Seq.",   47,  None),
         ("\U0001f433", "Docker",          4,  None),
-        ("\U0001f4ca", "Docker Stats",  52,  None),
-        ("\U0001f4e6", "Docker Volumes", 57, None),
         ("\U0001f40b", "Compose",        15,  None),
         ("⏰",         "Cron Jobs",      16,  None),
-        ("⏲",     "Timers",         58,  None),
         ("📅",         "Scheduler",      44,  None),
         ("📦",         "Install Apps",   45,  None),
         ("\U0001f465", "Sessions",       13,  None),
         ("\U0001f5a5", "Processes",      50,  None),
-        ("\U0001f4bf", "Disk Health",    10,  None),
-        ("\U0001f5c4", "Storage Health", 25,  None),
+        ("\U0001f4bf", "Storage",        10,  None),
         ("\U0001f6e1", "VPN",            22,  None),
         ("\U0001f310", "Reverse Proxy",  23,  None),
         ("☁",          "Cloudflare",     60,  None),
@@ -88,7 +84,6 @@ class Sidebar(tk.Frame):
         ("\U0001f4be", "Backups",        29,  None),
         ("\U0001f504", "Updates",        12,  None),
         ("\U0001f514", "Notifications",  19,  None),
-        ("\U0001f4be", "Disk Usage",     49,  None),
         ("\U0001f527", "Net Toolkit",    56,  None),
         ("\U0001f4dc", "Audit Log",      61,  None),
 
@@ -233,10 +228,13 @@ class Sidebar(tk.Frame):
 
         # ── Build nav items ───────────────────────────────────────────
         self._section_widgets     = []
+        self._section_rows        = {}   # section name -> [row frames] (its own items)
+        self._section_labels      = {}   # section name -> header label (for chevron text)
         self._first_nav_row       = None   # anchor for collapse/expand re-pack
         self._first_section_spacer = None  # anchor for _server_section_frame re-pack
         current_section = None
-        pending_section = None
+        current_body    = None
+        section_collapsed = self.controller.config_manager.sidebar_section_collapsed
 
         for icon, label, idx, section in self._NAV_ITEMS:
             if section and section != current_section:
@@ -250,35 +248,45 @@ class Sidebar(tk.Frame):
                 if self._first_section_spacer is None:
                     self._first_section_spacer = spacer
 
-                sec_frame = tk.Frame(self._nav_frame, bg=sec_bg)
+                sec_frame = tk.Frame(self._nav_frame, bg=sec_bg, cursor="hand2")
                 sec_frame.pack(fill="x", pady=(0, 2))
                 sec_frame.bind("<MouseWheel>", self._on_mousewheel)
 
                 tk.Frame(sec_frame, bg=color, width=3).pack(side="left", fill="y")
+                is_collapsed = bool(section_collapsed.get(section))
                 sec_lbl = tk.Label(
                     sec_frame,
-                    text=section,
+                    text=self._section_label_text(section, is_collapsed),
                     bg=sec_bg, fg=color,
                     font=("Segoe UI", 9, "bold"),
-                    anchor="w", padx=10,
+                    anchor="w", padx=10, cursor="hand2",
                 )
                 sec_lbl.pack(side="left", fill="x", expand=True, pady=4)
                 sec_lbl.bind("<MouseWheel>", self._on_mousewheel)
-                # Row for this item (below) is this section's anchor — captured
-                # once it's created, so re-packing after a collapse can restore
-                # the header to its correct position instead of appending it
-                # to the end of the pack order.
-                pending_section = (sec_frame, spacer)
+                sec_lbl.bind("<Button-1>", lambda e, s=section: self._toggle_section(s))
+                sec_frame.bind("<Button-1>", lambda e, s=section: self._toggle_section(s))
+                self._section_labels[section] = sec_lbl
 
-            row = tk.Frame(self._nav_frame, bg=t.sidebar_bg)
-            row.pack(fill="x", padx=6, pady=1)
+                # This section's item rows live in their own body frame (kept
+                # always packed — a stable sibling of sec_frame/spacer usable
+                # as the before= anchor _apply_collapsed_state relies on for
+                # the whole-sidebar case). Collapsing a section instead
+                # pack_forget()s the *rows* inside it, so the body frame's own
+                # pack state never changes and that anchor stays valid even
+                # when this section is individually collapsed.
+                current_body = tk.Frame(self._nav_frame, bg=t.sidebar_bg)
+                current_body.pack(fill="x")
+                current_body.bind("<MouseWheel>", self._on_mousewheel)
+                self._section_rows[section] = []
+                self._section_widgets.append((sec_frame, spacer, current_body))
+
+            row = tk.Frame(current_body, bg=t.sidebar_bg)
+            if not section_collapsed.get(current_section):
+                row.pack(fill="x", padx=6, pady=1)
             row.bind("<MouseWheel>", self._on_mousewheel)
+            self._section_rows[current_section].append(row)
             if self._first_nav_row is None:
                 self._first_nav_row = row
-            if pending_section is not None:
-                sec_frame, spacer = pending_section
-                self._section_widgets.append((sec_frame, spacer, row))
-                pending_section = None
 
             btn = tk.Button(
                 row,
@@ -664,6 +672,33 @@ class Sidebar(tk.Frame):
             self._animating = False
             self.configure(width=end_w)
             self._apply_collapsed_state()
+
+    @staticmethod
+    def _section_label_text(section, collapsed):
+        return "{}  {}".format("▸" if collapsed else "▾", section)
+
+    def _toggle_section(self, section):
+        """Collapse/expand one sidebar section independently of the others,
+        persisting the choice so it survives an app restart. The section's
+        body frame itself stays packed at all times (see _build_sidebar) —
+        only its row children are shown/hidden — so this section's entry in
+        _section_widgets stays a valid before= anchor for the whole-sidebar
+        collapse case even while individually collapsed."""
+        cfg = self.controller.config_manager
+        state = dict(cfg.sidebar_section_collapsed)
+        collapsed = not state.get(section, False)
+        state[section] = collapsed
+        cfg.sidebar_section_collapsed = state
+
+        for row in self._section_rows.get(section, []):
+            if collapsed:
+                row.pack_forget()
+            else:
+                row.pack(fill="x", padx=6, pady=1)
+
+        lbl = self._section_labels.get(section)
+        if lbl is not None:
+            lbl.config(text=self._section_label_text(section, collapsed))
 
     def _apply_collapsed_state(self):
         """Show/hide labels and section headers after animation completes."""

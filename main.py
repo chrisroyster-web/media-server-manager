@@ -19,13 +19,13 @@ from ui.connection_panel import ConnectionPanel
 from ui.quick_commands import QuickCommandsPanel
 from ui.dashboard_tab import DashboardTab
 from ui.services_tab import ServicesTab
-from ui.docker_tab import DockerTab
+from ui.docker_hub_tab import DockerHubTab
 from ui.custom_commands_tab import CustomCommandsTab
 from ui.log_viewer_tab import LogViewerTab
 from ui.sabnzbd_tab import SABnzbdTab
 from ui.config_tab import ConfigTab
 from ui.sftp_tab import SFTPTab
-from ui.smart_tab import SmartTab
+from ui.storage_hub_tab import StorageHubTab
 from ui.arr_tab import ArrTab
 from ui.updates_tab import UpdatesTab
 from ui.sessions_tab import SessionsTab
@@ -37,7 +37,6 @@ from ui.play_history_tab import PlayHistoryTab
 from ui.vpn_tab import VPNTab
 from ui.reverse_proxy_tab import ReverseProxyTab
 from ui.speedtest_tab import SpeedtestTab
-from ui.storage_health_tab import StorageHealthTab
 from ui.ssl_tab import SSLTab
 from ui.tailscale_tab import TailscaleTab
 from ui.bandwidth_tab import BandwidthTab
@@ -57,16 +56,12 @@ from ui.install_tab import InstallTab
 from ui.fail2ban_tab import Fail2banTab
 from ui.restart_sequence_tab import RestartSequenceTab
 from ui.qbittorrent_tab import QBittorrentTab
-from ui.disk_usage_tab import DiskUsageTab
 from ui.process_tab import ProcessTab
 from ui.ufw_tab import UFWTab
-from ui.docker_stats_tab import DockerStatsTab
 from ui.ports_tab import PortsTab
 from ui.sensors_tab import SensorsTab
 from ui.pihole_tab import PiholeTab
 from ui.network_toolkit_tab import NetworkToolkitTab
-from ui.docker_volumes_tab import DockerVolumesTab
-from ui.systemd_timers_tab import SystemdTimersTab
 from ui.watchstate_tab import WatchstateTab
 from ui.cloudflare_tab import CloudflareTab
 from ui.audit_log_tab import AuditLogTab
@@ -115,12 +110,12 @@ _TAB_NAMES = {
     0: "Connect", 1: "Quick Commands", 2: "Dashboard",
     3: "Services", 4: "Docker", 5: "Custom Commands",
     6: "Log Viewer", 7: "SABnzbd", 8: "Config",
-    9: "Files", 10: "Disk Health", 11: "Arr",
+    9: "Files", 10: "Storage", 11: "Arr",
     12: "Updates", 13: "Sessions", 14: "Emby",
     15: "Compose", 16: "Cron Jobs", 17: "Plex",
     18: "Jellyfin", 19: "Notifications", 20: "All Servers",
     21: "Play History", 22: "VPN", 23: "Reverse Proxy",
-    24: "Speedtest", 25: "Storage Health", 26: "SSL Certs",
+    24: "Speedtest", 26: "SSL Certs",
     27: "Tailscale", 28: "Bandwidth", 29: "Backups",
     30: "Prowlarr", 33: "Tautulli", 34: "Uptime Kuma",
     35: "Netdata", 36: "Glances", 37: "All Servers",
@@ -128,12 +123,12 @@ _TAB_NAMES = {
     42: "Media Users", 43: "Now Playing",
     44: "Automation",  45: "Install Apps",
     46: "Fail2ban",   47: "Restart Sequence",
-    48: "qBittorrent", 49: "Disk Usage",
+    48: "qBittorrent",
     50: "Processes",   51: "UFW Firewall",
-    52: "Docker Stats", 53: "Ports",
+    53: "Ports",
     54: "Sensors",     55: "Pi-hole",
-    56: "Net Toolkit", 57: "Docker Volumes",
-    58: "Timers",     59: "Watchstate",
+    56: "Net Toolkit",
+    59: "Watchstate",
     60: "Cloudflare",   61: "Audit Log",
 }
 
@@ -216,13 +211,13 @@ class MediaServerManager(tk.Tk):
         self.quick_commands   = QuickCommandsPanel(self.tabs, self) # 1
         self.dashboard_tab    = DashboardTab(self.tabs, self)       # 2
         self.services_tab     = ServicesTab(self.tabs, self)        # 3
-        self.docker_tab       = DockerTab(self.tabs, self)          # 4
+        self.docker_tab       = DockerHubTab(self.tabs, self)       # 4
         self.custom_tab       = CustomCommandsTab(self.tabs, self)  # 5
         self.log_viewer       = LogViewerTab(self.tabs, self)       # 6
         self.sabnzbd_tab      = SABnzbdTab(self.tabs, self)         # 7
         self.config_tab       = ConfigTab(self.tabs, self)          # 8
         self.sftp_tab         = SFTPTab(self.tabs, self)            # 9
-        self.smart_tab        = SmartTab(self.tabs, self)           # 10
+        self.storage_tab      = StorageHubTab(self.tabs, self)      # 10
         self.arr_tab          = ArrTab(self.tabs, self)             # 11
         self.updates_tab      = UpdatesTab(self.tabs, self)         # 12
         self.sessions_tab     = SessionsTab(self.tabs, self)        # 13
@@ -237,7 +232,7 @@ class MediaServerManager(tk.Tk):
         self.vpn_tab          = VPNTab(self.tabs, self)                  # 22
         self.proxy_tab        = ReverseProxyTab(self.tabs, self)         # 23
         self.speedtest_tab    = SpeedtestTab(self.tabs, self)            # 24
-        self.storage_health_tab = StorageHealthTab(self.tabs, self)     # 25
+        self._stub_25           = tk.Frame(self.tabs)                   # 25 (retired - storage_hub_tab)
         self.ssl_tab          = SSLTab(self.tabs, self)                 # 26
         self.tailscale_tab    = TailscaleTab(self.tabs, self)           # 27
         self.bandwidth_tab    = BandwidthTab(self.tabs, self)           # 28
@@ -261,16 +256,16 @@ class MediaServerManager(tk.Tk):
         self.fail2ban_tab          = Fail2banTab(self.tabs, self)           # 46
         self.restart_sequence_tab  = RestartSequenceTab(self.tabs, self)    # 47
         self.qbittorrent_tab       = QBittorrentTab(self.tabs, self)        # 48
-        self.disk_usage_tab        = DiskUsageTab(self.tabs, self)          # 49
+        self._stub_49              = tk.Frame(self.tabs)                    # 49 (retired - storage_hub_tab)
         self.process_tab           = ProcessTab(self.tabs, self)            # 50
         self.ufw_tab               = UFWTab(self.tabs, self)                # 51
-        self.docker_stats_tab      = DockerStatsTab(self.tabs, self)        # 52
+        self._stub_52              = tk.Frame(self.tabs)                    # 52 (retired - docker_hub_tab)
         self.ports_tab             = PortsTab(self.tabs, self)              # 53
         self.sensors_tab           = SensorsTab(self.tabs, self)            # 54
         self.pihole_tab            = PiholeTab(self.tabs, self)             # 55
         self.network_toolkit_tab   = NetworkToolkitTab(self.tabs, self)    # 56
-        self.docker_volumes_tab    = DockerVolumesTab(self.tabs, self)     # 57
-        self.systemd_timers_tab    = SystemdTimersTab(self.tabs, self)     # 58
+        self._stub_57              = tk.Frame(self.tabs)                   # 57 (retired - docker_hub_tab)
+        self._stub_58              = tk.Frame(self.tabs)                   # 58 (retired - folded into cron_tab)
         self.watchstate_tab        = WatchstateTab(self.tabs, self)        # 59
         self.cloudflare_tab        = CloudflareTab(self.tabs, self)        # 60
         self.audit_log_tab         = AuditLogTab(self.tabs, self)          # 61
@@ -279,13 +274,13 @@ class MediaServerManager(tk.Tk):
             self.connection_panel, self.quick_commands, self.dashboard_tab,
             self.services_tab, self.docker_tab, self.custom_tab,
             self.log_viewer, self.sabnzbd_tab, self.config_tab,
-            self.sftp_tab, self.smart_tab, self.arr_tab,
+            self.sftp_tab, self.storage_tab, self.arr_tab,
             self.updates_tab, self.sessions_tab, self._stub_14,
             self.compose_tab, self.cron_tab,
             self._stub_17, self._stub_18,
             self.notif_tab, self.server_tab, self.play_history_tab,
             self.vpn_tab, self.proxy_tab, self.speedtest_tab,
-            self.storage_health_tab, self.ssl_tab, self.tailscale_tab,
+            self._stub_25, self.ssl_tab, self.tailscale_tab,
             self.bandwidth_tab, self.backup_tab, self.prowlarr_tab,
             self._stub_31, self._stub_32, self.tautulli_tab,
             self.uptime_kuma_tab, self.netdata_tab, self.glances_tab,
@@ -295,11 +290,11 @@ class MediaServerManager(tk.Tk):
             self.media_requests_tab, self.media_users_tab, self.now_playing_tab,
             self.scheduler_tab, self.install_tab,
             self.fail2ban_tab, self.restart_sequence_tab,
-            self.qbittorrent_tab, self.disk_usage_tab,
-            self.process_tab, self.ufw_tab, self.docker_stats_tab,
+            self.qbittorrent_tab, self._stub_49,
+            self.process_tab, self.ufw_tab, self._stub_52,
             self.ports_tab, self.sensors_tab,
             self.pihole_tab, self.network_toolkit_tab,
-            self.docker_volumes_tab, self.systemd_timers_tab,
+            self._stub_57, self._stub_58,
             self.watchstate_tab, self.cloudflare_tab, self.audit_log_tab,
         ]:
             self.tabs.add(tab)
@@ -806,16 +801,15 @@ class MediaServerManager(tk.Tk):
         m = {
             2:  lambda: self.dashboard_tab.refresh(),
             3:  lambda: self.services_tab.refresh_all(),
-            4:  lambda: self.docker_tab.refresh_all(),
+            4:  lambda: self.docker_tab.on_show(),
             7:  lambda: self.sabnzbd_tab.refresh(),
-            10: lambda: self.smart_tab._fetch(),
+            10: lambda: self.storage_tab.on_show(),
             11: lambda: self.arr_tab._fetch(),
             13: lambda: self.sessions_tab._refresh(),
             34: lambda: self.uptime_kuma_tab.refresh(),
             35: lambda: self.netdata_tab.refresh(),
             36: lambda: self.glances_tab.refresh(),
             28: lambda: self.bandwidth_tab.refresh(),
-            25: lambda: self.storage_health_tab.refresh(),
             9:  lambda: self.sftp_tab._navigate(self.sftp_tab._current_path, push_history=False),
             6:  lambda: self.log_viewer.fetch(),
             29: lambda: self.backup_tab.refresh(),
@@ -843,13 +837,10 @@ class MediaServerManager(tk.Tk):
             48: lambda: self.qbittorrent_tab.on_show(),
             50: lambda: self.process_tab.on_show(),
             51: lambda: self.ufw_tab.on_show(),
-            52: lambda: self.docker_stats_tab.on_show(),
             53: lambda: self.ports_tab.on_show(),
             54: lambda: self.sensors_tab.on_show(),
             55: lambda: self.pihole_tab.on_show(),
             56: lambda: self.network_toolkit_tab.on_show(),
-            57: lambda: self.docker_volumes_tab.on_show(),
-            58: lambda: self.systemd_timers_tab.on_show(),
             59: lambda: self.watchstate_tab.refresh(),
             60: lambda: self.cloudflare_tab.on_show(),
             61: lambda: self.audit_log_tab.on_show(),
