@@ -237,8 +237,8 @@ class MediaRequestsTab(tk.Frame):
             try:
                 counts = _api(host, port, key, "request/count")
             except Exception as e:
-                self.after(0, lambda: self._status.config(
-                    text="Cannot reach {}: {}".format(server, e),
+                self.after(0, lambda err=str(e): self._status.config(
+                    text="Cannot reach {}: {}".format(server, err),
                     bg=self.theme.surface_dark, fg=self.theme.status_stopped))
                 return
 

@@ -241,7 +241,6 @@ class PortsTab(tk.Frame):
             rows = sorted(rows, key=lambda r: str(r.get(key, "")), reverse=rev)
 
         self._tree.delete(*self._tree.get_children())
-        t = self.theme
         for r in rows:
             # Tag: protocol colour, plus priv (<1024) or sys (no process)
             tags = [r["proto"]]

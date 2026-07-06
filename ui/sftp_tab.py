@@ -6,7 +6,6 @@ import datetime
 import threading
 import tkinter as tk
 from tkinter import ttk, filedialog, simpledialog, messagebox
-import time
 
 
 def _is_dir(attr):
@@ -235,7 +234,7 @@ class SFTPTab(tk.Frame):
                 sftp = self.controller.ssh.get_sftp()
                 home = sftp.normalize(".")
                 self.after(0, lambda h=home: self._navigate(h))
-            except Exception as e:
+            except Exception:
                 self.after(0, lambda: self._navigate("/"))
         threading.Thread(target=worker, daemon=True).start()
 
@@ -247,7 +246,7 @@ class SFTPTab(tk.Frame):
             sftp = self.controller.ssh.get_sftp()
             attrs = sftp.listdir_attr(path)
         except Exception as e:
-            self.after(0, lambda: self._set_status("Error: " + str(e), "error"))
+            self.after(0, lambda err=str(e): self._set_status("Error: " + err, "error"))
             return
 
         # Sort: parent (..) always first, then dirs A-Z, then files A-Z
@@ -384,7 +383,7 @@ class SFTPTab(tk.Frame):
                 self.after(0, lambda: self._set_status(
                     "Downloaded  " + name + "  →  " + local, "success"))
             except Exception as e:
-                self.after(0, lambda: self._set_status("Download failed: " + str(e), "error"))
+                self.after(0, lambda err=str(e): self._set_status("Download failed: " + err, "error"))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -412,7 +411,7 @@ class SFTPTab(tk.Frame):
                     "Uploaded  " + filename, "success"))
                 self.after(0, self._refresh)
             except Exception as e:
-                self.after(0, lambda: self._set_status("Upload failed: " + str(e), "error"))
+                self.after(0, lambda err=str(e): self._set_status("Upload failed: " + err, "error"))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -434,7 +433,7 @@ class SFTPTab(tk.Frame):
                 self.after(0, lambda: self._set_status("Created folder  " + name, "success"))
                 self.after(0, self._refresh)
             except Exception as e:
-                self.after(0, lambda: self._set_status("Create folder failed: " + str(e), "error"))
+                self.after(0, lambda err=str(e): self._set_status("Create folder failed: " + err, "error"))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -461,7 +460,7 @@ class SFTPTab(tk.Frame):
                     "Renamed  " + name + "  →  " + new_name.strip(), "success"))
                 self.after(0, self._refresh)
             except Exception as e:
-                self.after(0, lambda: self._set_status("Rename failed: " + str(e), "error"))
+                self.after(0, lambda err=str(e): self._set_status("Rename failed: " + err, "error"))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -495,7 +494,7 @@ class SFTPTab(tk.Frame):
                     "Deleted  " + name, "success"))
                 self.after(0, self._refresh)
             except Exception as e:
-                self.after(0, lambda: self._set_status("Delete failed: " + str(e), "error"))
+                self.after(0, lambda err=str(e): self._set_status("Delete failed: " + err, "error"))
 
         threading.Thread(target=worker, daemon=True).start()
 

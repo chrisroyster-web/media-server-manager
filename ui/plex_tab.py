@@ -5,7 +5,7 @@ Uses the Plex Media Server HTTP API with X-Plex-Token authentication.
 """
 
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import messagebox
 import threading
 import urllib.request
 import json

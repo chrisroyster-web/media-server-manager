@@ -6,7 +6,7 @@ Polls every 15 seconds automatically.
 """
 
 import tkinter as tk
-from tkinter import ttk, simpledialog
+from tkinter import ttk
 import threading
 import urllib.request
 import urllib.error
@@ -301,7 +301,6 @@ class EmbyTab(tk.Frame):
         kick_btn.pack(side="right", padx=(4, 0))
 
         # Expand/collapse detail button
-        detail_state = [False]
         expand_btn = tk.Button(
             top, text="Details",
             bg=t.surface_light, fg=t.text_muted,

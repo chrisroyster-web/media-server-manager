@@ -135,7 +135,7 @@ class StorageHealthTab(tk.Frame):
     def _fetch(self):
         try:
             self._fetch_inner()
-        except Exception as exc:
+        except Exception:
             err = traceback.format_exc()
             self.after(0, lambda e=err: self._populate([], "ERROR:\n" + e, "error"))
         finally:

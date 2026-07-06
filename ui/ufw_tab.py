@@ -5,7 +5,7 @@ import re
 import shlex
 import threading
 import tkinter as tk
-from tkinter import ttk, messagebox, simpledialog
+from tkinter import ttk, messagebox
 
 
 class UFWTab(tk.Frame):

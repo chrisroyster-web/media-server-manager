@@ -215,8 +215,8 @@ class ProcessTab(tk.Frame):
                 text="Updated {}".format(ts)))
             self.after(0, self._rc.schedule)
         except Exception as e:
-            self.after(0, lambda: self._status.config(
-                text="Error: {}".format(e),
+            self.after(0, lambda err=str(e): self._status.config(
+                text="Error: {}".format(err),
                 bg=self.theme.surface_dark,
                 fg=self.theme.status_stopped))
         finally:

@@ -426,7 +426,7 @@ class JellyfinUsersTab(tk.Frame):
             def worker():
                 try:
                     cfg = self.controller.config_manager
-                    result = _jf_request(
+                    _jf_request(
                         cfg.jellyfin_host, cfg.jellyfin_port, cfg.jellyfin_apikey,
                         "POST", "/Users/New", {"Name": name, "Password": pw})
                     self.after(0, lambda: self._show_status(

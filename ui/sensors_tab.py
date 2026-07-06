@@ -8,7 +8,6 @@ Keeps a rolling history (last 60 readings) per sensor for sparklines.
 """
 
 import json
-import math
 import shlex
 import time
 import threading
@@ -288,7 +287,6 @@ class SensorsTab(tk.Frame):
                      bg=t.bg, fg=t.text_muted, font=t.font_regular,
                      justify="center").pack(pady=40)
 
-        n_sensors = sum(len(h) for h in self._history.values()) if self._history else 0
         self._status.config(
             text="{} sensor reading{}".format(
                 len(self._cards), "s" if len(self._cards) != 1 else ""),

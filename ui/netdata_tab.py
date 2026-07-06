@@ -150,7 +150,6 @@ class NetdataTab(tk.Frame):
 
     # ---- System tab ----
     def _build_system_tab(self):
-        t = self.theme
         f = self._tab_system
 
         cols = [
@@ -163,7 +162,6 @@ class NetdataTab(tk.Frame):
 
     # ---- Disk tab ----
     def _build_disk_tab(self):
-        t = self.theme
         f = self._tab_disk
 
         cols = [
@@ -178,7 +176,6 @@ class NetdataTab(tk.Frame):
 
     # ---- Network tab ----
     def _build_network_tab(self):
-        t = self.theme
         f = self._tab_network
 
         cols = [
@@ -295,8 +292,8 @@ class NetdataTab(tk.Frame):
                 "net_ifaces":  dict(list(net_ifaces.items())[:12]),
             }
         except Exception as e:
-            self.after(0, lambda: self._status.config(
-                text="Cannot reach Netdata: {}".format(e),
+            self.after(0, lambda err=str(e): self._status.config(
+                text="Cannot reach Netdata: {}".format(err),
                 bg=self.theme.surface_dark, fg=self.theme.status_stopped))
             return
         finally:

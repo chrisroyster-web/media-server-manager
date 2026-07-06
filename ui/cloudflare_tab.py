@@ -217,10 +217,10 @@ class CloudflareTab(tk.Frame):
         try:
             records = cf.list_dns_records(token, zone)
         except cf.CloudflareError as e:
-            self.after(0, lambda: self._fail("DNS records: {}".format(e)))
+            self.after(0, lambda err=str(e): self._fail("DNS records: {}".format(err)))
             return
         except Exception as e:
-            self.after(0, lambda: self._fail("DNS records: {}".format(e)))
+            self.after(0, lambda err=str(e): self._fail("DNS records: {}".format(err)))
             return
 
         try:

@@ -10,7 +10,7 @@ import shlex
 import threading
 import time
 import tkinter as tk
-from tkinter import ttk, messagebox, simpledialog
+from tkinter import ttk, messagebox
 
 from ui.refresh_control import RefreshControl
 

@@ -263,8 +263,8 @@ class GlancesTab(tk.Frame):
                 except Exception:
                     pass
         except Exception as e:
-            self.after(0, lambda: self._status.config(
-                text="Cannot reach Glances: {}".format(e),
+            self.after(0, lambda err=str(e): self._status.config(
+                text="Cannot reach Glances: {}".format(err),
                 bg=self.theme.surface_dark, fg=self.theme.status_stopped))
             return
         finally:

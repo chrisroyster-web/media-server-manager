@@ -567,7 +567,6 @@ class CronTab(tk.Frame):
                 badge, src, sched, nxt, left, last, passed, cmd))
             self._iid_map[iid] = job
 
-        t = self.theme
         self._tree.tag_configure("cron",    foreground=_TYPE_COLOR["cron"])
         self._tree.tag_configure("systemd", foreground=_TYPE_COLOR["systemd"])
         self._tree.tag_configure("docker",  foreground=_TYPE_COLOR["docker"])
@@ -760,7 +759,7 @@ class CronTab(tk.Frame):
         elif source == "root crontab":
             out, _, _ = ssh.run_sudo("crontab -l 2>/dev/null")
         else:
-            path = source if source.startswith("/") else f"/etc/crontab"
+            path = source if source.startswith("/") else "/etc/crontab"
             out, _, _ = ssh.run(f"cat {shlex.quote(path)} 2>/dev/null")
         return out.splitlines()
 

@@ -10,7 +10,6 @@ filename ends with .exe  (e.g. AllClearServerServices_v2.0.0_Setup.exe).
 import hashlib
 import json
 import os
-import sys
 import subprocess
 import tempfile
 import urllib.request

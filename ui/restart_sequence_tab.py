@@ -181,7 +181,7 @@ class RestartSequenceTab(tk.Frame):
 
         # Identifier
         self._id_var = tk.StringVar()
-        id_entry = _field("Identifier", lambda p: tk.Entry(
+        _field("Identifier", lambda p: tk.Entry(
             p, textvariable=self._id_var,
             bg=t.surface_dark, fg=t.text,
             insertbackground=t.blue,

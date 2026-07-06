@@ -703,7 +703,6 @@ class Sidebar(tk.Frame):
     def _apply_collapsed_state(self):
         """Show/hide labels and section headers after animation completes."""
         collapsed = self._collapsed
-        t = self.theme
 
         # Header: collapsed = only the toggle button, centered
         if collapsed:

@@ -143,7 +143,6 @@ class JellyseerrTab(tk.Frame):
         self._req_tree.pack(fill="both", expand=True)
 
     def _build_users_tab(self):
-        t = self.theme
         cols = ("rank", "name", "requests")
         self._user_tree = ttk.Treeview(self._user_frame, columns=cols,
                                         show="headings", style="JS.Treeview")
@@ -187,8 +186,8 @@ class JellyseerrTab(tk.Frame):
             try:
                 counts = _api(host, port, key, "request/count")
             except Exception as e:
-                self.after(0, lambda: self._status.config(
-                    text="Cannot reach {}: {}".format(self._name, e),
+                self.after(0, lambda err=str(e): self._status.config(
+                    text="Cannot reach {}: {}".format(self._name, err),
                     bg=self.theme.surface_dark, fg=self.theme.status_stopped))
                 return
 

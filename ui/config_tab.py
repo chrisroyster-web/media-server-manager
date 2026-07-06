@@ -1872,28 +1872,6 @@ class ConfigTab(tk.Frame):
                 self.after(0, lambda err=str(e): self._set_test_result(lbl, False, err[:60]))
         threading.Thread(target=_run, daemon=True).start()
 
-    def _test_wud(self):
-        import threading, urllib.request, json as _json
-        lbl  = self._wud_test_lbl
-        lbl.configure(text="Testing…", fg=self.controller.theme.text_muted)
-        host = self.wud_host_var.get().strip() or "localhost"
-        port = self.wud_port_var.get().strip() or "3002"
-        host = self._resolve_host(host.removeprefix("https://").removeprefix("http://").strip("/"))
-
-        def _run():
-            try:
-                url = "http://{}:{}/api/containers".format(host, port)
-                with urllib.request.urlopen(url, timeout=6) as r:
-                    containers = _json.loads(r.read())
-                updates = sum(1 for c in containers if c.get("updateAvailable"))
-                self.after(0, lambda: self._set_test_result(
-                    lbl, True,
-                    "Connected  ·  {} container(s)  ·  {} update(s) available".format(
-                        len(containers), updates)))
-            except Exception as e:
-                self.after(0, lambda err=str(e): self._set_test_result(lbl, False, err[:60]))
-        threading.Thread(target=_run, daemon=True).start()
-
     def _test_emby(self):
         import threading, urllib.request, urllib.error, json as _json
         lbl = self._emby_test_lbl

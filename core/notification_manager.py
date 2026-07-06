@@ -11,7 +11,6 @@ import ssl
 import threading
 import urllib.request
 import urllib.error
-import json
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 

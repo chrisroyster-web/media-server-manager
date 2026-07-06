@@ -262,8 +262,8 @@ class MediaUsersTab(tk.Frame):
             if isinstance(users, dict):
                 users = users.get("Items", []) or []
         except Exception as e:
-            self.after(0, lambda: self._status.config(
-                text="Cannot reach {}: {}".format(server, e),
+            self.after(0, lambda err=str(e): self._status.config(
+                text="Cannot reach {}: {}".format(server, err),
                 bg=self.theme.surface_dark, fg=self.theme.status_stopped))
             return
         finally:
@@ -360,8 +360,8 @@ class MediaUsersTab(tk.Frame):
                 self._api("POST", "/Users/{}/Policy".format(uid), policy)
                 self.after(0, self.refresh)
             except Exception as e:
-                self.after(0, lambda: messagebox.showerror(
-                    "Error", "Could not update user policy:\n{}".format(e)))
+                self.after(0, lambda err=str(e): messagebox.showerror(
+                    "Error", "Could not update user policy:\n{}".format(err)))
         threading.Thread(target=do, daemon=True).start()
 
     def _set_bitrate(self):
@@ -396,8 +396,8 @@ class MediaUsersTab(tk.Frame):
                     self._api("POST", "/Users/{}/Policy".format(uid), policy)
                     self.after(0, self.refresh)
                 except Exception as e:
-                    self.after(0, lambda: messagebox.showerror(
-                        "Error", "Could not set bitrate:\n{}".format(e)))
+                    self.after(0, lambda err=str(e): messagebox.showerror(
+                        "Error", "Could not set bitrate:\n{}".format(err)))
             threading.Thread(target=do, daemon=True).start()
 
         btns = tk.Frame(dlg, bg=t.bg)
@@ -424,8 +424,8 @@ class MediaUsersTab(tk.Frame):
                 self._api("DELETE", "/Users/{}".format(uid))
                 self.after(0, self.refresh)
             except Exception as e:
-                self.after(0, lambda: messagebox.showerror(
-                    "Error", "Could not delete user:\n{}".format(e)))
+                self.after(0, lambda err=str(e): messagebox.showerror(
+                    "Error", "Could not delete user:\n{}".format(err)))
         threading.Thread(target=do, daemon=True).start()
 
     def _new_user(self):
@@ -446,6 +446,6 @@ class MediaUsersTab(tk.Frame):
                 self._api("POST", "/Users/New", body)
                 self.after(0, self.refresh)
             except Exception as e:
-                self.after(0, lambda: messagebox.showerror(
-                    "Error", "Could not create user:\n{}".format(e)))
+                self.after(0, lambda err=str(e): messagebox.showerror(
+                    "Error", "Could not create user:\n{}".format(err)))
         threading.Thread(target=do, daemon=True).start()

@@ -264,10 +264,10 @@ class NetworkToolkitTab(tk.Frame):
                 fg=self.theme.status_running if status
                    else self.theme.status_stopped))
         except Exception as e:
-            self.after(0, lambda: self._write(
-                "Error: {}\n".format(e), "err"))
-            self.after(0, lambda: self._status.config(
-                text="Error: {}".format(e),
+            self.after(0, lambda err=str(e): self._write(
+                "Error: {}\n".format(err), "err"))
+            self.after(0, lambda err=str(e): self._status.config(
+                text="Error: {}".format(err),
                 bg=self.theme.surface_dark,
                 fg=self.theme.status_stopped))
         finally:

@@ -163,7 +163,6 @@ class TautulliTab(tk.Frame):
                                      font=t.font_small)
 
     def _build_history_tab(self):
-        t = self.theme
         cols = ("date", "user", "title", "type", "duration", "decision")
         self._hist_tree = ttk.Treeview(self._history_frame, columns=cols,
                                         show="headings", style="TT.Treeview")
@@ -185,7 +184,6 @@ class TautulliTab(tk.Frame):
         self._hist_tree.pack(fill="both", expand=True)
 
     def _build_libraries_tab(self):
-        t = self.theme
         cols = ("name", "type", "count", "plays")
         self._lib_tree = ttk.Treeview(self._libs_frame, columns=cols,
                                        show="headings", style="TT.Treeview")
@@ -230,8 +228,8 @@ class TautulliTab(tk.Frame):
             try:
                 activity = _api(host, port, key, "get_activity")
             except Exception as e:
-                self.after(0, lambda: self._status.config(
-                    text="Cannot reach Tautulli: {}".format(e),
+                self.after(0, lambda err=str(e): self._status.config(
+                    text="Cannot reach Tautulli: {}".format(err),
                     bg=self.theme.surface_dark, fg=self.theme.status_stopped))
                 return
 

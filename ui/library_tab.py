@@ -455,7 +455,6 @@ class LibraryTab(tk.Frame):
                     total = len(items)
                 elif lib:
                     key    = lib["id"]
-                    ptype  = lib.get("plex_type", "")
                     qparams = {}
                     if plex_type:
                         qparams["type"] = plex_type

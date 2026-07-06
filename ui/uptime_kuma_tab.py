@@ -172,8 +172,8 @@ class UptimeKumaTab(tk.Frame):
         try:
             page, hb, hb_err = _api(host, port, slug, key)
         except Exception as e:
-            self.after(0, lambda: self._status.config(
-                text="Cannot reach Uptime Kuma: {}".format(e),
+            self.after(0, lambda err=str(e): self._status.config(
+                text="Cannot reach Uptime Kuma: {}".format(err),
                 bg=self.theme.surface_dark, fg=self.theme.status_stopped))
             return
         finally:

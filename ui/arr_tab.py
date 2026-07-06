@@ -343,7 +343,6 @@ class ArrTab(tk.Frame):
     # POPULATE
     # =========================================================
     def _populate(self, results):
-        t = self.theme
         self._queue_tree.delete(*self._queue_tree.get_children())
         self._missing_tree.delete(*self._missing_tree.get_children())
         self._upcoming_tree.delete(*self._upcoming_tree.get_children())

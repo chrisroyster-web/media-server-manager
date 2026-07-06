@@ -158,7 +158,6 @@ class ProwlarrTab(tk.Frame):
         self._idx_tree.pack(fill="both", expand=True, padx=0, pady=0)
 
     def _build_history_tab(self):
-        t = self.theme
         cols = ("date", "indexer", "title", "type", "app")
         self._hist_tree = ttk.Treeview(self._hist_frame, columns=cols,
                                         show="headings", style="PW.Treeview")
@@ -214,8 +213,8 @@ class ProwlarrTab(tk.Frame):
             try:
                 indexers = _api(host, port, key, "indexer")
             except Exception as e:
-                self.after(0, lambda: self._status.config(
-                    text="Cannot reach Prowlarr: {}".format(e),
+                self.after(0, lambda err=str(e): self._status.config(
+                    text="Cannot reach Prowlarr: {}".format(err),
                     bg=self.theme.surface_dark, fg=self.theme.status_stopped))
                 return
 
@@ -352,8 +351,8 @@ class ProwlarrTab(tk.Frame):
                     bg=self.theme.surface_dark, fg=self.theme.status_running))
                 self.after(500, self.refresh)
             except Exception as e:
-                self.after(0, lambda: self._status.config(
-                    text="Test failed: {}".format(e),
+                self.after(0, lambda err=str(e): self._status.config(
+                    text="Test failed: {}".format(err),
                     bg=self.theme.surface_dark, fg=self.theme.status_stopped))
             finally:
                 self.after(0, lambda: self._test_btn.config(

@@ -349,8 +349,8 @@ class MediaServerManager(tk.Tk):
 
             # Progress bar over the image
             BAR_H = 4
-            bar_track = c.create_rectangle(0, H-BAR_H, W, H,
-                                            fill="#1a1d27", outline="")
+            c.create_rectangle(0, H-BAR_H, W, H,
+                                fill="#1a1d27", outline="")
             bar_fill  = c.create_rectangle(0, H-BAR_H, 0, H,
                                             fill=self.theme.blue, outline="")
 

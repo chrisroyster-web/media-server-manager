@@ -7,7 +7,7 @@ Each card carries a server badge and routes kick/message to the correct API.
 """
 
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import messagebox
 import threading
 import urllib.request
 import json

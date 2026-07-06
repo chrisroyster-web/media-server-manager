@@ -441,8 +441,8 @@ class QBittorrentTab(tk.Frame):
                      {"hashes": hashes}, self._cookies)
                 self.after(800, self.refresh)
             except Exception as e:
-                self.after(0, lambda: messagebox.showerror(
-                    "Action Failed", str(e), parent=self))
+                self.after(0, lambda err=str(e): messagebox.showerror(
+                    "Action Failed", err, parent=self))
         threading.Thread(target=_run, daemon=True).start()
 
     def _delete_selected(self):
@@ -470,8 +470,8 @@ class QBittorrentTab(tk.Frame):
                      self._cookies)
                 self.after(800, self.refresh)
             except Exception as e:
-                self.after(0, lambda: messagebox.showerror(
-                    "Delete Failed", str(e), parent=self))
+                self.after(0, lambda err=str(e): messagebox.showerror(
+                    "Delete Failed", err, parent=self))
         threading.Thread(target=_run, daemon=True).start()
 
     def _add_torrent(self):
@@ -489,8 +489,8 @@ class QBittorrentTab(tk.Frame):
                      {"urls": url.strip()}, self._cookies)
                 self.after(1500, self.refresh)
             except Exception as e:
-                self.after(0, lambda: messagebox.showerror(
-                    "Add Failed", str(e), parent=self))
+                self.after(0, lambda err=str(e): messagebox.showerror(
+                    "Add Failed", err, parent=self))
         threading.Thread(target=_run, daemon=True).start()
 
     def on_show(self):
