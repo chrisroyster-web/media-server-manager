@@ -984,19 +984,34 @@ class DashboardTab(tk.Frame):
             self.after(0, _upd_alerts)
 
             # -- Last Backup --
-            out, _, _ = ssh.run(
+            # Checks both backup.sh (config) and full-system-backup.sh
+            # (restic) — a single "Success" dot here used to only reflect
+            # the config backup, so the full-system backup could silently
+            # fail for weeks without this at-a-glance widget ever noticing.
+            def _classify(text):
+                low = text.lower()
+                if any(w in low for w in ("error", "fail", "fatal")):
+                    return "Failed", self.theme.status_stopped, 0
+                if any(w in low for w in ("success", "complete", "done", "finished")):
+                    return "Success", self.theme.status_running, 2
+                return "Unknown", self.theme.text_muted, 1
+
+            cfg_out, _, _ = ssh.run(
                 "tail -5 /var/log/media-backup.log 2>/dev/null || echo 'Log not found'")
-            blog = out.strip()
-            blog_lower = blog.lower()
-            if any(w in blog_lower for w in ("success", "complete", "done", "finished")):
-                dot_color   = self.theme.status_running
-                status_text = "Success"
-            elif any(w in blog_lower for w in ("error", "fail", "fatal")):
-                dot_color   = self.theme.status_stopped
-                status_text = "Failed"
+            full_out, _, _ = ssh.run(
+                "tail -5 /var/log/media-fullbackup.log 2>/dev/null || echo 'Log not found'")
+            cfg_text, full_text = cfg_out.strip(), full_out.strip()
+            cfg_status,  cfg_color,  cfg_rank  = _classify(cfg_text)
+            full_status, full_color, full_rank = _classify(full_text)
+
+            # Worst-of-both: Failed beats Unknown beats Success, so this
+            # widget can't show green while either backup is actually broken.
+            if cfg_rank <= full_rank:
+                status_text, dot_color = cfg_status, cfg_color
             else:
-                dot_color   = self.theme.text_muted
-                status_text = "Unknown"
+                status_text, dot_color = full_status, full_color
+            blog = "== Config Backup ({}) ==\n{}\n\n== Full System Backup ({}) ==\n{}".format(
+                cfg_status, cfg_text, full_status, full_text)
             def _upd_backup(log=blog, dc=dot_color, st=status_text):
                 self.backup_dot.delete("all")
                 self.backup_dot.create_oval(1, 1, 11, 11, fill=dc, outline=dc)

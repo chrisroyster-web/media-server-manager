@@ -595,6 +595,10 @@ class BackupTab(tk.Frame):
                 self.after(0, lambda: self._status.config(
                     text="Backup running…", bg=self.theme.blue, fg="#ffffff"))
                 _, err, code = self.controller.ssh.run("sudo {}".format(remote_path))
+                self.controller.audit_log(
+                    "backup.run", remote_path,
+                    detail=(err or "").strip()[:200],
+                    result="ok" if code == 0 else "fail")
                 if code == 0:
                     self.after(0, lambda: self._status.config(
                         text="Backup completed successfully",

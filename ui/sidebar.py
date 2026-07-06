@@ -90,6 +90,7 @@ class Sidebar(tk.Frame):
         ("\U0001f514", "Notifications",  19,  None),
         ("\U0001f4be", "Disk Usage",     49,  None),
         ("\U0001f527", "Net Toolkit",    56,  None),
+        ("\U0001f4dc", "Audit Log",      61,  None),
 
         ("⚙",         "Config",          8,  "SETTINGS"),
     ]

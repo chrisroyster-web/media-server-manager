@@ -21,6 +21,20 @@ notifications
     level     TEXT    — info / ok / warn / error
     title     TEXT
     message   TEXT
+
+audit_log
+    id        INTEGER PRIMARY KEY AUTOINCREMENT
+    server_id TEXT
+    ts        INTEGER
+    actor     TEXT    — OS username of whoever was running the app
+    action    TEXT    — e.g. "service.restart", "fail2ban.unban"
+    target    TEXT    — what it was run against, e.g. a service/container/IP
+    detail    TEXT    — optional extra context
+    result    TEXT    — "ok" / "fail"
+
+    Unlike notifications, this is never auto-pruned and has no "clear all" —
+    it's a trail of destructive actions taken through the app, not a
+    dismissable alert feed.
 """
 
 import sqlite3
@@ -78,6 +92,20 @@ class MetricsStore:
 
                 CREATE INDEX IF NOT EXISTS idx_notif_ts
                     ON notifications (ts);
+
+                CREATE TABLE IF NOT EXISTS audit_log (
+                    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                    server_id TEXT    NOT NULL DEFAULT 'default',
+                    ts        INTEGER NOT NULL,
+                    actor     TEXT    NOT NULL DEFAULT '',
+                    action    TEXT    NOT NULL DEFAULT '',
+                    target    TEXT    NOT NULL DEFAULT '',
+                    detail    TEXT    NOT NULL DEFAULT '',
+                    result    TEXT    NOT NULL DEFAULT 'ok'
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_audit_ts
+                    ON audit_log (ts);
             """)
             con.commit()
             con.close()
@@ -182,10 +210,51 @@ class MetricsStore:
             con.close()
 
     # ------------------------------------------------------------------
+    # Audit log
+    # ------------------------------------------------------------------
+    def insert_audit(self, server_id: str, actor: str, action: str,
+                     target: str, detail: str = "", result: str = "ok"):
+        with self._lock:
+            con = self._connect()
+            con.execute(
+                "INSERT INTO audit_log "
+                "(server_id, ts, actor, action, target, detail, result) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (server_id, int(time.time()), actor, action, target, detail, result)
+            )
+            con.commit()
+            con.close()
+
+    def get_audit_log(self, limit: int = 500,
+                      server_id: str | None = None) -> list:
+        """
+        Return up to `limit` most-recent audit entries, newest first.
+        If server_id is None, return all servers.
+        """
+        with self._lock:
+            con = self._connect()
+            if server_id:
+                rows = con.execute(
+                    "SELECT id, server_id, ts, actor, action, target, detail, result "
+                    "FROM audit_log WHERE server_id = ? "
+                    "ORDER BY ts DESC LIMIT ?",
+                    (server_id, limit)
+                ).fetchall()
+            else:
+                rows = con.execute(
+                    "SELECT id, server_id, ts, actor, action, target, detail, result "
+                    "FROM audit_log ORDER BY ts DESC LIMIT ?",
+                    (limit,)
+                ).fetchall()
+            con.close()
+        return [dict(r) for r in rows]
+
+    # ------------------------------------------------------------------
     # Retention / pruning
     # ------------------------------------------------------------------
     def prune_old(self, retention_days: int = 30):
-        """Delete rows older than retention_days. Call on startup."""
+        """Delete rows older than retention_days. Call on startup.
+        audit_log is deliberately excluded — it's a trail, not a cache."""
         cutoff = int(time.time()) - retention_days * 86400
         with self._lock:
             con = self._connect()

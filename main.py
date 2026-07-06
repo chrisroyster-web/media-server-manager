@@ -1,3 +1,4 @@
+import getpass
 import os
 import threading
 import tkinter as tk
@@ -67,6 +68,7 @@ from ui.docker_volumes_tab import DockerVolumesTab
 from ui.systemd_timers_tab import SystemdTimersTab
 from ui.watchstate_tab import WatchstateTab
 from ui.cloudflare_tab import CloudflareTab
+from ui.audit_log_tab import AuditLogTab
 from core.metrics_store import MetricsStore
 from core.scheduler import TaskScheduler
 
@@ -98,7 +100,7 @@ _TAB_NAMES = {
     54: "Sensors",     55: "Pi-hole",
     56: "Net Toolkit", 57: "Docker Volumes",
     58: "Timers",     59: "Watchstate",
-    60: "Cloudflare",
+    60: "Cloudflare",   61: "Audit Log",
 }
 
 
@@ -237,6 +239,7 @@ class MediaServerManager(tk.Tk):
         self.systemd_timers_tab    = SystemdTimersTab(self.tabs, self)     # 58
         self.watchstate_tab        = WatchstateTab(self.tabs, self)        # 59
         self.cloudflare_tab        = CloudflareTab(self.tabs, self)        # 60
+        self.audit_log_tab         = AuditLogTab(self.tabs, self)          # 61
 
         for tab in [
             self.connection_panel, self.quick_commands, self.dashboard_tab,
@@ -263,7 +266,7 @@ class MediaServerManager(tk.Tk):
             self.ports_tab, self.sensors_tab,
             self.pihole_tab, self.network_toolkit_tab,
             self.docker_volumes_tab, self.systemd_timers_tab,
-            self.watchstate_tab, self.cloudflare_tab,
+            self.watchstate_tab, self.cloudflare_tab, self.audit_log_tab,
         ]:
             self.tabs.add(tab)
 
@@ -815,6 +818,7 @@ class MediaServerManager(tk.Tk):
             58: lambda: self.systemd_timers_tab.on_show(),
             59: lambda: self.watchstate_tab.refresh(),
             60: lambda: self.cloudflare_tab.on_show(),
+            61: lambda: self.audit_log_tab.on_show(),
         }
         fn = m.get(idx)
         if fn:
@@ -887,6 +891,16 @@ class MediaServerManager(tk.Tk):
             sb.dim_item(42, "Add a Jellyfin or Emby API key in Config → Media")
 
         # ── REQUESTS ───────────────────────────────────────────────────
+        if cfg.sonarr_apikey or cfg.radarr_apikey:
+            sb.undim_item(11)   # unified Arr
+        else:
+            sb.dim_item(11, "Add a Sonarr or Radarr API key in Config → Arr / Requests")
+
+        if cfg.sabnzbd_apikey:
+            sb.undim_item(7)
+        else:
+            sb.dim_item(7, "Add a SABnzbd API key in Config → Arr / Requests")
+
         if cfg.prowlarr_apikey:
             sb.undim_item(30)
         else:
@@ -896,6 +910,11 @@ class MediaServerManager(tk.Tk):
             sb.undim_item(41)   # unified Requests
         else:
             sb.dim_item(41, "Add an Overseerr or Jellyseerr API key in Config → Arr / Requests")
+
+        if cfg.qbittorrent_host:
+            sb.undim_item(48)
+        else:
+            sb.dim_item(48, "Set the qBittorrent host in Config → Arr / Requests")
 
         # ── MONITORING ─────────────────────────────────────────────────
         if cfg.tautulli_apikey:
@@ -1032,6 +1051,20 @@ class MediaServerManager(tk.Tk):
     def set_requests_badge(self, pending_count):
         """Update the Requests sidebar button to show pending count badge."""
         self.after(0, lambda: self.sidebar.set_badge(41, pending_count))
+
+    # ---------------------------------------------------------
+    # ADMIN ACTION AUDIT LOG
+    # ---------------------------------------------------------
+    def audit_log(self, action, target, detail="", result="ok"):
+        """Record a destructive/consequential action taken through the app.
+        Call this right after the action actually runs, from any tab —
+        `self.controller` is the one thing every tab already has."""
+        try:
+            server_id = (self.config_manager.get_active_server() or {}).get("name", "default")
+            actor = getpass.getuser()
+            self.metrics_store.insert_audit(server_id, actor, action, target, detail, result)
+        except Exception:
+            pass
 
     # ---------------------------------------------------------
     # IN-APP TOAST NOTIFICATIONS

@@ -358,7 +358,11 @@ class ComposeTab(tk.Frame):
             ff  = self._compose_file_flags(config_file)
             cmd = "docker compose {} -p {} {} 2>&1".format(ff, shlex.quote(stack_name), action)
             self._append_console(card, "$ {}\n".format(cmd))
-            out, _, _ = ssh.run(cmd)
+            out, _, code = ssh.run(cmd)
+            self.controller.audit_log(
+                "compose.{}".format(action), stack_name,
+                detail=(out or "").strip()[:200],
+                result="ok" if code == 0 else "fail")
             self._append_console(card, out + "\n")
             self.after(1000, self.refresh)
 

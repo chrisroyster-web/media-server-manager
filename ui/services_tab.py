@@ -137,6 +137,11 @@ class ServicesTab(CardConsoleTab):
             elif action == "status":  result = sm.full_status(svc)
             else: return
             out, err, code = result
+            if action in ("start", "stop", "restart"):
+                self.controller.audit_log(
+                    "service.{}".format(action), svc,
+                    detail=(err or out or "").strip()[:200],
+                    result="ok" if code == 0 else "fail")
             self._log_output("{0} {1}".format(name, action), out, err, code)
             if code != 0:
                 self.after(0, lambda n=name, a=action, c=code: (

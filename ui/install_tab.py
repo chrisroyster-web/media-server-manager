@@ -518,6 +518,10 @@ class InstallTab(tk.Frame):
         elif op == "uninstall":
             ok = im.uninstall(app, self._log)
 
+        self.controller.audit_log(
+            "install.{}".format(op), name,
+            result="ok" if ok else "fail")
+
         # Re-check status after a short settle time
         settle = 8 if op in ("install", "fix", "reinstall") else 4
         time.sleep(settle)

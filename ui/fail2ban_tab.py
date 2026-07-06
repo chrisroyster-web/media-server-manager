@@ -302,6 +302,9 @@ class Fail2banTab(tk.Frame):
             self._log(f"  $ fail2ban-client set {jail} unbanip {ip}\n", "cmd")
             out, err, code = self.controller.ssh.run_sudo(
                 f"fail2ban-client set {shlex.quote(jail)} unbanip {shlex.quote(ip)}")
+            self.controller.audit_log(
+                "fail2ban.unban", ip, detail=f"jail={jail}",
+                result="ok" if code == 0 else "fail")
             if code == 0:
                 self._log(f"  ✓  {ip} unbanned from {jail}\n", "ok")
             else:

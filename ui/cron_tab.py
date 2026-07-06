@@ -569,6 +569,10 @@ class CronTab(tk.Frame):
             out, err, code = ssh.run(f"docker restart {shlex.quote(unit)} 2>&1")
         else:
             out, err, code = "", "Unknown job type", 1
+        self.controller.audit_log(
+            "cron.run", job.get("unit") or job.get("source", "job"),
+            detail=(err or out or "").strip()[:200],
+            result="ok" if code == 0 else "fail")
         self._log_result("run", out, err, code)
 
     def _do_toggle(self):
@@ -604,6 +608,10 @@ class CronTab(tk.Frame):
                 out, err, code = ssh.run(f"docker start {shlex.quote(unit)} 2>&1")
         else:
             out, err, code = "", "Unknown job type", 1
+        self.controller.audit_log(
+            "cron.toggle", job.get("unit") or job.get("source", "job"),
+            detail="disable" if currently_enabled else "enable",
+            result="ok" if code == 0 else "fail")
         self._log_result("toggle", out, err, code)
         if code == 0:
             job["enabled"] = not currently_enabled
@@ -639,6 +647,10 @@ class CronTab(tk.Frame):
             out, err, code = o1 + o2, e1 + e2, c2
         else:
             out, err, code = "", "Unknown job type", 1
+        self.controller.audit_log(
+            "cron.delete", job.get("unit") or job.get("source", "job"),
+            detail=(err or out or "").strip()[:200],
+            result="ok" if code == 0 else "fail")
         self._log_result("delete", out, err, code)
         if code == 0:
             self.after(0, self.refresh)

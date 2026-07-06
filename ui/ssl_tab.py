@@ -378,6 +378,39 @@ class SSLTab(tk.Frame):
             r.update({"status": "ok",   "days": days, "expires": expires,
                       "issuer": issuer, "sans": sans})
 
+        # This specific host:port is Emby's cert, renewed unattended on the
+        # server via certbot + a deploy hook (see RESTORE.md-adjacent
+        # rebuild-server.sh era changes) rather than the app itself — the
+        # live cert can still look "ok" for weeks after that automation has
+        # silently broken, so cross-check it here instead of waiting for
+        # the cert to actually expire.
+        emby_host = getattr(self.controller.config_manager, "emby_host", "") or ""
+        if r["host"] == emby_host and r["port"] == "8920" and r["status"] != "error":
+            self._check_certbot_automation(r)
+
+    def _check_certbot_automation(self, r):
+        ssh = self.controller.ssh
+        out, _, _ = ssh.run(
+            "systemctl is-active certbot.timer 2>/dev/null; "
+            "test -x /etc/letsencrypt/renewal-hooks/deploy/emby-cert.sh "
+            "&& echo HOOK_OK || echo HOOK_MISSING"
+        )
+        lines = (out or "").splitlines()
+        timer_active = lines[0].strip() == "active" if lines else False
+        hook_ok      = "HOOK_OK" in (lines[1] if len(lines) > 1 else "")
+
+        if timer_active and hook_ok:
+            return
+
+        problems = []
+        if not timer_active:
+            problems.append("certbot.timer inactive")
+        if not hook_ok:
+            problems.append("deploy hook missing")
+        r["sans"] = "{} ⚠ {}".format(r.get("sans", "--"), "; ".join(problems))
+        if r["status"] == "ok":
+            r["status"] = "warn"
+
     # =========================================================
     # POPULATE
     # =========================================================

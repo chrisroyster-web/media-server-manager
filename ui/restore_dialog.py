@@ -404,6 +404,10 @@ class RestoreDialog(tk.Toplevel):
             out, err, code = self.ssh.run(
                 "sudo env {env} restic restore {sid} --target / "
                 "--exclude /boot 2>&1".format(env=env, sid=shlex.quote(snap_id)))
+            self.controller.audit_log(
+                "restore.run", "snapshot {}".format(snap_id),
+                detail="host={}".format(self._confirm_host),
+                result="ok" if code == 0 else "fail")
             if code == 0:
                 self.after(0, lambda: self._log_line(
                     "Restore OK (exit {}).".format(code)))

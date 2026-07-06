@@ -219,6 +219,10 @@ class UFWTab(tk.Frame):
             self._log("$ ufw --force {}\n".format(word), "cmd")
             out, err, code = self.controller.ssh.run_sudo(
                 "ufw --force {}".format(word))
+            self.controller.audit_log(
+                "ufw.{}".format(word), "(firewall)",
+                detail=(err or out or "").strip()[:200],
+                result="ok" if code == 0 else "fail")
             if code == 0:
                 self._log("✓ {}\n".format(out.strip() or word.capitalize()+"d"), "ok")
                 self.after(600, self.refresh)
@@ -238,6 +242,10 @@ class UFWTab(tk.Frame):
             self._log("$ ufw --force delete {}\n".format(num), "cmd")
             out, err, code = self.controller.ssh.run_sudo(
                 "ufw --force delete {}".format(num))
+            self.controller.audit_log(
+                "ufw.delete_rule", "rule #{}".format(num),
+                detail=(err or out or "").strip()[:200],
+                result="ok" if code == 0 else "fail")
             if code == 0:
                 self._log("✓ Rule {} deleted\n".format(num), "ok")
                 self.after(600, self.refresh)
@@ -254,6 +262,10 @@ class UFWTab(tk.Frame):
         def _run():
             self._log("$ {}\n".format(cmd), "cmd")
             out, err, code = self.controller.ssh.run_sudo(cmd)
+            self.controller.audit_log(
+                "ufw.add_rule", cmd,
+                detail=(err or out or "").strip()[:200],
+                result="ok" if code == 0 else "fail")
             if code == 0:
                 self._log("✓ {}\n".format(out.strip() or "Rule added"), "ok")
                 self.after(600, self.refresh)

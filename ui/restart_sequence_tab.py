@@ -421,6 +421,9 @@ class RestartSequenceTab(tk.Frame):
 
         self._log(f"  STOP  {name}  →  $ {cmd}\n", "cmd")
         out, err, code = ssh.run_sudo(cmd) if itype == "service" else ssh.run(f"{cmd} 2>&1")
+        self.controller.audit_log(
+            "restart_sequence.stop", name, detail=(err or out or "").strip()[:200],
+            result="ok" if code == 0 else "fail")
         if code == 0:
             self._log(f"  ✓  {name} stopped\n", "ok")
         else:
@@ -441,6 +444,9 @@ class RestartSequenceTab(tk.Frame):
 
         self._log(f"  START {name}  →  $ {cmd}\n", "cmd")
         out, err, code = ssh.run_sudo(cmd) if itype == "service" else ssh.run(f"{cmd} 2>&1")
+        self.controller.audit_log(
+            "restart_sequence.start", name, detail=(err or out or "").strip()[:200],
+            result="ok" if code == 0 else "fail")
         if code == 0:
             self._log(f"  ✓  {name} started\n", "ok")
         else:

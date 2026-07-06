@@ -418,6 +418,11 @@ class DockerTab(CardConsoleTab):
                 return
 
             out, err, code = result
+            if action in ("start", "stop", "restart", "pull"):
+                self.controller.audit_log(
+                    "docker.{}".format(action), name,
+                    detail=(err or out or "").strip()[:200],
+                    result="ok" if code == 0 else "fail")
             self._log_output("{} {}".format(name, action), out, err, code)
             self.after(1500, self.refresh_all)
 
@@ -441,6 +446,10 @@ class DockerTab(CardConsoleTab):
 
         def worker():
             out, err, code = self.controller.docker_manager.prune_images()
+            self.controller.audit_log(
+                "docker.prune_images", "(dangling images)",
+                detail=(err or out or "").strip()[:200],
+                result="ok" if code == 0 else "fail")
             self._log_output("Prune Images", out, err, code)
             if code == 0:
                 self.after(1500, self.refresh_all)
@@ -463,6 +472,10 @@ class DockerTab(CardConsoleTab):
 
         def worker():
             out, err, code = self.controller.docker_manager.prune_volumes()
+            self.controller.audit_log(
+                "docker.prune_volumes", "(unused volumes)",
+                detail=(err or out or "").strip()[:200],
+                result="ok" if code == 0 else "fail")
             self._log_output("Prune Volumes", out, err, code)
             if code == 0:
                 self.after(1500, self.refresh_all)
