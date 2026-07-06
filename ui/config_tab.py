@@ -182,7 +182,7 @@ class ConfigTab(tk.Frame):
         self._show_btn = tk.Button(
             sab_frame, text="Show",
             command=self._toggle_key,
-            bg=t.surface, fg=t.blue,
+            bg=t.surface, fg=t.blue_bright,
             font=t.font_small, bd=0, relief="flat",
             activebackground=t.surface, activeforeground=t.text,
         )
@@ -638,7 +638,7 @@ class ConfigTab(tk.Frame):
                  font=t.font_title).pack(side="left")
         cf_help_btn = tk.Button(cf_title_row, text="?",
                                  command=self._show_cloudflare_help,
-                                 bg=t.surface_light, fg=t.blue,
+                                 bg=t.surface_light, fg=t.blue_bright,
                                  bd=0, relief="flat", font=("Segoe UI", 9, "bold"),
                                  width=2, cursor="hand2")
         cf_help_btn.pack(side="left", padx=(8, 0))
@@ -1075,7 +1075,7 @@ class ConfigTab(tk.Frame):
         footer.pack(fill="x")
 
         err_lbl = tk.Label(footer, text="", bg=t.surface_dark,
-                            fg=t.status_stopped, font=t.font_small)
+                            fg=t.status_stopped_text, font=t.font_small)
         err_lbl.pack(side="left")
 
         def _save():
@@ -1160,9 +1160,9 @@ class ConfigTab(tk.Frame):
         t = self.theme
         tk.Button(
             self.body, text=text, command=cmd,
-            bg=t.bg, fg=t.blue,
+            bg=t.bg, fg=t.blue_bright,
             font=t.font_small, bd=0, relief="flat",
-            activebackground=t.surface, activeforeground=t.blue,
+            activebackground=t.surface, activeforeground=t.blue_bright,
             cursor="hand2",
         ).pack(anchor="w", padx=16, pady=(2, 6))
 
@@ -1372,9 +1372,9 @@ class ConfigTab(tk.Frame):
         tk.Button(
             frame, text="✕",
             command=lambda r=row: self._del_row(r, self._service_rows),
-            bg=t.card_bg, fg=t.status_stopped,
+            bg=t.card_bg, fg=t.status_stopped_text,
             font=t.font_small, bd=0, relief="flat",
-            activebackground=t.surface, activeforeground=t.status_stopped,
+            activebackground=t.surface, activeforeground=t.status_stopped_text,
             cursor="hand2",
         ).grid(row=0, column=3, padx=(3, 6), pady=4)
 
@@ -1411,9 +1411,9 @@ class ConfigTab(tk.Frame):
         tk.Button(
             frame, text="✕",
             command=lambda r=row: self._del_row(r, self._docker_rows),
-            bg=t.card_bg, fg=t.status_stopped,
+            bg=t.card_bg, fg=t.status_stopped_text,
             font=t.font_small, bd=0, relief="flat",
-            activebackground=t.surface, activeforeground=t.status_stopped,
+            activebackground=t.surface, activeforeground=t.status_stopped_text,
             cursor="hand2",
         ).grid(row=0, column=3, padx=(3, 6), pady=4)
 
@@ -1436,9 +1436,9 @@ class ConfigTab(tk.Frame):
         tk.Button(
             frame, text="✕",
             command=lambda r=row: self._del_row(r, self._mount_rows),
-            bg=t.card_bg, fg=t.status_stopped,
+            bg=t.card_bg, fg=t.status_stopped_text,
             font=t.font_small, bd=0, relief="flat",
-            activebackground=t.surface, activeforeground=t.status_stopped,
+            activebackground=t.surface, activeforeground=t.status_stopped_text,
             cursor="hand2",
         ).grid(row=0, column=1, padx=(3, 6), pady=4)
 
@@ -1468,7 +1468,7 @@ class ConfigTab(tk.Frame):
         t = self.theme
         state = {"visible": False}
         btn = tk.Button(frame, text="Show", bd=0, relief="flat",
-                        bg=t.surface, fg=t.blue,
+                        bg=t.surface, fg=t.blue_bright,
                         font=t.font_small, cursor="hand2",
                         activebackground=t.surface, activeforeground=t.text)
         def _toggle():
@@ -1730,14 +1730,14 @@ class ConfigTab(tk.Frame):
             parent,
             text="Test Connection",
             command=command,
-            bg=t.surface_light, fg=t.blue,
+            bg=t.surface_light, fg=t.blue_bright,
             bd=0, relief="flat",
             font=t.font_small, padx=10, pady=4,
             cursor="hand2",
         )
         btn.grid(row=row, column=0, sticky="w", pady=(8, 2))
         btn.bind("<Enter>", lambda e: btn.configure(fg=t.blue_bright))
-        btn.bind("<Leave>", lambda e: btn.configure(fg=t.blue))
+        btn.bind("<Leave>", lambda e: btn.configure(fg=t.blue_bright))
 
         result_lbl = tk.Label(
             parent, text="",
@@ -2077,7 +2077,7 @@ class ConfigTab(tk.Frame):
             tk.Label(body, text=perm, bg=t.bg, fg=t.text,
                      font=t.font_small).grid(row=row_i, column=0, sticky="w", pady=2)
             level_lbl = tk.Label(body, text=level,
-                                 bg=t.surface, fg=t.blue,
+                                 bg=t.surface, fg=t.blue_bright,
                                  font=t.font_mono, padx=6, pady=2,
                                  highlightbackground=t.card_border, highlightthickness=1)
             level_lbl.grid(row=row_i, column=1, sticky="w", padx=(10, 10), pady=2)

@@ -479,7 +479,7 @@ class ComposeTab(tk.Frame):
                     else:
                         status_lbl.config(
                             text="Save failed: {}".format((err or "unknown error")[:120]),
-                            fg=t.status_stopped)
+                            fg=t.status_stopped_text)
                 self.after(0, _done)
 
             threading.Thread(target=_worker, daemon=True).start()
@@ -505,7 +505,7 @@ class ComposeTab(tk.Frame):
         lbl = tk.Label(
             self._body, text=msg,
             bg=self.theme.bg,
-            fg=self.theme.status_stopped if error else self.theme.text_muted,
+            fg=self.theme.status_stopped_text if error else self.theme.text_muted,
             font=self.theme.font_regular, justify="center",
         )
         lbl.pack(pady=40)

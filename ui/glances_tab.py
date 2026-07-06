@@ -183,7 +183,7 @@ class GlancesTab(tk.Frame):
         ]
         self._proc_tree = self._make_tree(self._tab_procs, cols, "GL.Proc")
         t = self.theme
-        self._proc_tree.tag_configure("high_cpu", foreground=t.status_stopped)
+        self._proc_tree.tag_configure("high_cpu", foreground=t.status_stopped_text)
         self._proc_tree.tag_configure("mid_cpu",  foreground=t.yellow)
 
     def _build_fs_tab(self):
@@ -198,7 +198,7 @@ class GlancesTab(tk.Frame):
         self._fs_tree = self._make_tree(self._tab_fs, cols, "GL.FS")
         t = self.theme
         self._fs_tree.tag_configure("warn",  foreground=t.yellow)
-        self._fs_tree.tag_configure("crit",  foreground=t.status_stopped)
+        self._fs_tree.tag_configure("crit",  foreground=t.status_stopped_text)
 
     def _build_net_tab(self):
         cols = [
@@ -265,7 +265,7 @@ class GlancesTab(tk.Frame):
         except Exception as e:
             self.after(0, lambda err=str(e): self._status.config(
                 text="Cannot reach Glances: {}".format(err),
-                bg=self.theme.surface_dark, fg=self.theme.status_stopped))
+                bg=self.theme.surface_dark, fg=self.theme.status_stopped_text))
             return
         finally:
             self._fetching = False

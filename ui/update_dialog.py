@@ -195,13 +195,13 @@ class UpdateDialog(tk.Toplevel):
 
     def _show_update_available(self, tag, notes, has_installer):
         t = self.theme
-        self._icon_lbl.config(text="↑", fg=t.blue)
+        self._icon_lbl.config(text="↑", fg=t.blue_bright)
         self._headline.config(
             text="v{} is available".format(tag.lstrip("v")),
-            fg=t.blue)
+            fg=t.blue_bright)
         self._subline.config(
             text="You're running v{}.".format(self._current_ver()))
-        self._state_badge.config(text="Update available", fg=t.blue)
+        self._state_badge.config(text="Update available", fg=t.blue_bright)
 
         # Show release notes
         self._notes_txt.configure(state="normal")
@@ -229,9 +229,9 @@ class UpdateDialog(tk.Toplevel):
             self._asset.get("size", 0) / 1_048_576))
 
     def _show_error(self, msg):
-        self._icon_lbl.config(text="✗", fg=self.theme.status_stopped)
+        self._icon_lbl.config(text="✗", fg=self.theme.status_stopped_text)
         self._headline.config(text="Update check failed")
-        self._subline.config(text=msg, fg=self.theme.status_stopped)
+        self._subline.config(text=msg, fg=self.theme.status_stopped_text)
         self._status_lbl.config(text=msg)
         self._action_btn.config(text="Retry",
                                  command=self._retry,

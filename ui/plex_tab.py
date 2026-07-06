@@ -263,7 +263,7 @@ class PlexTab(tk.Frame):
         info = tk.Frame(card, bg=t.card_bg)
         info.pack(fill="x", padx=12, pady=2)
         tk.Label(info, text="\U0001f464 {}".format(user),
-                 bg=t.card_bg, fg=t.blue, font=t.font_small).pack(side="left", padx=(0, 16))
+                 bg=t.card_bg, fg=t.blue_bright, font=t.font_small).pack(side="left", padx=(0, 16))
         tk.Label(info, text="\U0001f4bb {}".format(player),
                  bg=t.card_bg, fg=t.text_muted, font=t.font_small).pack(side="left", padx=(0, 16))
         tk.Label(info, text=state.title(),
@@ -443,5 +443,5 @@ class PlexTab(tk.Frame):
         for w in self._session_frame.winfo_children():
             w.destroy()
         tk.Label(self._session_frame, text=msg,
-                 bg=self.theme.bg, fg=self.theme.status_stopped,
+                 bg=self.theme.bg, fg=self.theme.status_stopped_text,
                  font=self.theme.font_regular).pack(pady=40)

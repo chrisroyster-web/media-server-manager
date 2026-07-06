@@ -141,7 +141,7 @@ class CloudflareTab(tk.Frame):
             self._evt_tree.heading(col, text=hdr_txt, anchor="w")
             self._evt_tree.column(col, width=w, minwidth=40, anchor="w",
                                   stretch=(col == "path"))
-        self._evt_tree.tag_configure("block",     foreground=t.status_stopped)
+        self._evt_tree.tag_configure("block",     foreground=t.status_stopped_text)
         self._evt_tree.tag_configure("challenge", foreground=t.yellow)
         self._evt_tree.tag_configure("other",     foreground=t.text_muted)
         evsb = ttk.Scrollbar(evt_tree_fr, orient="vertical", command=self._evt_tree.yview)
@@ -173,7 +173,7 @@ class CloudflareTab(tk.Frame):
             self._tun_tree.column(col, width=w, minwidth=40, anchor="w",
                                   stretch=(col == "name"))
         self._tun_tree.tag_configure("healthy",  foreground=t.status_running)
-        self._tun_tree.tag_configure("down",     foreground=t.status_stopped)
+        self._tun_tree.tag_configure("down",     foreground=t.status_stopped_text)
         self._tun_tree.tag_configure("degraded", foreground=t.yellow)
         tusb = ttk.Scrollbar(tun_tree_fr, orient="vertical", command=self._tun_tree.yview)
         self._tun_tree.configure(yscrollcommand=tusb.set)
@@ -243,7 +243,7 @@ class CloudflareTab(tk.Frame):
     def _fail(self, msg):
         self._fetching = False
         self._refresh_btn.config(state="normal")
-        self._status.config(text=msg, bg=self.theme.surface_dark, fg=self.theme.status_stopped)
+        self._status.config(text=msg, bg=self.theme.surface_dark, fg=self.theme.status_stopped_text)
 
     def _populate(self, events_unavailable, tunnels_unavailable):
         t = self.theme
@@ -322,7 +322,7 @@ class CloudflareTab(tk.Frame):
     def _sync_dynamic_ip(self):
         if not self.controller.ssh.connected:
             self._status.config(text="Not connected to server — can't detect current IP",
-                                bg=self.theme.surface_dark, fg=self.theme.status_stopped)
+                                bg=self.theme.surface_dark, fg=self.theme.status_stopped_text)
             return
         self._sync_btn.config(state="disabled", text="Checking…")
         threading.Thread(target=self._do_sync_check, daemon=True).start()
@@ -335,7 +335,7 @@ class CloudflareTab(tk.Frame):
         if code != 0 or not current_ip:
             self.after(0, lambda: self._status.config(
                 text="Could not detect the server's current public IP",
-                bg=self.theme.surface_dark, fg=self.theme.status_stopped))
+                bg=self.theme.surface_dark, fg=self.theme.status_stopped_text))
             return
 
         stale = [(r, current_ip) for r in self._records
@@ -374,7 +374,7 @@ class CloudflareTab(tk.Frame):
             if errors:
                 self.after(0, lambda: self._status.config(
                     text="Some updates failed — " + "; ".join(errors)[:150],
-                    bg=self.theme.surface_dark, fg=self.theme.status_stopped))
+                    bg=self.theme.surface_dark, fg=self.theme.status_stopped_text))
             else:
                 self.after(0, lambda: self._status.config(
                     text="Updated {} record(s)".format(len(changes)),
@@ -405,7 +405,7 @@ class CloudflareTab(tk.Frame):
             except Exception as e:
                 self.after(0, lambda err=str(e): self._status.config(
                     text="Purge failed: {}".format(err), bg=self.theme.surface_dark,
-                    fg=self.theme.status_stopped))
+                    fg=self.theme.status_stopped_text))
             finally:
                 self.after(0, lambda: self._purge_btn.config(state="normal", text="🗑 Purge Cache"))
 

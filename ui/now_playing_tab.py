@@ -363,7 +363,7 @@ class NowPlayingTab(tk.Frame):
         elif not sessions and errors:
             tk.Label(self._session_frame,
                      text="\n".join(errors),
-                     bg=self.theme.bg, fg=self.theme.status_stopped,
+                     bg=self.theme.bg, fg=self.theme.status_stopped_text,
                      font=self.theme.font_small).pack(pady=20)
         else:
             for s in sorted(sessions, key=lambda x: (x["server"], x["user"])):
@@ -422,7 +422,7 @@ class NowPlayingTab(tk.Frame):
         info = tk.Frame(card, bg=t.card_bg)
         info.pack(fill="x", padx=12, pady=2)
         tk.Label(info, text="\U0001f464 {}".format(s["user"]),
-                 bg=t.card_bg, fg=t.blue, font=t.font_small).pack(side="left", padx=(0, 16))
+                 bg=t.card_bg, fg=t.blue_bright, font=t.font_small).pack(side="left", padx=(0, 16))
         tk.Label(info, text="\U0001f4bb {}".format(s["device"]),
                  bg=t.card_bg, fg=t.text_muted, font=t.font_small).pack(side="left", padx=(0, 16))
         tk.Label(info, text=state.title(),
@@ -469,7 +469,7 @@ class NowPlayingTab(tk.Frame):
         if s.get("can_message"):
             msg_btn = tk.Button(btn_row, text="Message",
                                 command=lambda ss=s: self._message_dialog(ss),
-                                bg=t.surface_light, fg=t.blue,
+                                bg=t.surface_light, fg=t.blue_bright,
                                 bd=0, relief="flat", font=t.font_small,
                                 padx=10, pady=2, cursor="hand2")
             msg_btn.pack(side="left")
@@ -516,7 +516,7 @@ class NowPlayingTab(tk.Frame):
                 self.after(2000, self._fetch)
             except Exception as e:
                 self.after(0, lambda err=str(e): self._status_lbl.config(
-                    text="Kick failed: " + err[:60], fg=self.theme.status_stopped))
+                    text="Kick failed: " + err[:60], fg=self.theme.status_stopped_text))
         threading.Thread(target=worker, daemon=True).start()
 
     def _message_dialog(self, s):

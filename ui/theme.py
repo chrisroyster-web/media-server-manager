@@ -21,7 +21,7 @@ class Theme:
         card_bg="#2d2d2d", card_border="#3d3d3d",
         glass_accent="#2d2d2d", glass_shimmer="#383838",
         text="#f3f3f3", text_secondary="#d0d0d0",
-        text_muted="#9e9e9e", text_dim="#6e6e6e",
+        text_muted="#9e9e9e", text_dim="#8a8a8a",
         sidebar_icon="#c8c8c8", sidebar_icon_hover="#ffffff",
         sidebar_icon_active="#ffffff", sidebar_active_bg="#0078d4",
         sidebar_active_bar="#0078d4", sidebar_section_text="#808080",
@@ -39,7 +39,7 @@ class Theme:
         card_bg="#ffffff", card_border="#d8d8d8",
         glass_accent="#ffffff", glass_shimmer="#f0f0f0",
         text="#1a1a1a", text_secondary="#3d3d3d",
-        text_muted="#666666", text_dim="#999999",
+        text_muted="#666666", text_dim="#6e6e6e",
         sidebar_icon="#c8c8c8", sidebar_icon_hover="#ffffff",
         sidebar_icon_active="#ffffff", sidebar_active_bg="#0078d4",
         sidebar_active_bar="#0078d4", sidebar_section_text="#888888",
@@ -104,9 +104,22 @@ class Theme:
         self.accent      = self.blue
 
         # ── Status colors ─────────────────────────────────────────────
-        self.status_running = "#57a300"   # Office green
-        self.status_stopped = "#d13438"   # Office red
+        # status_running was previously a fixed "#57a300" in both modes —
+        # fine against a dark background (5.15:1) but only 2.85:1 against
+        # light mode's near-white bg, well under WCAG's 4.5:1 for normal
+        # text. console_success/console_error already carry correctly
+        # tuned per-mode shades of the same two hues (they were only ever
+        # wired to console output), so status colors now reuse them
+        # instead of inventing new values.
+        self.status_running = palette["console_success"]
+        self.status_stopped = "#d13438"   # Office red — fine for dots/borders/cards (3.3:1 dark, 4.44:1 light; WCAG's large-text/UI threshold is 3:1)
         self.status_unknown = "#767676"
+
+        # Text-only variant: status_stopped is used as small fg=/foreground=
+        # text (88 sites) far more than as a dot/fill/border color, and at
+        # that size 3.3:1 isn't enough. console_error is the same red hue
+        # already tuned for legibility at text size in both modes.
+        self.status_stopped_text = palette["console_error"]
 
         self.glow_green = "#57a300"
         self.glow_blue  = "#0078d4"

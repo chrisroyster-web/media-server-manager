@@ -131,7 +131,7 @@ class JellyfinUsersTab(tk.Frame):
         self._action_frame.pack(fill="x", padx=16, pady=(0, 12))
 
         self._sel_lbl = tk.Label(self._action_frame, text="",
-                                  bg=t.surface_dark, fg=t.blue,
+                                  bg=t.surface_dark, fg=t.blue_bright,
                                   font=("Segoe UI Semibold", 10), padx=12, pady=8)
         self._sel_lbl.pack(side="left")
 
@@ -310,7 +310,7 @@ class JellyfinUsersTab(tk.Frame):
                            ("20 Mbps", "20"), ("40 Mbps", "40")]:
             tk.Button(presets_frame, text=label,
                       command=lambda v=val: var.set(v),
-                      bg=t.surface_dark, fg=t.blue, bd=0, relief="flat",
+                      bg=t.surface_dark, fg=t.blue_bright, bd=0, relief="flat",
                       font=t.font_small, padx=8, pady=2, cursor="hand2"
                       ).pack(side="left", padx=2)
 
@@ -339,7 +339,7 @@ class JellyfinUsersTab(tk.Frame):
                     self.after(0, dlg.destroy)
                 except Exception as e:
                     self.after(0, lambda err=str(e): status_lbl.config(
-                        text="Failed: " + err[:60], fg=t.status_stopped))
+                        text="Failed: " + err[:60], fg=t.status_stopped_text))
                     self.after(0, lambda: apply_btn.config(state="normal"))
             threading.Thread(target=worker, daemon=True).start()
 
@@ -435,7 +435,7 @@ class JellyfinUsersTab(tk.Frame):
                     self.after(0, dlg.destroy)
                 except Exception as e:
                     self.after(0, lambda err=str(e): status_lbl.config(
-                        text="Failed: " + err[:70], fg=t.status_stopped))
+                        text="Failed: " + err[:70], fg=t.status_stopped_text))
                     self.after(0, lambda: create_btn.config(state="normal"))
             threading.Thread(target=worker, daemon=True).start()
 

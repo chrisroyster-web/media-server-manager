@@ -154,7 +154,7 @@ class Fail2banTab(tk.Frame):
 
         self._console.tag_configure("cmd",   foreground=t.cyan)
         self._console.tag_configure("ok",    foreground=t.status_running)
-        self._console.tag_configure("error", foreground=t.status_stopped)
+        self._console.tag_configure("error", foreground=t.status_stopped_text)
         self._console.tag_configure("warn",  foreground=t.yellow)
 
     # ──────────────────────────────────────────────────────────────────────
@@ -249,7 +249,7 @@ class Fail2banTab(tk.Frame):
         self._ip_title.config(text="BANNED IPs")
 
         t = self.theme
-        self._jail_tree.tag_configure("active",   foreground=t.status_stopped)
+        self._jail_tree.tag_configure("active",   foreground=t.status_stopped_text)
         self._jail_tree.tag_configure("inactive", foreground=t.text_muted)
 
         for jail, data in sorted(self._jails.items()):

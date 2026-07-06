@@ -124,7 +124,7 @@ class Sidebar(tk.Frame):
         self._icon_lbl = tk.Label(
             logo_frame,
             text="\U0001f5a5",
-            bg=t.sidebar_bg, fg=t.blue,
+            bg=t.sidebar_bg, fg=t.blue_bright,
             font=("Segoe UI", 16),
         )
         self._icon_lbl.pack(side="left", padx=(14, 4), pady=14)

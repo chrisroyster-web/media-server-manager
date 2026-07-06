@@ -112,7 +112,7 @@ class UptimeKumaTab(tk.Frame):
                               anchor=anch, stretch=(col == "url"))
 
         self._tree.tag_configure("up",          foreground=t.status_running)
-        self._tree.tag_configure("down",        foreground=t.status_stopped)
+        self._tree.tag_configure("down",        foreground=t.status_stopped_text)
         self._tree.tag_configure("pending",     foreground=t.yellow)
         self._tree.tag_configure("maintenance", foreground=t.cyan)
         self._tree.tag_configure("group",
@@ -174,7 +174,7 @@ class UptimeKumaTab(tk.Frame):
         except Exception as e:
             self.after(0, lambda err=str(e): self._status.config(
                 text="Cannot reach Uptime Kuma: {}".format(err),
-                bg=self.theme.surface_dark, fg=self.theme.status_stopped))
+                bg=self.theme.surface_dark, fg=self.theme.status_stopped_text))
             return
         finally:
             self._fetching = False
@@ -277,7 +277,7 @@ class UptimeKumaTab(tk.Frame):
             fg=t.status_running if n_up else t.text_muted)
         self._card_down.config(
             text=str(n_down),
-            fg=t.status_stopped if n_down else t.text_muted)
+            fg=t.status_stopped_text if n_down else t.text_muted)
         self._card_maintenance.config(
             text=str(n_maint),
             fg=t.yellow if n_maint else t.text_muted)

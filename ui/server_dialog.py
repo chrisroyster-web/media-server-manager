@@ -128,7 +128,7 @@ class ServerDialog(tk.Toplevel):
         host = self._host_var.get().strip()
         if not host:
             self._status.config(text="Host is required.",
-                                fg=self.theme.status_stopped)
+                                fg=self.theme.status_stopped_text)
             return None
         return {
             "name":     self._name_var.get().strip() or host,

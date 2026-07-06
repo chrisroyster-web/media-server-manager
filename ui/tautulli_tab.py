@@ -230,7 +230,7 @@ class TautulliTab(tk.Frame):
             except Exception as e:
                 self.after(0, lambda err=str(e): self._status.config(
                     text="Cannot reach Tautulli: {}".format(err),
-                    bg=self.theme.surface_dark, fg=self.theme.status_stopped))
+                    bg=self.theme.surface_dark, fg=self.theme.status_stopped_text))
                 return
 
             try:

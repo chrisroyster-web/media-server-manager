@@ -105,7 +105,7 @@ class SFTPTab(tk.Frame):
         refresh_btn = tk.Button(nav, text="⟳ Refresh",
                                  command=self._refresh,
                                  font=t.font_small, bd=0, relief="flat",
-                                 bg=t.surface, fg=t.blue,
+                                 bg=t.surface, fg=t.blue_bright,
                                  activebackground=t.surface_light)
         refresh_btn.pack(side="left")
 

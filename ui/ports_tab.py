@@ -125,7 +125,7 @@ class PortsTab(tk.Frame):
         if not self.controller.ssh.connected:
             self._status.config(text="Not connected",
                                 bg=self.theme.surface_dark,
-                                fg=self.theme.status_stopped)
+                                fg=self.theme.status_stopped_text)
             return
         self._status.config(text="Scanning ports…",
                             bg=self.theme.blue, fg="#ffffff")
@@ -149,7 +149,7 @@ class PortsTab(tk.Frame):
             self.after(0, lambda: self._status.config(
                 text="Error: {}".format(msg),
                 bg=self.theme.surface_dark,
-                fg=self.theme.status_stopped))
+                fg=self.theme.status_stopped_text))
         finally:
             self._fetching = False
 

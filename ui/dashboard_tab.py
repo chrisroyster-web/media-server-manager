@@ -310,7 +310,7 @@ class DashboardTab(tk.Frame):
         self.storage_tree.tag_configure("even", background=t.card_bg,      foreground=t.text)
         self.storage_tree.tag_configure("ok",   foreground=t.status_running)
         self.storage_tree.tag_configure("warn", foreground=t.yellow)
-        self.storage_tree.tag_configure("crit", foreground=t.status_stopped)
+        self.storage_tree.tag_configure("crit", foreground=t.status_stopped_text)
         self.storage_tree.pack(fill="x")
         self.storage_rows = {}   # mount -> iid
         for idx, mount in enumerate(mounts):
@@ -981,7 +981,7 @@ class DashboardTab(tk.Frame):
             self.after(0, lambda: self.card_svc_running.config(text=str(running)))
             self.after(0, lambda: self.card_svc_stopped.config(
                 text=str(stopped),
-                fg=self.theme.status_stopped if stopped else self.theme.status_running))
+                fg=self.theme.status_stopped_text if stopped else self.theme.status_running))
 
             # -- Top Processes --
             out, _, _ = ssh.run(

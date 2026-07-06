@@ -89,7 +89,7 @@ class SmartTab(tk.Frame):
 
         self.tree.tag_configure("good",    foreground=t.status_running)
         self.tree.tag_configure("warn",    foreground=t.yellow)
-        self.tree.tag_configure("bad",     foreground=t.status_stopped)
+        self.tree.tag_configure("bad",     foreground=t.status_stopped_text)
         self.tree.tag_configure("unknown", foreground=t.text_muted)
         self.tree.tag_configure("odd",     background=t.surface_dark, foreground=t.text)
         self.tree.tag_configure("even",    background=t.card_bg,      foreground=t.text)

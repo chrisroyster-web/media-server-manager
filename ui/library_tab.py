@@ -233,7 +233,7 @@ class LibraryTab(tk.Frame):
         self._more_frame.pack(fill="x", padx=16)
         self._more_btn = tk.Button(self._more_frame, text="Load More…",
                                     command=self._load_more,
-                                    bg=t.surface_light, fg=t.blue,
+                                    bg=t.surface_light, fg=t.blue_bright,
                                     bd=0, relief="flat", font=t.font_small,
                                     padx=14, pady=4, cursor="hand2")
 

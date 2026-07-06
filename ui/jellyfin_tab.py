@@ -259,7 +259,7 @@ class JellyfinTab(tk.Frame):
         info = tk.Frame(card, bg=t.card_bg)
         info.pack(fill="x", padx=12, pady=2)
         tk.Label(info, text="\U0001f464 {}".format(username),
-                 bg=t.card_bg, fg=t.blue, font=t.font_small).pack(side="left", padx=(0, 16))
+                 bg=t.card_bg, fg=t.blue_bright, font=t.font_small).pack(side="left", padx=(0, 16))
         tk.Label(info, text="\U0001f4bb {}".format(device),
                  bg=t.card_bg, fg=t.text_muted, font=t.font_small).pack(side="left", padx=(0, 16))
         tk.Label(info, text=client,
@@ -299,7 +299,7 @@ class JellyfinTab(tk.Frame):
 
         msg_btn = tk.Button(btn_row, text="Message",
                             command=lambda sid=session_id: self._message_session(sid),
-                            bg=t.surface_light, fg=t.blue,
+                            bg=t.surface_light, fg=t.blue_bright,
                             bd=0, relief="flat", font=t.font_small,
                             padx=10, pady=2, cursor="hand2")
         msg_btn.pack(side="left")
@@ -472,5 +472,5 @@ class JellyfinTab(tk.Frame):
         for w in self._session_frame.winfo_children():
             w.destroy()
         tk.Label(self._session_frame, text=msg,
-                 bg=self.theme.bg, fg=self.theme.status_stopped,
+                 bg=self.theme.bg, fg=self.theme.status_stopped_text,
                  font=self.theme.font_regular).pack(pady=40)

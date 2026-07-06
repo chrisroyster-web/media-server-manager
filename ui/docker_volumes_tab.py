@@ -178,7 +178,7 @@ class DockerVolumesTab(tk.Frame):
         self._console.pack(fill="x", padx=6, pady=(0, 4))
         self._console.tag_configure("cmd", foreground=t.cyan)
         self._console.tag_configure("ok",  foreground=t.status_running)
-        self._console.tag_configure("err", foreground=t.status_stopped)
+        self._console.tag_configure("err", foreground=t.status_stopped_text)
 
         # Status bar
         self._status = tk.Label(self, text="Connect to server to view volumes",
@@ -196,7 +196,7 @@ class DockerVolumesTab(tk.Frame):
         if not self.controller.ssh.connected:
             self._status.config(text="Not connected",
                                 bg=self.theme.surface_dark,
-                                fg=self.theme.status_stopped)
+                                fg=self.theme.status_stopped_text)
             return
         self._status.config(text="Loading…",
                             bg=self.theme.blue, fg="#ffffff")
@@ -285,7 +285,7 @@ class DockerVolumesTab(tk.Frame):
             self.after(0, lambda: self._status.config(
                 text="Error: {}".format(msg),
                 bg=self.theme.surface_dark,
-                fg=self.theme.status_stopped))
+                fg=self.theme.status_stopped_text))
         finally:
             self._fetching = False
 

@@ -84,7 +84,7 @@ class StorageHealthTab(tk.Frame):
                                    anchor="w", stretch=(col in ("name", "info")))
         self._pool_tree.tag_configure("healthy",  foreground=t.status_running)
         self._pool_tree.tag_configure("degraded", foreground=t.yellow)
-        self._pool_tree.tag_configure("faulted",  foreground=t.status_stopped)
+        self._pool_tree.tag_configure("faulted",  foreground=t.status_stopped_text)
         self._pool_tree.tag_configure("unknown",  foreground=t.text_muted)
         self._pool_tree.pack(fill="x")
         self._pool_tree.bind("<<TreeviewSelect>>", self._on_select)
@@ -295,7 +295,7 @@ class StorageHealthTab(tk.Frame):
             fg=self.theme.yellow if degraded else self.theme.text_muted)
         self._card_faulted.config(
             text=str(faulted),
-            fg=self.theme.status_stopped if faulted else self.theme.text_muted)
+            fg=self.theme.status_stopped_text if faulted else self.theme.text_muted)
         self._card_type.config(text=fs_type)
 
         self._pool_tree.delete(*self._pool_tree.get_children())

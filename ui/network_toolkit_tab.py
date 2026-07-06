@@ -161,9 +161,9 @@ class NetworkToolkitTab(tk.Frame):
 
         self._output.tag_configure("cmd",     foreground=t.cyan)
         self._output.tag_configure("ok",      foreground=t.status_running)
-        self._output.tag_configure("err",     foreground=t.status_stopped)
+        self._output.tag_configure("err",     foreground=t.status_stopped_text)
         self._output.tag_configure("warn",    foreground=t.yellow)
-        self._output.tag_configure("header",  foreground=t.blue)
+        self._output.tag_configure("header",  foreground=t.blue_bright)
 
         # Status bar
         self._status = tk.Label(self, text="Connect to server to use toolkit",
@@ -198,7 +198,7 @@ class NetworkToolkitTab(tk.Frame):
         if not self.controller.ssh.connected:
             self._status.config(text="Not connected to SSH",
                                 bg=self.theme.surface_dark,
-                                fg=self.theme.status_stopped)
+                                fg=self.theme.status_stopped_text)
             return
         label = self._tool_var.get()
         tid   = self._tool_map.get(label, "ping")
@@ -269,7 +269,7 @@ class NetworkToolkitTab(tk.Frame):
             self.after(0, lambda err=str(e): self._status.config(
                 text="Error: {}".format(err),
                 bg=self.theme.surface_dark,
-                fg=self.theme.status_stopped))
+                fg=self.theme.status_stopped_text))
         finally:
             self._running = False
             self.after(0, lambda: self._run_btn.config(state="normal"))

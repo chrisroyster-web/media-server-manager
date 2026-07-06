@@ -100,7 +100,7 @@ class SSLTab(tk.Frame):
 
         self._tree.tag_configure("ok",   foreground=t.status_running)
         self._tree.tag_configure("warn", foreground=t.yellow)
-        self._tree.tag_configure("crit", foreground=t.status_stopped)
+        self._tree.tag_configure("crit", foreground=t.status_stopped_text)
         self._tree.tag_configure("err",  foreground=t.text_muted)
 
         vsb = ttk.Scrollbar(tbl_frame, orient="vertical", command=self._tree.yview)
@@ -424,9 +424,9 @@ class SSLTab(tk.Frame):
         self._card_warn.config(text=str(warn),
                                fg=self.theme.yellow if warn else self.theme.text_muted)
         self._card_crit.config(text=str(crit),
-                               fg=self.theme.status_stopped if crit else self.theme.text_muted)
+                               fg=self.theme.status_stopped_text if crit else self.theme.text_muted)
         self._card_err.config(text=str(err),
-                              fg=self.theme.status_stopped if err else self.theme.text_muted)
+                              fg=self.theme.status_stopped_text if err else self.theme.text_muted)
 
         self._tree.delete(*self._tree.get_children())
         for r in sorted(self._results,

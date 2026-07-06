@@ -1353,7 +1353,7 @@ class MediaServerManager(tk.Tk):
             row_i += 1
             for key, desc in items:
                 key_lbl = tk.Label(body, text=key,
-                                   bg=t.surface, fg=t.blue,
+                                   bg=t.surface, fg=t.blue_bright,
                                    font=t.font_mono, padx=8, pady=3,
                                    relief="flat",
                                    highlightbackground=t.card_border,
@@ -1399,7 +1399,7 @@ class MediaServerManager(tk.Tk):
         body = tk.Frame(win, bg=t.bg, padx=44, pady=28)
         body.pack(fill="both", expand=True)
 
-        tk.Label(body, text="\U0001f5a5", bg=t.bg, fg=t.blue,
+        tk.Label(body, text="\U0001f5a5", bg=t.bg, fg=t.blue_bright,
                  font=("Segoe UI", 40)).pack()
         tk.Label(body, text="All Clear Server Services", bg=t.bg, fg=t.text,
                  font=("Segoe UI Semibold", 16)).pack(pady=(10, 2))

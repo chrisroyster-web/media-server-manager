@@ -111,7 +111,7 @@ class SensorsTab(tk.Frame):
         if not self.controller.ssh.connected:
             self._status.config(text="Not connected",
                                 bg=self.theme.surface_dark,
-                                fg=self.theme.status_stopped)
+                                fg=self.theme.status_stopped_text)
             return
         self._status.config(text="Reading sensors…",
                             bg=self.theme.blue, fg="#ffffff")
@@ -191,7 +191,7 @@ class SensorsTab(tk.Frame):
             self.after(0, lambda: self._status.config(
                 text="Could not read sensor data: {}".format(msg),
                 bg=self.theme.surface_dark,
-                fg=self.theme.status_stopped))
+                fg=self.theme.status_stopped_text))
             self.after(0, self._rc.schedule)
         finally:
             self._fetching = False

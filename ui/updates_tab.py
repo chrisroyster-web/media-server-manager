@@ -51,7 +51,7 @@ class UpdatesTab(tk.Frame):
         self._dist_btn = tk.Button(apt_hdr, text="⬆⬆ Full Upgrade (dist)",
                                     command=lambda: self._run_upgrade(dist=True))
         t.style_button(self._dist_btn)
-        self._dist_btn.configure(fg=t.status_stopped)
+        self._dist_btn.configure(fg=t.status_stopped_text)
         self._dist_btn.pack(side="right", padx=(0, 6))
 
         self._upgrade_btn = tk.Button(apt_hdr, text="⬆  Run apt upgrade",
@@ -102,7 +102,7 @@ class UpdatesTab(tk.Frame):
         self._console.pack(fill="x", padx=16, pady=(0, 4))
         self._console.tag_config("ok",   foreground=t.status_running)
         self._console.tag_config("warn", foreground=t.yellow)
-        self._console.tag_config("err",  foreground=t.status_stopped)
+        self._console.tag_config("err",  foreground=t.status_stopped_text)
 
         # Status bar
         self._status_lbl = tk.Label(self, text="Not connected",

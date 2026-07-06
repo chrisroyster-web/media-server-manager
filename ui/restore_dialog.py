@@ -63,7 +63,7 @@ class RestoreDialog(tk.Toplevel):
         tk.Label(outer,
                  text="Only ever run this against a freshly-installed server "
                       "you intend to fully overwrite. It cannot be undone.",
-                 bg=t.bg, fg=t.status_stopped, font=t.font_small,
+                 bg=t.bg, fg=t.status_stopped_text, font=t.font_small,
                  wraplength=440, justify="left").pack(anchor="w", pady=(2, 12))
 
         # ── Safety check ───────────────────────────────────────────
@@ -72,7 +72,7 @@ class RestoreDialog(tk.Toplevel):
         tk.Label(safety, text="1. Safety check", bg=t.surface, fg=t.text,
                  font=t.font_regular).pack(anchor="w")
         self._safety_lbl = tk.Label(safety, text="Checking…",
-                                    bg=t.surface, fg=t.blue,
+                                    bg=t.surface, fg=t.blue_bright,
                                     font=t.font_small, wraplength=420,
                                     justify="left")
         self._safety_lbl.pack(anchor="w", pady=(4, 0))
@@ -211,7 +211,7 @@ class RestoreDialog(tk.Toplevel):
                 text="REFUSED: this server already has backup.sh or "
                      "full-system-backup.sh deployed — it does not look like "
                      "a fresh install. Restore blocked for safety.",
-                fg=t.status_stopped)
+                fg=t.status_stopped_text)
             self._log_line("Safety check FAILED — target already configured.")
             return
 
@@ -238,7 +238,7 @@ class RestoreDialog(tk.Toplevel):
             return
 
         self._mount_btn.config(state="disabled")
-        self._mount_status.config(text="Mounting…", fg=self.theme.blue)
+        self._mount_status.config(text="Mounting…", fg=self.theme.blue_bright)
 
         def worker():
             cmd = (
@@ -267,7 +267,7 @@ class RestoreDialog(tk.Toplevel):
         if not ok:
             self._mount_status.config(
                 text="Mount failed: {}".format((err or out or "unknown error").strip()[:150]),
-                fg=t.status_stopped)
+                fg=t.status_stopped_text)
             self._log_line("NAS mount FAILED.")
             return
         self._mounted = True

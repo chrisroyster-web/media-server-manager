@@ -294,7 +294,7 @@ class NetdataTab(tk.Frame):
         except Exception as e:
             self.after(0, lambda err=str(e): self._status.config(
                 text="Cannot reach Netdata: {}".format(err),
-                bg=self.theme.surface_dark, fg=self.theme.status_stopped))
+                bg=self.theme.surface_dark, fg=self.theme.status_stopped_text))
             return
         finally:
             self._fetching = False
@@ -315,10 +315,10 @@ class NetdataTab(tk.Frame):
 
         # Cards
         self._c_cpu.config(text="{:.1f}%".format(cpu_pct),
-                           fg=t.status_stopped if cpu_pct > 90 else
+                           fg=t.status_stopped_text if cpu_pct > 90 else
                               t.yellow         if cpu_pct > 70 else t.status_running)
         self._c_ram.config(text="{:.1f}%".format(ram_pct),
-                           fg=t.status_stopped if ram_pct > 90 else
+                           fg=t.status_stopped_text if ram_pct > 90 else
                               t.yellow         if ram_pct > 70 else t.status_running)
         self._c_disk.config(text=p["dio_str"])
         self._c_net.config( text=p["net_str"])

@@ -267,7 +267,7 @@ class _ServerCard(tk.Frame):
 
         # ---- Error label (hidden when ok) ----
         self._error_lbl = tk.Label(self, text="", bg=t.card_bg,
-                                   fg=t.status_stopped, font=t.font_small,
+                                   fg=t.status_stopped_text, font=t.font_small,
                                    wraplength=300, anchor="w", padx=14)
         self._error_lbl.pack(fill="x", pady=(0, 8))
 

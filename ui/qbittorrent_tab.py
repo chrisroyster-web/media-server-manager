@@ -231,7 +231,7 @@ class QBittorrentTab(tk.Frame):
         self._tree.tag_configure("seed",   foreground=t.status_running)
         self._tree.tag_configure("stall",  foreground=t.yellow)
         self._tree.tag_configure("paused", foreground=t.text_muted)
-        self._tree.tag_configure("err",    foreground=t.status_stopped)
+        self._tree.tag_configure("err",    foreground=t.status_stopped_text)
 
         vsb = ttk.Scrollbar(tree_fr, orient="vertical", command=self._tree.yview)
         self._tree.configure(yscrollcommand=vsb.set)
@@ -307,7 +307,7 @@ class QBittorrentTab(tk.Frame):
             msg = str(e)
             self.after(0, lambda: self._status.config(
                 text="Cannot reach qBittorrent: {}".format(msg),
-                bg=self.theme.surface_dark, fg=self.theme.status_stopped))
+                bg=self.theme.surface_dark, fg=self.theme.status_stopped_text))
         finally:
             self._fetching = False
 

@@ -339,7 +339,7 @@ class PiholeTab(tk.Frame):
 
         tree.tag_configure("odd",     background=t.surface_dark, foreground=t.text)
         tree.tag_configure("even",    background=t.card_bg,      foreground=t.text)
-        tree.tag_configure("blocked", foreground=t.status_stopped)
+        tree.tag_configure("blocked", foreground=t.status_stopped_text)
         tree.tag_configure("cached",  foreground=t.cyan)
 
         vsb = tk.Scrollbar(parent, orient="vertical", command=tree.yview)
@@ -494,7 +494,7 @@ class PiholeTab(tk.Frame):
         if enabled:
             self._enabled_lbl.config(text="Enabled", fg=t.status_running)
         else:
-            self._enabled_lbl.config(text="Disabled", fg=t.status_stopped)
+            self._enabled_lbl.config(text="Disabled", fg=t.status_stopped_text)
 
         # Summary cards
         pct_val = _fmt_pct(data["pct"])
@@ -576,7 +576,7 @@ class PiholeTab(tk.Frame):
 
     def _show_error(self, msg: str):
         t = self.theme
-        self._status.config(text=msg, bg=t.surface_dark, fg=t.status_stopped)
+        self._status.config(text=msg, bg=t.surface_dark, fg=t.status_stopped_text)
         self._rc.schedule()
 
     # -----------------------------------------------------------------------

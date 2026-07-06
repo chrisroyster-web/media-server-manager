@@ -138,7 +138,7 @@ class DockerStatsTab(tk.Frame):
             self._tree.column(col_id, width=width, minwidth=30,
                               anchor=anchor, stretch=stretch)
 
-        self._tree.tag_configure("high", foreground=t.status_stopped)
+        self._tree.tag_configure("high", foreground=t.status_stopped_text)
         self._tree.tag_configure("med",  foreground=t.yellow)
         self._tree.tag_configure("low",  foreground=t.status_running)
 
@@ -190,7 +190,7 @@ class DockerStatsTab(tk.Frame):
         if not self.controller.ssh.connected:
             self._status.config(text="Not connected to SSH",
                                 bg=self.theme.surface_dark,
-                                fg=self.theme.status_stopped)
+                                fg=self.theme.status_stopped_text)
             return
         self._status.config(text="Loading…",
                             bg=self.theme.blue, fg="#ffffff")
@@ -216,7 +216,7 @@ class DockerStatsTab(tk.Frame):
             self.after(0, lambda err=str(e): self._status.config(
                 text="Error: {}".format(err),
                 bg=self.theme.surface_dark,
-                fg=self.theme.status_stopped))
+                fg=self.theme.status_stopped_text))
         finally:
             self._fetching = False
 

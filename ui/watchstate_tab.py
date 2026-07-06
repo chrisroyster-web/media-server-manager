@@ -160,7 +160,7 @@ class WatchstateTab(tk.Frame):
             self._status.config(text="Watchstate is up ({})".format(detail),
                                 bg=t.surface_dark, fg=t.status_running)
         else:
-            self._status_dot.config(fg=t.status_stopped)
+            self._status_dot.config(fg=t.status_stopped_text)
             self._status_lbl.config(text="Unreachable — {}".format(self._url()))
             self._status.config(text="Cannot reach Watchstate: {}".format(detail),
-                                bg=t.surface_dark, fg=t.status_stopped)
+                                bg=t.surface_dark, fg=t.status_stopped_text)

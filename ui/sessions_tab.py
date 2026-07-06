@@ -218,7 +218,7 @@ class SessionsTab(tk.Frame):
         self._refresh_btn.pack(side="right")
         self._kick_btn = tk.Button(hdr, text="✕  Kick Session", command=self._kick)
         t.style_button(self._kick_btn)
-        self._kick_btn.configure(fg=t.status_stopped)
+        self._kick_btn.configure(fg=t.status_stopped_text)
         self._kick_btn.pack(side="right", padx=(0, 8))
         self._last_lbl = tk.Label(hdr, text="", bg=t.bg,
                                    fg=t.text_muted, font=t.font_small)
@@ -266,7 +266,7 @@ class SessionsTab(tk.Frame):
         self.tree.tag_configure("even",  background=t.card_bg,      foreground=t.text)
         self.tree.tag_configure("self",  foreground=t.cyan)   # our own session
         self.tree.tag_configure("other", foreground=t.text)
-        self.tree.tag_configure("root",  foreground=t.status_stopped)
+        self.tree.tag_configure("root",  foreground=t.status_stopped_text)
 
         vsb = tk.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=vsb.set)

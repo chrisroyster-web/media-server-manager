@@ -124,7 +124,7 @@ class BandwidthTab(tk.Frame):
         if getattr(self, "_fetching", False): return
         self._rc.cancel()
         if not self.controller.ssh.connected:
-            self._status.config(text="Not connected", fg=self.theme.status_stopped)
+            self._status.config(text="Not connected", fg=self.theme.status_stopped_text)
             return
         self._status.config(text="Loading bandwidth data…", bg=self.theme.blue, fg="#ffffff")
         self._fetching = True
@@ -178,7 +178,7 @@ class BandwidthTab(tk.Frame):
         if not raw:
             self.after(0, lambda: self._status.config(
                 text="vnstat not installed. Install with: sudo apt install vnstat",
-                bg=self.theme.surface_dark, fg=self.theme.status_stopped))
+                bg=self.theme.surface_dark, fg=self.theme.status_stopped_text))
             return
 
         # /proc/net/dev columns: iface rx_bytes ... tx_bytes ...
@@ -218,7 +218,7 @@ class BandwidthTab(tk.Frame):
         if not results:
             self.after(0, lambda: self._status.config(
                 text="No interface data found",
-                bg=self.theme.surface_dark, fg=self.theme.status_stopped))
+                bg=self.theme.surface_dark, fg=self.theme.status_stopped_text))
             return
 
         def _show():

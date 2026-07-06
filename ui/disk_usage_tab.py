@@ -139,7 +139,7 @@ class DiskUsageTab(tk.Frame):
             self._tree.column(col, width=w, minwidth=40, anchor="w",
                               stretch=(col in stretches))
 
-        self._tree.tag_configure("large",  foreground=t.status_stopped)
+        self._tree.tag_configure("large",  foreground=t.status_stopped_text)
         self._tree.tag_configure("medium", foreground=t.yellow)
         self._tree.tag_configure("small",  foreground=t.text)
         self._tree.tag_configure("dir",    foreground=t.cyan)
@@ -223,7 +223,7 @@ class DiskUsageTab(tk.Frame):
         if not self.controller.ssh.connected:
             self._status.config(
                 text="Not connected to SSH", bg=self.theme.surface_dark,
-                fg=self.theme.status_stopped)
+                fg=self.theme.status_stopped_text)
             return
         self._status.config(text="Scanning {}…".format(path),
                             bg=self.theme.blue, fg="#ffffff")
@@ -241,7 +241,7 @@ class DiskUsageTab(tk.Frame):
                 self.after(0, lambda: self._status.config(
                     text="Cannot scan {}: {}".format(path, err or "no output"),
                     bg=self.theme.surface_dark,
-                    fg=self.theme.status_stopped))
+                    fg=self.theme.status_stopped_text))
                 return
             entries = self._parse_du(out, path)
             self.after(0, lambda: self._show(path, entries))
@@ -249,7 +249,7 @@ class DiskUsageTab(tk.Frame):
             self.after(0, lambda err=str(e): self._status.config(
                 text="Error: {}".format(err),
                 bg=self.theme.surface_dark,
-                fg=self.theme.status_stopped))
+                fg=self.theme.status_stopped_text))
         finally:
             self._fetching = False
 

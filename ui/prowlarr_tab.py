@@ -149,7 +149,7 @@ class ProwlarrTab(tk.Frame):
 
         self._idx_tree.tag_configure("ok",      foreground=t.status_running)
         self._idx_tree.tag_configure("disabled",foreground=t.text_muted)
-        self._idx_tree.tag_configure("error",   foreground=t.status_stopped)
+        self._idx_tree.tag_configure("error",   foreground=t.status_stopped_text)
 
         vsb = ttk.Scrollbar(self._idx_frame, orient="vertical",
                             command=self._idx_tree.yview)
@@ -215,7 +215,7 @@ class ProwlarrTab(tk.Frame):
             except Exception as e:
                 self.after(0, lambda err=str(e): self._status.config(
                     text="Cannot reach Prowlarr: {}".format(err),
-                    bg=self.theme.surface_dark, fg=self.theme.status_stopped))
+                    bg=self.theme.surface_dark, fg=self.theme.status_stopped_text))
                 return
 
             try:
@@ -264,7 +264,7 @@ class ProwlarrTab(tk.Frame):
             fg=t.status_running if enabled else t.text_muted)
         self._card_failing.config(
             text=str(len(failing)),
-            fg=t.status_stopped if failing else t.text_muted)
+            fg=t.status_stopped_text if failing else t.text_muted)
         self._card_grabs.config(text=str(total_grabs))
 
         # Indexers table
@@ -329,7 +329,7 @@ class ProwlarrTab(tk.Frame):
         self._status.config(
             text="{} indexer{} | {} enabled | {} grabs total".format(
                 n, "s" if n != 1 else "", len(enabled), total_grabs),
-            bg=t.surface_dark, fg=t.status_stopped if failing else t.status_running)
+            bg=t.surface_dark, fg=t.status_stopped_text if failing else t.status_running)
 
     # =========================================================
     # TEST ALL
@@ -353,7 +353,7 @@ class ProwlarrTab(tk.Frame):
             except Exception as e:
                 self.after(0, lambda err=str(e): self._status.config(
                     text="Test failed: {}".format(err),
-                    bg=self.theme.surface_dark, fg=self.theme.status_stopped))
+                    bg=self.theme.surface_dark, fg=self.theme.status_stopped_text))
             finally:
                 self.after(0, lambda: self._test_btn.config(
                     state="normal", text="Test All Indexers"))

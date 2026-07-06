@@ -130,7 +130,7 @@ class TailscaleTab(tk.Frame):
         if getattr(self, "_fetching", False): return
         self._rc.cancel()
         if not self.controller.ssh.connected:
-            self._status.config(text="Not connected", bg=self.theme.surface_dark, fg=self.theme.status_stopped)
+            self._status.config(text="Not connected", bg=self.theme.surface_dark, fg=self.theme.status_stopped_text)
             return
         self._status.config(text="Loading Tailscale status…", bg=self.theme.blue, fg="#ffffff")
         self._fetching = True
@@ -149,14 +149,14 @@ class TailscaleTab(tk.Frame):
                 else:
                     self.after(0, lambda: self._status.config(
                         text="tailscale not found or not running",
-                        bg=self.theme.surface_dark, fg=self.theme.status_stopped))
+                        bg=self.theme.surface_dark, fg=self.theme.status_stopped_text))
                 return
             try:
                 data = json.loads(out)
             except Exception:
                 self.after(0, lambda: self._status.config(
                     text="Could not parse tailscale JSON output",
-                    bg=self.theme.surface_dark, fg=self.theme.status_stopped))
+                    bg=self.theme.surface_dark, fg=self.theme.status_stopped_text))
                 return
             self.after(0, lambda: self._populate(data))
             self.after(0, lambda: self._last_lbl.config(

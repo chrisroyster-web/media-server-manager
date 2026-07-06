@@ -82,7 +82,7 @@ class ServicesTab(CardConsoleTab):
         port = data["port"]
         url_lbl = tk.Label(
             frame, text=self._url(port) if port else "--",
-            bg=self.theme.card_bg, fg=self.theme.blue,
+            bg=self.theme.card_bg, fg=self.theme.blue_bright,
             font=self.theme.font_small, cursor="hand2" if port else "",
         )
         url_lbl.pack(anchor="w", padx=10)

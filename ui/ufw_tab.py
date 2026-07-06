@@ -93,7 +93,7 @@ class UFWTab(tk.Frame):
                               stretch=(col in stretches))
 
         self._tree.tag_configure("allow", foreground=t.status_running)
-        self._tree.tag_configure("deny",  foreground=t.status_stopped)
+        self._tree.tag_configure("deny",  foreground=t.status_stopped_text)
         self._tree.tag_configure("limit", foreground=t.yellow)
 
         vsb = ttk.Scrollbar(tree_fr, orient="vertical", command=self._tree.yview)
@@ -116,7 +116,7 @@ class UFWTab(tk.Frame):
                                 font=t.font_mono, height=5, bd=0,
                                 relief="flat", state="disabled", wrap="word")
         self._console.tag_configure("ok",  foreground=t.status_running)
-        self._console.tag_configure("err", foreground=t.status_stopped)
+        self._console.tag_configure("err", foreground=t.status_stopped_text)
         self._console.tag_configure("cmd", foreground=t.cyan)
         self._console.pack(fill="x", padx=10, pady=(0, 6))
 
@@ -135,7 +135,7 @@ class UFWTab(tk.Frame):
         if not self.controller.ssh.connected:
             self._status.config(text="Not connected",
                                 bg=self.theme.surface_dark,
-                                fg=self.theme.status_stopped)
+                                fg=self.theme.status_stopped_text)
             return
         self._status.config(text="Loading…", bg=self.theme.blue, fg="#ffffff")
         self._fetching = True
@@ -156,7 +156,7 @@ class UFWTab(tk.Frame):
             msg = str(e)
             self.after(0, lambda: self._status.config(
                 text="Error: {}".format(msg),
-                bg=self.theme.surface_dark, fg=self.theme.status_stopped))
+                bg=self.theme.surface_dark, fg=self.theme.status_stopped_text))
         finally:
             self._fetching = False
 

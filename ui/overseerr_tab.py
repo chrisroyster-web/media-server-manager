@@ -139,7 +139,7 @@ class OverseerrTab(tk.Frame):
         self._req_tree.tag_configure("approved",   foreground=t.cyan)
         self._req_tree.tag_configure("available",  foreground=t.status_running)
         self._req_tree.tag_configure("processing", foreground=t.purple)
-        self._req_tree.tag_configure("declined",   foreground=t.status_stopped)
+        self._req_tree.tag_configure("declined",   foreground=t.status_stopped_text)
 
         vsb = ttk.Scrollbar(self._req_frame, orient="vertical",
                             command=self._req_tree.yview)
@@ -193,7 +193,7 @@ class OverseerrTab(tk.Frame):
             except Exception as e:
                 self.after(0, lambda err=str(e): self._status.config(
                     text="Cannot reach {}: {}".format(self._name, err),
-                    bg=self.theme.surface_dark, fg=self.theme.status_stopped))
+                    bg=self.theme.surface_dark, fg=self.theme.status_stopped_text))
                 return
 
             try:

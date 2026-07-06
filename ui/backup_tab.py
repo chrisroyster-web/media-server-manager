@@ -144,7 +144,7 @@ class BackupTab(tk.Frame):
 
         self._tree.tag_configure("ok",   foreground=t.status_running)
         self._tree.tag_configure("warn", foreground=t.yellow)
-        self._tree.tag_configure("fail", foreground=t.status_stopped)
+        self._tree.tag_configure("fail", foreground=t.status_stopped_text)
         self._tree.tag_configure("none", foreground=t.text_muted)
 
         vsb = ttk.Scrollbar(tbl_frame, orient="vertical", command=self._tree.yview)
@@ -266,7 +266,7 @@ class BackupTab(tk.Frame):
         elif "NAS_NOT_MOUNTED" in out:
             self._status.config(text="Restic setup failed: NAS not mounted",
                                 bg=self.theme.surface_dark,
-                                fg=self.theme.status_stopped)
+                                fg=self.theme.status_stopped_text)
             messagebox.showerror("Setup Failed",
                                  "/mnt/nas/wsbackup is not mounted. Mount "
                                  "the NAS share before initializing the repo.")
@@ -274,7 +274,7 @@ class BackupTab(tk.Frame):
             msg = (err or out or "Unknown error").strip()[:400]
             self._status.config(
                 text="Restic setup failed: {}".format(msg[:120]),
-                bg=self.theme.surface_dark, fg=self.theme.status_stopped)
+                bg=self.theme.surface_dark, fg=self.theme.status_stopped_text)
             messagebox.showerror("Setup Failed", msg)
 
     def _stat_card(self, parent, label, value, color):
@@ -296,7 +296,7 @@ class BackupTab(tk.Frame):
         if getattr(self, "_fetching", False): return
         self._rc.cancel()
         if not self.controller.ssh.connected:
-            self._status.config(text="Not connected", fg=self.theme.status_stopped)
+            self._status.config(text="Not connected", fg=self.theme.status_stopped_text)
             return
         self._status.config(text="Scanning backup logs…", bg=self.theme.blue, fg="#ffffff")
         self._fetching = True
@@ -513,7 +513,7 @@ class BackupTab(tk.Frame):
         self._card_warn.config(text=str(warn),
                                 fg=t.yellow if warn else t.text_muted)
         self._card_fail.config(text=str(fail),
-                                fg=t.status_stopped if fail else t.text_muted)
+                                fg=t.status_stopped_text if fail else t.text_muted)
         self._card_size.config(text="{} jobs".format(len(jobs)))
 
         self._tree.delete(*self._tree.get_children())
@@ -534,7 +534,7 @@ class BackupTab(tk.Frame):
         elif fail:
             self._status.config(
                 text="{} backup job{} FAILED".format(fail, "s" if fail != 1 else ""),
-                bg=t.surface_dark, fg=t.status_stopped)
+                bg=t.surface_dark, fg=t.status_stopped_text)
         elif warn:
             self._status.config(
                 text="{} job{} may be stale".format(warn, "s" if warn != 1 else ""),
@@ -608,7 +608,7 @@ class BackupTab(tk.Frame):
                     msg = (err or "").strip()[:120]
                     self.after(0, lambda: self._status.config(
                         text="Backup failed (exit {}): {}".format(code, msg),
-                        bg=self.theme.surface_dark, fg=self.theme.status_stopped))
+                        bg=self.theme.surface_dark, fg=self.theme.status_stopped_text))
             finally:
                 self.after(0, lambda: btn.config(state="normal"))
 

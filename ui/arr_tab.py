@@ -155,7 +155,7 @@ class ArrTab(tk.Frame):
         tree.tag_configure("sonarr",    foreground=t.cyan)
         tree.tag_configure("radarr",    foreground=t.purple)
         tree.tag_configure("warning",   foreground=t.yellow)
-        tree.tag_configure("error",     foreground=t.status_stopped)
+        tree.tag_configure("error",     foreground=t.status_stopped_text)
 
         vsb = tk.Scrollbar(parent, orient="vertical", command=tree.yview)
         tree.configure(yscrollcommand=vsb.set)
@@ -196,12 +196,12 @@ class ArrTab(tk.Frame):
         self._search_btn = tk.Button(
             bar, text="Search Selected",
             command=self._search_selected_missing,
-            bg=t.surface_light, fg=t.blue,
+            bg=t.surface_light, fg=t.blue_bright,
             bd=0, relief="flat", font=t.font_small, padx=10, pady=3, cursor="hand2",
         )
         self._search_btn.pack(side="left")
         self._search_btn.bind("<Enter>", lambda e: self._search_btn.configure(fg=t.blue_bright))
-        self._search_btn.bind("<Leave>", lambda e: self._search_btn.configure(fg=t.blue))
+        self._search_btn.bind("<Leave>", lambda e: self._search_btn.configure(fg=t.blue_bright))
 
         tk.Label(bar, text="  Double-click a row to search immediately",
                  bg=t.bg, fg=t.text_dim, font=t.font_small).pack(side="left", padx=4)

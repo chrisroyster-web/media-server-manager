@@ -446,8 +446,8 @@ class SchedulerTab(tk.Frame):
         osb.pack(side="right", fill="y")
         self._output.configure(yscrollcommand=osb.set)
         self._output.tag_config("ok",      foreground=t.status_running)
-        self._output.tag_config("error",   foreground=t.status_stopped)
-        self._output.tag_config("running", foreground=t.blue)
+        self._output.tag_config("error",   foreground=t.status_stopped_text)
+        self._output.tag_config("running", foreground=t.blue_bright)
         self._output.tag_config("dim",     foreground=t.text_muted)
         self._output.tag_config("hdr",     foreground=t.text_secondary)
 
@@ -511,8 +511,8 @@ class SchedulerTab(tk.Frame):
 
         t = self.theme
         self._tree.tag_configure("ok",      foreground=t.status_running)
-        self._tree.tag_configure("error",   foreground=t.status_stopped)
-        self._tree.tag_configure("running", foreground=t.blue)
+        self._tree.tag_configure("error",   foreground=t.status_stopped_text)
+        self._tree.tag_configure("running", foreground=t.blue_bright)
         self._tree.tag_configure("never",   foreground=t.text_muted)
 
         n_active = sum(1 for t in tasks if t.get("enabled", True))

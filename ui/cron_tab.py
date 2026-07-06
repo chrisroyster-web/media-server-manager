@@ -394,7 +394,7 @@ class CronTab(tk.Frame):
         csb.pack(side="right", fill="y")
         self._console.configure(yscrollcommand=csb.set)
         self._console.tag_config("ok",    foreground=t.status_running)
-        self._console.tag_config("error", foreground=t.status_stopped)
+        self._console.tag_config("error", foreground=t.status_stopped_text)
         self._console.tag_config("cmd",   foreground=t.cyan)
         self._console.tag_config("dim",   foreground=t.text_muted)
 
@@ -420,7 +420,7 @@ class CronTab(tk.Frame):
             ssh = self.controller.ssh
             if not ssh.connected:
                 self.after(0, lambda: self._count_lbl.config(
-                    text="Not connected", fg=self.theme.status_stopped))
+                    text="Not connected", fg=self.theme.status_stopped_text))
                 return
 
             jobs = []

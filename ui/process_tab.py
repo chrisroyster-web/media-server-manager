@@ -135,7 +135,7 @@ class ProcessTab(tk.Frame):
             self._tree.column(col_id, width=width, minwidth=30,
                               anchor=anchor, stretch=stretch)
 
-        self._tree.tag_configure("cpu_high", foreground=t.status_stopped)
+        self._tree.tag_configure("cpu_high", foreground=t.status_stopped_text)
         self._tree.tag_configure("cpu_med",  foreground=t.yellow)
         self._tree.tag_configure("normal",   foreground=t.text)
 
@@ -192,7 +192,7 @@ class ProcessTab(tk.Frame):
         if not self.controller.ssh.connected:
             self._status.config(text="Not connected to SSH",
                                 bg=self.theme.surface_dark,
-                                fg=self.theme.status_stopped)
+                                fg=self.theme.status_stopped_text)
             return
         self._status.config(text="Loading…",
                             bg=self.theme.blue, fg="#ffffff")
@@ -218,7 +218,7 @@ class ProcessTab(tk.Frame):
             self.after(0, lambda err=str(e): self._status.config(
                 text="Error: {}".format(err),
                 bg=self.theme.surface_dark,
-                fg=self.theme.status_stopped))
+                fg=self.theme.status_stopped_text))
         finally:
             self._fetching = False
 
@@ -349,7 +349,7 @@ class ProcessTab(tk.Frame):
         except (TypeError, ValueError):
             self.after(0, lambda: self._status.config(
                 text="Invalid PID: {}".format(pid),
-                bg=self.theme.surface_dark, fg=self.theme.status_stopped))
+                bg=self.theme.surface_dark, fg=self.theme.status_stopped_text))
             return
         out, err, code = self.controller.ssh.run_sudo(
             "kill -{} {}".format(int(sig), pid))
@@ -363,7 +363,7 @@ class ProcessTab(tk.Frame):
             self.after(0, lambda: self._status.config(
                 text="kill -{} {} failed: {}".format(sig, pid, msg),
                 bg=self.theme.surface_dark,
-                fg=self.theme.status_stopped))
+                fg=self.theme.status_stopped_text))
 
     def _renice(self):
         pid = self._selected_pid()
@@ -383,7 +383,7 @@ class ProcessTab(tk.Frame):
         except (TypeError, ValueError):
             self.after(0, lambda: self._status.config(
                 text="Invalid PID: {}".format(pid),
-                bg=self.theme.surface_dark, fg=self.theme.status_stopped))
+                bg=self.theme.surface_dark, fg=self.theme.status_stopped_text))
             return
         out, err, code = self.controller.ssh.run_sudo(
             "renice {} -p {}".format(int(value), pid))
@@ -397,4 +397,4 @@ class ProcessTab(tk.Frame):
             self.after(0, lambda: self._status.config(
                 text="renice failed: {}".format(msg),
                 bg=self.theme.surface_dark,
-                fg=self.theme.status_stopped))
+                fg=self.theme.status_stopped_text))
