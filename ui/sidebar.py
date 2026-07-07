@@ -102,6 +102,7 @@ class Sidebar(tk.Frame):
         self._dimmed     = {}
         self._section_animating = set()   # section names currently mid-collapse/expand
         self._row_height = None           # measured once _build_sidebar finishes
+        self._last_nav_frame_height = None   # tracked by _on_frame_resize
 
         # Right-edge separator
         tk.Frame(self, bg="#1a1a1a", width=1).place(
@@ -350,6 +351,20 @@ class Sidebar(tk.Frame):
 
     def _on_frame_resize(self, event):
         self._nav_canvas.configure(scrollregion=self._nav_canvas.bbox("all"))
+        # <Configure> on this frame fires not only when its actual height
+        # changes (section collapse/expand, rebuild_servers(), etc.) but
+        # also just from the canvas being scrolled — scrolling moves the
+        # embedded window on screen, and Tk reports that as a Configure
+        # event on the child too, even though its size didn't change.
+        # Resetting the scroll here unconditionally means every mousewheel
+        # tick would immediately snap back to the top, since scrolling
+        # itself re-triggers this handler. Only reset when the height
+        # actually changed — that's the real signal that the reclamping
+        # problem this guards against (see git history) could happen.
+        new_height = event.height
+        if new_height != self._last_nav_frame_height:
+            self._last_nav_frame_height = new_height
+            self._nav_canvas.yview_moveto(0.0)
 
     def _on_mousewheel(self, event):
         self._nav_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
