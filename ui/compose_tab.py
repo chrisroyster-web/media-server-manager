@@ -11,6 +11,8 @@ import threading
 import time
 import shlex
 
+from ui.empty_state import EmptyState
+
 
 class ComposeTab(tk.Frame):
 
@@ -94,19 +96,20 @@ class ComposeTab(tk.Frame):
         try:
             ssh = self.controller.ssh
             if not ssh.connected:
-                self.after(0, lambda: self._show_msg("Not connected to server.", error=False))
+                self.after(0, lambda: self._show_msg("Not connected to server.", disconnected=True))
                 return
 
             # Find compose stacks via docker compose ls
             out, err, code = ssh.run("docker compose ls --format json 2>/dev/null || docker compose ls 2>/dev/null")
             if code != 0 or not out.strip():
                 self.after(0, lambda: self._show_msg(
-                    "No compose stacks found.\n\nMake sure Docker Compose v2 is installed\nand stacks are running or stopped."))
+                    "No compose stacks found.\n\nMake sure Docker Compose v2 is installed\nand stacks are running or stopped.",
+                    error=False))
                 return
 
             stacks = self._parse_stacks(out.strip())
             if not stacks:
-                self.after(0, lambda: self._show_msg("No compose stacks found."))
+                self.after(0, lambda: self._show_msg("No compose stacks found.", error=False))
                 return
 
             # For each stack, get per-service status
@@ -498,16 +501,25 @@ class ComposeTab(tk.Frame):
     # ------------------------------------------------------------------
     # HELPERS
     # ------------------------------------------------------------------
-    def _show_msg(self, msg, error=True):
+    def _show_msg(self, msg, error=True, disconnected=False):
         for f in self._stack_frames:
             f.destroy()
         self._stack_frames.clear()
-        lbl = tk.Label(
-            self._body, text=msg,
-            bg=self.theme.bg,
-            fg=self.theme.status_stopped_text if error else self.theme.text_muted,
-            font=self.theme.font_regular, justify="center",
-        )
-        lbl.pack(pady=40)
-        self._stack_frames.append(lbl)
+        if disconnected:
+            state = EmptyState(
+                self._body, self.theme,
+                icon="🔌", title="Not connected",
+                subtitle="Connect to a server to view Compose stacks.",
+                action_text="⚡ Connect",
+                action_cmd=lambda: self.controller.tabs.select(0),
+            )
+        else:
+            title, _, subtitle = msg.partition("\n\n")
+            state = EmptyState(
+                self._body, self.theme,
+                icon="⚠" if error else "🐙",
+                title=title, subtitle=subtitle,
+            )
+        state.pack(fill="both", expand=True)
+        self._stack_frames.append(state)
         self._status_lbl.config(text="", bg=self.theme.surface_dark)

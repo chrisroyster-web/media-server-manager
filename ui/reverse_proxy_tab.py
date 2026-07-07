@@ -166,7 +166,6 @@ class ReverseProxyTab(tk.Frame):
         table_frame.pack(fill="both", expand=True, padx=16, pady=(0, 8))
 
         style = ttk.Style()
-        style.theme_use("default")
         style.configure("Proxy.Treeview",
                         background=t.surface,
                         foreground=t.text,

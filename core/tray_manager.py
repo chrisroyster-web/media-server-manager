@@ -61,8 +61,6 @@ class TrayManager:
             self.controller.after(0, self.controller.deiconify)
             return
 
-        import pystray
-
         def _open(_icon=None, _item=None):
             self.controller.after(0, self._restore)
 

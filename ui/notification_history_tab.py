@@ -12,10 +12,13 @@ class NotificationHistoryTab(tk.Frame):
     Supports filtering by level and keyword search.
     """
 
+    # Darkened slightly from the original #4c9ef5/#4caf50/#f5a623 — those
+    # fell short of WCAG's 3:1 minimum for large/icon-sized content against
+    # a white (light-mode) card background (2.79/2.78/2.03:1).
     LEVEL_COLORS = {
-        "info":  "#4c9ef5",
-        "ok":    "#4caf50",
-        "warn":  "#f5a623",
+        "info":  "#3d96f4",
+        "ok":    "#48a74c",
+        "warn":  "#cc8309",
         "error": "#e53935",
     }
     LEVEL_ICONS = {

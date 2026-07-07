@@ -18,7 +18,7 @@ from ui.sidebar import Sidebar
 from ui.connection_panel import ConnectionPanel
 from ui.quick_commands import QuickCommandsPanel
 from ui.dashboard_tab import DashboardTab
-from ui.services_tab import ServicesTab
+from ui.services_hub_tab import ServicesHubTab
 from ui.docker_hub_tab import DockerHubTab
 from ui.custom_commands_tab import CustomCommandsTab
 from ui.log_viewer_tab import LogViewerTab
@@ -30,7 +30,7 @@ from ui.arr_tab import ArrTab
 from ui.updates_tab import UpdatesTab
 from ui.sessions_tab import SessionsTab
 from ui.compose_tab import ComposeTab
-from ui.cron_tab import CronTab
+from ui.scheduled_tasks_hub_tab import ScheduledTasksHubTab
 from ui.notification_history_tab import NotificationHistoryTab
 from ui.server_manager_tab import ServerManagerTab
 from ui.play_history_tab import PlayHistoryTab
@@ -44,17 +44,14 @@ from ui.backup_tab import BackupTab
 from ui.prowlarr_tab import ProwlarrTab
 from ui.tautulli_tab import TautulliTab
 from ui.uptime_kuma_tab import UptimeKumaTab
-from ui.netdata_tab import NetdataTab
-from ui.glances_tab import GlancesTab
+from ui.monitoring_hub_tab import MonitoringHubTab
 from ui.aggregate_tab import AggregateTab
 from ui.library_tab import LibraryTab
 from ui.now_playing_tab import NowPlayingTab
 from ui.media_requests_tab import MediaRequestsTab
 from ui.media_users_tab import MediaUsersTab
-from ui.scheduler_tab import SchedulerTab
 from ui.install_tab import InstallTab
 from ui.fail2ban_tab import Fail2banTab
-from ui.restart_sequence_tab import RestartSequenceTab
 from ui.qbittorrent_tab import QBittorrentTab
 from ui.process_tab import ProcessTab
 from ui.ufw_tab import UFWTab
@@ -112,17 +109,17 @@ _TAB_NAMES = {
     6: "Log Viewer", 7: "SABnzbd", 8: "Config",
     9: "Files", 10: "Storage", 11: "Arr",
     12: "Updates", 13: "Sessions", 14: "Emby",
-    15: "Compose", 16: "Cron Jobs", 17: "Plex",
-    18: "Jellyfin", 19: "Notifications", 20: "All Servers",
+    15: "Compose", 16: "Scheduled Tasks", 17: "Plex",
+    18: "Jellyfin", 19: "Notifications", 20: "Server Profiles",
     21: "Play History", 22: "VPN", 23: "Reverse Proxy",
     24: "Speedtest", 26: "SSL Certs",
     27: "Tailscale", 28: "Bandwidth", 29: "Backups",
     30: "Prowlarr", 33: "Tautulli", 34: "Uptime Kuma",
-    35: "Netdata", 36: "Glances", 37: "All Servers",
+    35: "Monitoring", 37: "All Servers",
     40: "Media Library", 41: "Requests",
     42: "Media Users", 43: "Now Playing",
-    44: "Automation",  45: "Install Apps",
-    46: "Fail2ban",   47: "Restart Sequence",
+    45: "Install Apps",
+    46: "Fail2ban",
     48: "qBittorrent",
     50: "Processes",   51: "UFW Firewall",
     53: "Ports",
@@ -194,23 +191,29 @@ class MediaServerManager(tk.Tk):
         content = tk.Frame(body, bg=t.bg)
         content.pack(side="left", fill="both", expand=True)
 
-        # ── Tab notebook — tab bar clipped out of view ────────────────
-        # Wrap the notebook in a clipping frame. The notebook is placed
-        # with y=-TAB_H so the tab strip sits above the frame's top edge
-        # (tkinter clips children to the parent's bounds). height=TAB_H
-        # adds that many pixels back so the content area fills the frame.
-        TAB_H = 30
-        nb_clip = tk.Frame(content, bg=t.bg)
-        nb_clip.pack(fill="both", expand=True)
+        # ── Tab notebook — native tab strip removed, not just hidden ──
+        # Navigation happens entirely through the custom Sidebar; the
+        # notebook is only used for its tab-switching/content-pane
+        # mechanics. This used to fake-hide the tab strip by placing the
+        # notebook a fixed number of pixels above its container so the
+        # strip poked out the top and got clipped by the parent frame's
+        # bounds — fragile (the exact pixel height depends on the active
+        # ttk theme/font and drifts), and it turned out the "hidden" strip
+        # was still hit-testable/clickable at the very top edge. Giving
+        # the Tab element an empty layout means ttk never draws or lays
+        # out a tab strip for this notebook at all, so there's nothing
+        # left to peek out or click.
+        style = ttk.Style()
+        style.layout("Hidden.TNotebook.Tab", [])
 
-        self.tabs = ttk.Notebook(nb_clip)
-        self.tabs.place(x=0, y=-TAB_H, relwidth=1.0, relheight=1.0, height=TAB_H)
+        self.tabs = ttk.Notebook(content, style="Hidden.TNotebook")
+        self.tabs.pack(fill="both", expand=True)
 
         # Instantiate all tab panels (instantiation order = tab index)
         self.connection_panel = ConnectionPanel(self.tabs, self)   # 0
         self.quick_commands   = QuickCommandsPanel(self.tabs, self) # 1
         self.dashboard_tab    = DashboardTab(self.tabs, self)       # 2
-        self.services_tab     = ServicesTab(self.tabs, self)        # 3
+        self.services_tab     = ServicesHubTab(self.tabs, self)     # 3
         self.docker_tab       = DockerHubTab(self.tabs, self)       # 4
         self.custom_tab       = CustomCommandsTab(self.tabs, self)  # 5
         self.log_viewer       = LogViewerTab(self.tabs, self)       # 6
@@ -223,7 +226,7 @@ class MediaServerManager(tk.Tk):
         self.sessions_tab     = SessionsTab(self.tabs, self)        # 13
         self._stub_14         = tk.Frame(self.tabs)                 # 14 (retired - now_playing_tab)
         self.compose_tab      = ComposeTab(self.tabs, self)         # 15
-        self.cron_tab         = CronTab(self.tabs, self)            # 16
+        self.cron_tab         = ScheduledTasksHubTab(self.tabs, self)  # 16
         self._stub_17         = tk.Frame(self.tabs)                 # 17 (retired - now_playing_tab)
         self._stub_18         = tk.Frame(self.tabs)                 # 18 (retired - now_playing_tab)
         self.notif_tab        = NotificationHistoryTab(self.tabs, self)  # 19
@@ -242,8 +245,8 @@ class MediaServerManager(tk.Tk):
         self._stub_32         = tk.Frame(self.tabs)                      # 32 (retired - media_requests_tab)
         self.tautulli_tab     = TautulliTab(self.tabs, self)            # 33
         self.uptime_kuma_tab  = UptimeKumaTab(self.tabs, self)          # 34
-        self.netdata_tab      = NetdataTab(self.tabs, self)             # 35
-        self.glances_tab      = GlancesTab(self.tabs, self)             # 36
+        self.monitoring_tab   = MonitoringHubTab(self.tabs, self)       # 35
+        self._stub_36         = tk.Frame(self.tabs)          # 36 (retired - folded into monitoring_tab)
         self.aggregate_tab       = AggregateTab(self.tabs, self)          # 37
         self._stub_38         = tk.Frame(self.tabs)                      # 38 (retired - media_users_tab)
         self._stub_39         = tk.Frame(self.tabs)                      # 39 (retired - media_users_tab)
@@ -251,10 +254,10 @@ class MediaServerManager(tk.Tk):
         self.media_requests_tab  = MediaRequestsTab(self.tabs, self)   # 41
         self.media_users_tab     = MediaUsersTab(self.tabs, self)      # 42
         self.now_playing_tab     = NowPlayingTab(self.tabs, self)      # 43
-        self.scheduler_tab         = SchedulerTab(self.tabs, self)          # 44
+        self._stub_44              = tk.Frame(self.tabs)          # 44 (retired - folded into cron_tab)
         self.install_tab           = InstallTab(self.tabs, self)            # 45
         self.fail2ban_tab          = Fail2banTab(self.tabs, self)           # 46
-        self.restart_sequence_tab  = RestartSequenceTab(self.tabs, self)    # 47
+        self._stub_47              = tk.Frame(self.tabs)          # 47 (retired - folded into services_tab)
         self.qbittorrent_tab       = QBittorrentTab(self.tabs, self)        # 48
         self._stub_49              = tk.Frame(self.tabs)                    # 49 (retired - storage_hub_tab)
         self.process_tab           = ProcessTab(self.tabs, self)            # 50
@@ -283,13 +286,13 @@ class MediaServerManager(tk.Tk):
             self._stub_25, self.ssl_tab, self.tailscale_tab,
             self.bandwidth_tab, self.backup_tab, self.prowlarr_tab,
             self._stub_31, self._stub_32, self.tautulli_tab,
-            self.uptime_kuma_tab, self.netdata_tab, self.glances_tab,
+            self.uptime_kuma_tab, self.monitoring_tab, self._stub_36,
             self.aggregate_tab,
             self._stub_38, self._stub_39,
             self.library_tab,
             self.media_requests_tab, self.media_users_tab, self.now_playing_tab,
-            self.scheduler_tab, self.install_tab,
-            self.fail2ban_tab, self.restart_sequence_tab,
+            self._stub_44, self.install_tab,
+            self.fail2ban_tab, self._stub_47,
             self.qbittorrent_tab, self._stub_49,
             self.process_tab, self.ufw_tab, self._stub_52,
             self.ports_tab, self.sensors_tab,
@@ -480,6 +483,14 @@ class MediaServerManager(tk.Tk):
                 self._update_player_sidebar()
                 self._update_server_sidebar()
                 self.log_viewer._rebuild_sources()
+                # Widgets packed/configured while this toplevel was withdrawn
+                # (the whole sidebar) never get an initial paint on Windows
+                # until something marks them dirty again — without this,
+                # the sidebar's section rows show as blank white rectangles
+                # for the first several frames after deiconify(), until the
+                # first tab switch (set_active()'s .configure() calls)
+                # incidentally forces the redraw. Force it immediately instead.
+                self.update()
                 self.tray.start()
                 self.after(500,   self._auto_connect)
                 self.after(3000,  self.start_service_watchdog)
@@ -492,6 +503,7 @@ class MediaServerManager(tk.Tk):
             self._update_player_sidebar()
             self._update_server_sidebar()
             self.log_viewer._rebuild_sources()
+            self.update()
             self.tray.start()
             self.after(500, self._auto_connect)
 
@@ -800,21 +812,20 @@ class MediaServerManager(tk.Tk):
     def _trigger_tab_refresh(self, idx):
         m = {
             2:  lambda: self.dashboard_tab.refresh(),
-            3:  lambda: self.services_tab.refresh_all(),
+            3:  lambda: self.services_tab.on_show(),
             4:  lambda: self.docker_tab.on_show(),
             7:  lambda: self.sabnzbd_tab.refresh(),
             10: lambda: self.storage_tab.on_show(),
             11: lambda: self.arr_tab._fetch(),
             13: lambda: self.sessions_tab._refresh(),
             34: lambda: self.uptime_kuma_tab.refresh(),
-            35: lambda: self.netdata_tab.refresh(),
-            36: lambda: self.glances_tab.refresh(),
+            35: lambda: self.monitoring_tab.on_show(),
             28: lambda: self.bandwidth_tab.refresh(),
             9:  lambda: self.sftp_tab._navigate(self.sftp_tab._current_path, push_history=False),
             6:  lambda: self.log_viewer.fetch(),
             29: lambda: self.backup_tab.refresh(),
             15: lambda: self.compose_tab.refresh(),
-            16: lambda: self.cron_tab.refresh(),
+            16: lambda: self.cron_tab.on_show(),
             20: lambda: self.server_tab._load(),
             40: lambda: self.library_tab.on_show(),
             21: lambda: self.play_history_tab.refresh(),
@@ -830,10 +841,8 @@ class MediaServerManager(tk.Tk):
             41: lambda: self.media_requests_tab.on_show(),
             42: lambda: self.media_users_tab.on_show(),
             43: lambda: self.now_playing_tab._fetch(),
-            44: lambda: self.scheduler_tab.on_show(),
             45: lambda: self.install_tab.on_show(),
             46: lambda: self.fail2ban_tab.on_show(),
-            47: lambda: self.restart_sequence_tab.on_show(),
             48: lambda: self.qbittorrent_tab.on_show(),
             50: lambda: self.process_tab.on_show(),
             51: lambda: self.ufw_tab.on_show(),
@@ -876,14 +885,19 @@ class MediaServerManager(tk.Tk):
             self._watchdog_stop = None
 
     def toggle_theme(self):
-        """Flip dark <-> light, save to config, restart to apply."""
-        import sys, os
+        """Flip dark <-> light in place — no restart. Re-initializes the
+        one shared Theme object (see Theme.retheme()) and walks the
+        widget tree recoloring anything that already baked the old
+        palette in as literal strings."""
+        from ui.theme import recolor_widget_tree
         cfg = self.config_manager
         new_mode = "light" if cfg.theme_mode == "dark" else "dark"
         cfg.theme_mode = new_mode
-        # Restart the process so the new theme is applied cleanly
-        self.destroy()
-        os.execv(sys.executable, [sys.executable] + sys.argv)
+        remap = self.theme.retheme(new_mode)
+        recolor_widget_tree(self, remap)
+        self.theme.apply_ttk_styles(self)
+        is_dark = (new_mode == "dark")
+        self.sidebar._theme_btn.configure(text="☀" if is_dark else "🌙")
 
     def apply_config(self):
         """Re-apply config changes that affect live widgets."""
@@ -1185,10 +1199,11 @@ class MediaServerManager(tk.Tk):
 
     def _refresh_scheduler_if_active(self):
         try:
-            sel_idx = self.tabs.index(self.tabs.select())
-            my_idx  = self.tabs.index(self.scheduler_tab)
-            if sel_idx == my_idx:
-                self.scheduler_tab.refresh()
+            # winfo_ismapped() is true only while the Automation sub-tab is
+            # the one actually on screen right now — correct regardless of
+            # it being nested inside cron_tab's own sub-notebook.
+            if self.cron_tab.automation_tab.winfo_ismapped():
+                self.cron_tab.automation_tab.refresh()
         except Exception:
             pass
 

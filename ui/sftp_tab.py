@@ -130,7 +130,6 @@ class SFTPTab(tk.Frame):
 
         # ttk style
         style = ttk.Style()
-        style.theme_use("default")
         style.configure("SFTP.Treeview",
                         background=t.surface_dark,
                         foreground=t.text,

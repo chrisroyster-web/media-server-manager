@@ -471,9 +471,11 @@ class SchedulerTab(tk.Frame):
     def _auto_refresh(self):
         self.refresh()
         try:
-            sel_idx = self.controller.tabs.index(self.controller.tabs.select())
-            my_idx  = self.controller.tabs.index(self)
-            if sel_idx == my_idx:
+            # winfo_ismapped() is true only while this tab (and every
+            # ancestor up to the toplevel) is actually the one on screen —
+            # works whether this tab is a direct child of the main notebook
+            # or nested inside a hub tab's own sub-notebook.
+            if self.winfo_ismapped():
                 self._refresh_job = self.after(10_000, self._auto_refresh)
         except Exception:
             pass

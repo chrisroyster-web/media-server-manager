@@ -197,11 +197,18 @@ _TYPE_TAG = {
     "systemd": "TIMER",
     "docker":  "DOCKER",
 }
+# Per-mode: a single fixed value can't clear 4.5:1 against both a dark
+# surface and a white one at once, so (unlike most accent colors in this
+# app, which use one constant value in both themes) these need their own
+# light/dark variant, same as the general text palette.
 _TYPE_COLOR = {
-    "cron":    "#f97316",
-    "systemd": "#5b8ef0",
-    "docker":  "#22c55e",
+    "dark":  {"cron": "#f97316", "systemd": "#6494f0", "docker": "#21c55e"},
+    "light": {"cron": "#c25205", "systemd": "#2c6deb", "docker": "#178840"},
 }
+
+
+def _type_color(kind, theme):
+    return _TYPE_COLOR[theme.mode][kind]
 
 
 class CronTab(tk.Frame):
@@ -271,9 +278,9 @@ class CronTab(tk.Frame):
         self._show_systemd = tk.BooleanVar(value=True)
         self._show_docker  = tk.BooleanVar(value=True)
         for lbl, var, color in [
-            ("Cron",   self._show_cron,    _TYPE_COLOR["cron"]),
-            ("Timers", self._show_systemd, _TYPE_COLOR["systemd"]),
-            ("Docker", self._show_docker,  _TYPE_COLOR["docker"]),
+            ("Cron",   self._show_cron,    _type_color("cron", t)),
+            ("Timers", self._show_systemd, _type_color("systemd", t)),
+            ("Docker", self._show_docker,  _type_color("docker", t)),
         ]:
             tk.Checkbutton(
                 fbar, text=lbl, variable=var, command=self._apply_filter,
@@ -567,9 +574,9 @@ class CronTab(tk.Frame):
                 badge, src, sched, nxt, left, last, passed, cmd))
             self._iid_map[iid] = job
 
-        self._tree.tag_configure("cron",    foreground=_TYPE_COLOR["cron"])
-        self._tree.tag_configure("systemd", foreground=_TYPE_COLOR["systemd"])
-        self._tree.tag_configure("docker",  foreground=_TYPE_COLOR["docker"])
+        self._tree.tag_configure("cron",    foreground=_type_color("cron", self.theme))
+        self._tree.tag_configure("systemd", foreground=_type_color("systemd", self.theme))
+        self._tree.tag_configure("docker",  foreground=_type_color("docker", self.theme))
 
     def _sort(self, col):
         rows = [(self._tree.set(k, col), k) for k in self._tree.get_children("")]

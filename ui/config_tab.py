@@ -38,6 +38,18 @@ class ConfigTab(tk.Frame):
         tk.Label(header, text="CONFIGURATION", bg=t.bg,
                  fg=t.text, font=t.font_title).pack(side="left")
 
+        # Quick-jump to section — this tab is one long continuous scroll
+        # covering every integration in the app, so jumping straight to
+        # e.g. "Prowlarr" beats scroll-hunting through 20+ sections.
+        # Populated once all _section_header() calls below have run.
+        self._section_anchors = []   # [(title, wrap_frame), ...]
+        self._jump_var = tk.StringVar(value="Jump to section…")
+        self._jump_box = ttk.Combobox(
+            header, textvariable=self._jump_var, state="readonly",
+            font=t.font_small, width=24)
+        self._jump_box.pack(side="left", padx=(20, 0))
+        self._jump_box.bind("<<ComboboxSelected>>", self._on_jump_selected)
+
         self.save_btn = tk.Button(header, text="Save & Apply", command=self._save)
         t.style_button(self.save_btn)
         self.save_btn.pack(side="right")
@@ -182,7 +194,7 @@ class ConfigTab(tk.Frame):
         self._show_btn = tk.Button(
             sab_frame, text="Show",
             command=self._toggle_key,
-            bg=t.surface, fg=t.blue_bright,
+            bg=t.surface, fg=t.link_text,
             font=t.font_small, bd=0, relief="flat",
             activebackground=t.surface, activeforeground=t.text,
         )
@@ -638,7 +650,7 @@ class ConfigTab(tk.Frame):
                  font=t.font_title).pack(side="left")
         cf_help_btn = tk.Button(cf_title_row, text="?",
                                  command=self._show_cloudflare_help,
-                                 bg=t.surface_light, fg=t.blue_bright,
+                                 bg=t.surface_light, fg=t.link_text,
                                  bd=0, relief="flat", font=("Segoe UI", 9, "bold"),
                                  width=2, cursor="hand2")
         cf_help_btn.pack(side="left", padx=(8, 0))
@@ -837,6 +849,11 @@ class ConfigTab(tk.Frame):
 
         # Bottom spacer
         tk.Frame(self.body, bg=t.bg, height=40).pack()
+
+        # Now that every _section_header() call above has registered its
+        # anchor, the quick-jump box (built at the top of this method,
+        # before any sections existed) can finally be filled in.
+        self._jump_box["values"] = [title for title, _ in self._section_anchors]
 
     # =========================================================
     # SECTION / COLUMN HELPERS
@@ -1145,6 +1162,18 @@ class ConfigTab(tk.Frame):
         if subtitle:
             tk.Label(wrap, text=subtitle, bg=t.bg, fg=t.text_muted,
                      font=t.font_small).pack(anchor="w")
+        self._section_anchors.append((title, wrap))
+
+    def _on_jump_selected(self, _event=None):
+        title = self._jump_var.get()
+        wrap = next((w for t, w in self._section_anchors if t == title), None)
+        if wrap is None:
+            return
+        self.body.update_idletasks()
+        body_h = self.body.winfo_height()
+        if body_h:
+            self._canvas.yview_moveto(wrap.winfo_y() / body_h)
+        self._jump_var.set("Jump to section…")
 
     def _col_header(self, cols, weights):
         t = self.theme
@@ -1160,9 +1189,9 @@ class ConfigTab(tk.Frame):
         t = self.theme
         tk.Button(
             self.body, text=text, command=cmd,
-            bg=t.bg, fg=t.blue_bright,
+            bg=t.bg, fg=t.link_text,
             font=t.font_small, bd=0, relief="flat",
-            activebackground=t.surface, activeforeground=t.blue_bright,
+            activebackground=t.surface, activeforeground=t.link_text,
             cursor="hand2",
         ).pack(anchor="w", padx=16, pady=(2, 6))
 
@@ -1468,7 +1497,7 @@ class ConfigTab(tk.Frame):
         t = self.theme
         state = {"visible": False}
         btn = tk.Button(frame, text="Show", bd=0, relief="flat",
-                        bg=t.surface, fg=t.blue_bright,
+                        bg=t.surface, fg=t.link_text,
                         font=t.font_small, cursor="hand2",
                         activebackground=t.surface, activeforeground=t.text)
         def _toggle():
@@ -1730,14 +1759,14 @@ class ConfigTab(tk.Frame):
             parent,
             text="Test Connection",
             command=command,
-            bg=t.surface_light, fg=t.blue_bright,
+            bg=t.surface_light, fg=t.link_text,
             bd=0, relief="flat",
             font=t.font_small, padx=10, pady=4,
             cursor="hand2",
         )
         btn.grid(row=row, column=0, sticky="w", pady=(8, 2))
-        btn.bind("<Enter>", lambda e: btn.configure(fg=t.blue_bright))
-        btn.bind("<Leave>", lambda e: btn.configure(fg=t.blue_bright))
+        btn.bind("<Enter>", lambda e: btn.configure(fg=t.link_text))
+        btn.bind("<Leave>", lambda e: btn.configure(fg=t.link_text))
 
         result_lbl = tk.Label(
             parent, text="",
@@ -2077,7 +2106,7 @@ class ConfigTab(tk.Frame):
             tk.Label(body, text=perm, bg=t.bg, fg=t.text,
                      font=t.font_small).grid(row=row_i, column=0, sticky="w", pady=2)
             level_lbl = tk.Label(body, text=level,
-                                 bg=t.surface, fg=t.blue_bright,
+                                 bg=t.surface, fg=t.link_text,
                                  font=t.font_mono, padx=6, pady=2,
                                  highlightbackground=t.card_border, highlightthickness=1)
             level_lbl.grid(row=row_i, column=1, sticky="w", padx=(10, 10), pady=2)

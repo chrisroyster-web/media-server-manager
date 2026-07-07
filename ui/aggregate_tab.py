@@ -140,10 +140,16 @@ class _MiniBar(tk.Frame):
 
     HEIGHT = 8
 
-    def __init__(self, parent, bg_color: str, **kwargs):
-        super().__init__(parent, bg=bg_color, **kwargs)
-        self._bg = bg_color
-        self._canvas = tk.Canvas(self, bg=bg_color, height=self.HEIGHT,
+    def __init__(self, parent, theme, **kwargs):
+        # Stores the live Theme object (not a resolved color string) so
+        # _draw() re-reads theme.card_bg fresh every time it redraws —
+        # otherwise the track would be stuck showing whatever the theme's
+        # card_bg happened to be at construction time, since the whole
+        # point of a "live" theme switch (see Theme.retheme()) is that
+        # this same object gets mutated in place rather than replaced.
+        self._theme = theme
+        super().__init__(parent, bg=theme.card_bg, **kwargs)
+        self._canvas = tk.Canvas(self, bg=theme.card_bg, height=self.HEIGHT,
                                  highlightthickness=0, bd=0)
         self._canvas.pack(fill="x", expand=True)
         self._canvas.bind("<Configure>", self._draw)
@@ -162,8 +168,9 @@ class _MiniBar(tk.Frame):
         h = self.HEIGHT
         if w < 2:
             return
+        bg = self._theme.card_bg
         # Track
-        c.create_rectangle(0, 0, w, h, fill=self._bg, outline="")
+        c.create_rectangle(0, 0, w, h, fill=bg, outline="")
         # Filled portion
         fill_w = int(w * self._pct / 100)
         if fill_w > 0:
@@ -243,7 +250,7 @@ class _ServerCard(tk.Frame):
                      font=t.font_small, width=4, anchor="e").grid(
                 row=row_i, column=0, padx=(0, 8), pady=3, sticky="e")
 
-            bar = _MiniBar(bars, bg_color=t.card_bg)
+            bar = _MiniBar(bars, t)
             bar.grid(row=row_i, column=1, sticky="ew", pady=3)
             self._bars[key] = bar
 

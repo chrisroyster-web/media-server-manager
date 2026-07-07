@@ -51,8 +51,7 @@ class Sidebar(tk.Frame):
 
         ("\U0001f4ca", "Tautulli",       33,  "MONITORING"),
         ("\U0001f7e2", "Uptime Kuma",    34,  None),
-        ("\U0001f4c8", "Netdata",        35,  None),
-        ("\U0001f52d", "Glances",        36,  None),
+        ("\U0001f4c8", "Monitoring",     35,  None),
         ("\U0001f4ca", "Bandwidth",      28,  None),
         ("\U0001f4f6", "Speedtest",      24,  None),
         ("\U0001f321", "Sensors",        54,  None),
@@ -60,11 +59,9 @@ class Sidebar(tk.Frame):
         ("\U0001f501", "Watchstate",     59,  None),
 
         ("\U0001f9e9", "Services",        3,  "INFRA"),
-        ("\U0001f504", "Restart Seq.",   47,  None),
         ("\U0001f433", "Docker",          4,  None),
         ("\U0001f40b", "Compose",        15,  None),
-        ("⏰",         "Cron Jobs",      16,  None),
-        ("📅",         "Scheduler",      44,  None),
+        ("⏰",         "Scheduled Tasks", 16,  None),
         ("📦",         "Install Apps",   45,  None),
         ("\U0001f465", "Sessions",       13,  None),
         ("\U0001f5a5", "Processes",      50,  None),
@@ -75,6 +72,7 @@ class Sidebar(tk.Frame):
         ("\U0001f4a0", "Tailscale",      27,  None),
         ("\U0001f6e1", "UFW Firewall",   51,  None),
         ("\U0001f50c", "Ports",          53,  None),
+        ("\U0001f527", "Net Toolkit",    56,  None),
 
         ("\U0001f4c2", "Files",           9,  "TOOLS"),
         ("\U0001f4cb", "Log Viewer",      6,  None),
@@ -84,7 +82,6 @@ class Sidebar(tk.Frame):
         ("\U0001f4be", "Backups",        29,  None),
         ("\U0001f504", "Updates",        12,  None),
         ("\U0001f514", "Notifications",  19,  None),
-        ("\U0001f527", "Net Toolkit",    56,  None),
         ("\U0001f4dc", "Audit Log",      61,  None),
 
         ("⚙",         "Config",          8,  "SETTINGS"),
@@ -103,6 +100,8 @@ class Sidebar(tk.Frame):
         self._active_idx = 0
         # {idx: {"label": str, "reason": str}}
         self._dimmed     = {}
+        self._section_animating = set()   # section names currently mid-collapse/expand
+        self._row_height = None           # measured once _build_sidebar finishes
 
         # Right-edge separator
         tk.Frame(self, bg="#1a1a1a", width=1).place(
@@ -132,7 +131,11 @@ class Sidebar(tk.Frame):
         self._app_lbl = tk.Label(
             logo_frame,
             text="All Clear",
-            bg=t.sidebar_bg, fg=t.text,
+            # sidebar_bg stays dark in both themes by design, but t.text
+            # flips to a dark color in light mode — was landing at a 1.2:1
+            # contrast ratio there. sidebar_icon_hover is the sidebar's own
+            # always-bright color, meant for exactly this.
+            bg=t.sidebar_bg, fg=t.sidebar_icon_hover,
             font=("Segoe UI Semibold", 12),
             anchor="w",
         )
@@ -184,7 +187,10 @@ class Sidebar(tk.Frame):
         self._shortcut_hint = tk.Label(
             self,
             text="Ctrl+?  shortcuts  ·  Ctrl+F  search",
-            bg=t.sidebar_bg, fg=t.text_dim,
+            # sidebar_icon (not text_dim) — this sits on sidebar_bg, which
+            # stays dark in both themes, so it needs the sidebar's own
+            # mode-invariant color rather than the general text hierarchy.
+            bg=t.sidebar_bg, fg=t.sidebar_icon,
             font=("Segoe UI", 8),
             anchor="center",
             cursor="hand2",
@@ -195,7 +201,7 @@ class Sidebar(tk.Frame):
         self._ver_lbl = tk.Label(
             self,
             text="All Clear  ·  v2.0.0",
-            bg=t.sidebar_bg, fg=t.text_dim,
+            bg=t.sidebar_bg, fg=t.sidebar_icon,
             font=("Segoe UI", 9),
             anchor="center",
             cursor="hand2",
@@ -229,6 +235,7 @@ class Sidebar(tk.Frame):
         # ── Build nav items ───────────────────────────────────────────
         self._section_widgets     = []
         self._section_rows        = {}   # section name -> [row frames] (its own items)
+        self._section_bodies      = {}   # section name -> body frame (holds those rows)
         self._section_labels      = {}   # section name -> header label (for chevron text)
         self._first_nav_row       = None   # anchor for collapse/expand re-pack
         self._first_section_spacer = None  # anchor for _server_section_frame re-pack
@@ -278,6 +285,7 @@ class Sidebar(tk.Frame):
                 current_body.pack(fill="x")
                 current_body.bind("<MouseWheel>", self._on_mousewheel)
                 self._section_rows[section] = []
+                self._section_bodies[section] = current_body
                 self._section_widgets.append((sec_frame, spacer, current_body))
 
             row = tk.Frame(current_body, bg=t.sidebar_bg)
@@ -311,6 +319,14 @@ class Sidebar(tk.Frame):
             self._buttons.append((btn, icon, label, idx, row))
 
         self.set_active(2)
+
+        # All nav rows share the same button style/font, so one measurement
+        # (taken while the very first row is still naturally packed) gives
+        # a standard row height reused by every section's collapse/expand
+        # animation, rather than measuring per-section.
+        self.update_idletasks()
+        if self._first_nav_row is not None:
+            self._row_height = self._first_nav_row.winfo_reqheight()
 
     # ------------------------------------------------------------------
     # HELPERS
@@ -356,7 +372,7 @@ class Sidebar(tk.Frame):
                               fg=t.sidebar_icon_active)
             elif is_dimmed:
                 row.configure(bg=t.sidebar_bg)
-                btn.configure(bg=t.sidebar_bg, fg=t.text_dim)
+                btn.configure(bg=t.sidebar_bg, fg=t.sidebar_section_text)
             else:
                 row.configure(bg=t.sidebar_bg)
                 btn.configure(bg=t.sidebar_bg, fg=t.sidebar_icon)
@@ -401,7 +417,7 @@ class Sidebar(tk.Frame):
             self._dimmed[idx] = {"label": label, "reason": reason}
             row.configure(bg=t.sidebar_bg)
             btn.configure(
-                fg=t.text_dim,
+                fg=t.sidebar_section_text,
                 bg=t.sidebar_bg,
                 cursor="arrow",
                 command=lambda i=idx: self._dimmed_click(i),
@@ -454,7 +470,13 @@ class Sidebar(tk.Frame):
                     padx=4, pady=0,
                 )
                 badge._is_badge = True
-                badge.pack(side="right", padx=(0, 6))
+                # place() instead of pack(): the row's button already fills
+                # the row via pack(fill="x", expand=True), so a badge packed
+                # afterwards gets shoved into the leftover cavity *below* the
+                # button instead of overlaying it. place() floats the badge
+                # on top, anchored to the row's right edge, independent of
+                # the button's own pack geometry.
+                badge.place(relx=1.0, rely=0.5, anchor="e", x=-10)
             break
 
     def _nav_click(self, idx):
@@ -555,7 +577,7 @@ class Sidebar(tk.Frame):
         add_btn = tk.Button(
             hdr_row, text="+",
             command=lambda: self.controller.open_server_dialog(),
-            bg=t.sidebar_bg, fg=t.text_dim,
+            bg=t.sidebar_bg, fg=t.sidebar_section_text,
             bd=0, relief="flat",
             font=("Segoe UI", 12, "bold"),
             padx=4, pady=0,
@@ -563,14 +585,14 @@ class Sidebar(tk.Frame):
         )
         add_btn.pack(side="right")
         add_btn.bind("<Enter>", lambda e: add_btn.configure(fg=t.sidebar_icon_hover))
-        add_btn.bind("<Leave>", lambda e: add_btn.configure(fg=t.text_dim))
+        add_btn.bind("<Leave>", lambda e: add_btn.configure(fg=t.sidebar_section_text))
         self._create_tooltip(add_btn, "Add server")
 
         if not servers:
             empty_btn = tk.Button(
                 pad, text="+ Add a server to get started",
                 command=lambda: self.controller.open_server_dialog(),
-                bg=t.sidebar_bg, fg=t.text_dim,
+                bg=t.sidebar_bg, fg=t.sidebar_section_text,
                 bd=0, relief="flat",
                 font=("Segoe UI", 9), anchor="w",
                 padx=0, pady=6,
@@ -578,7 +600,7 @@ class Sidebar(tk.Frame):
             )
             empty_btn.pack(fill="x", pady=(4, 0))
             empty_btn.bind("<Enter>", lambda e: empty_btn.configure(fg=t.sidebar_icon_hover))
-            empty_btn.bind("<Leave>", lambda e: empty_btn.configure(fg=t.text_dim))
+            empty_btn.bind("<Leave>", lambda e: empty_btn.configure(fg=t.sidebar_section_text))
         else:
             names = [s.get("name") or s.get("host", "Server {}".format(i + 1))
                      for i, s in enumerate(servers)]
@@ -601,7 +623,7 @@ class Sidebar(tk.Frame):
             edit_btn = tk.Button(
                 picker_row, text="\u270e",
                 command=lambda: self._edit_selected_server(servers, names),
-                bg=t.sidebar_bg, fg=t.text_dim,
+                bg=t.sidebar_bg, fg=t.sidebar_section_text,
                 bd=0, relief="flat",
                 font=("Segoe UI", 10),
                 padx=6, pady=0,
@@ -609,7 +631,7 @@ class Sidebar(tk.Frame):
             )
             edit_btn.pack(side="left", padx=(4, 0))
             edit_btn.bind("<Enter>", lambda e: edit_btn.configure(fg=t.sidebar_icon_hover))
-            edit_btn.bind("<Leave>", lambda e: edit_btn.configure(fg=t.text_dim))
+            edit_btn.bind("<Leave>", lambda e: edit_btn.configure(fg=t.sidebar_section_text))
             self._create_tooltip(edit_btn, "Edit / delete server")
 
         # Separator to visually detach the picker from the CORE nav below it
@@ -679,26 +701,73 @@ class Sidebar(tk.Frame):
 
     def _toggle_section(self, section):
         """Collapse/expand one sidebar section independently of the others,
-        persisting the choice so it survives an app restart. The section's
-        body frame itself stays packed at all times (see _build_sidebar) —
-        only its row children are shown/hidden — so this section's entry in
+        persisting the choice so it survives an app restart. Animates each
+        row's height down/up to zero — the same step-count/easing as the
+        whole-sidebar width animation (_animate) — rather than instantly
+        pack_forget()/pack()ing rows, which just made items disappear in
+        one frame instead of visibly collapsing. The section's body frame
+        itself stays packed at all times (see _build_sidebar) — only its
+        row children are shown/hidden — so this section's entry in
         _section_widgets stays a valid before= anchor for the whole-sidebar
         collapse case even while individually collapsed."""
+        if section in self._section_animating or not self._row_height:
+            return
         cfg = self.controller.config_manager
         state = dict(cfg.sidebar_section_collapsed)
         collapsed = not state.get(section, False)
         state[section] = collapsed
         cfg.sidebar_section_collapsed = state
 
-        for row in self._section_rows.get(section, []):
-            if collapsed:
-                row.pack_forget()
-            else:
-                row.pack(fill="x", padx=6, pady=1)
-
         lbl = self._section_labels.get(section)
         if lbl is not None:
             lbl.config(text=self._section_label_text(section, collapsed))
+
+        rows = self._section_rows.get(section, [])
+        if not rows:
+            return
+        self._section_animating.add(section)
+
+        if collapsed:
+            for row in rows:
+                row.pack_propagate(False)
+                row.configure(height=self._row_height)
+            self._animate_section(section, rows, self._row_height, 0, 0)
+        else:
+            for row in rows:
+                row.pack_propagate(False)
+                row.configure(height=0)
+                row.pack(fill="x", padx=6, pady=1)
+            self._animate_section(section, rows, 0, self._row_height, 0)
+
+    def _animate_section(self, section, rows, start_h, end_h, step):
+        frac = step / self.ANIM_STEPS
+        frac = frac * frac * (3 - 2 * frac)   # same ease-in-out cubic as _animate
+        h = int(start_h + (end_h - start_h) * frac)
+        for row in rows:
+            row.configure(height=h)
+        if step < self.ANIM_STEPS:
+            self.after(self.ANIM_MS, lambda: self._animate_section(
+                section, rows, start_h, end_h, step + 1))
+        else:
+            self._section_animating.discard(section)
+            if end_h == 0:
+                for row in rows:
+                    row.pack_forget()
+                # A Tk Frame that once sized itself around packed children
+                # doesn't shrink its own geometry cache after the last one
+                # is pack_forget()'d — verified directly: winfo_reqheight()
+                # keeps reporting the old size even after update_idletasks().
+                # Toggling pack_propagate forces a real recompute, which is
+                # what made every collapsed section's leftover height scale
+                # with its row count instead of collapsing to ~0.
+                body = self._section_bodies.get(section)
+                if body is not None:
+                    body.pack_propagate(False)
+                    body.configure(height=1)
+                    body.pack_propagate(True)
+            else:
+                for row in rows:
+                    row.pack_propagate(True)
 
     def _apply_collapsed_state(self):
         """Show/hide labels and section headers after animation completes."""
@@ -749,7 +818,7 @@ class Sidebar(tk.Frame):
                                    fg=self.theme.sidebar_icon_active)
                 elif is_dimmed:
                     btn.configure(bg=self.theme.sidebar_bg,
-                                  fg=self.theme.text_dim)
+                                  fg=self.theme.sidebar_section_text)
                 else:
                     btn.configure(bg=self.theme.sidebar_bg,
                                   fg=self.theme.sidebar_icon)

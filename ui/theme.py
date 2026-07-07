@@ -9,8 +9,88 @@ Palette:
   • Buttons, cards and sidebar follow Teams / Office 365 visual language
 """
 
+import re
 import tkinter as tk
 from tkinter import ttk
+
+_HEX_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+# Color-bearing widget options worth checking during a live theme switch.
+# Every plain tk widget bakes its bg=/fg=/etc. in as a literal string at
+# construction time (unlike ttk, there's no dynamic style to just
+# reconfigure), so recoloring in place means finding every widget whose
+# *current value* matches an old palette color and rewriting it.
+#
+# "bg"/"background" and "fg"/"foreground" are Tk aliases for the exact
+# same underlying option, not two different options — listing both used
+# to mean this got read-and-rewritten twice per widget under two names.
+# Since the first pass's *new* color can itself be a valid source key
+# elsewhere in the remap (many palette values collide across unrelated
+# attributes), the second pass could hop it again through an unrelated
+# mapping and land on the wrong color entirely. Only one name per alias.
+_COLOR_OPTS = (
+    "bg", "fg",
+    "activebackground", "activeforeground",
+    "disabledforeground", "disabledbackground",
+    "highlightbackground", "highlightcolor",
+    "insertbackground", "selectbackground", "selectforeground",
+    "readonlybackground", "troughcolor",
+)
+
+
+def recolor_widget_tree(widget, remap):
+    """Walk the widget tree from `widget` and rewrite any color option
+    whose current value is a key in `remap` (old hex -> new hex). Used by
+    MediaServerManager.toggle_theme() to re-skin the whole already-built
+    UI in place instead of restarting the process. Canvas-drawn items
+    (fill=/outline=) are handled separately since their colors live on
+    the drawn item, not a widget option.
+
+    Known limitation: this matches by literal color value, not by which
+    theme attribute a widget's color came from. A small number of
+    palette attributes share the same hex string in one mode but diverge
+    in the other (e.g. dark mode's surface_light/glass_shimmer/button
+    default all happen to be "#383838") — in that rare case only one of
+    them can win the remap. Cosmetic and limited to a couple of
+    rarely-touched, very similar neutral grays.
+    """
+    try:
+        keys = widget.keys()
+    except Exception:
+        keys = []
+    for opt in _COLOR_OPTS:
+        if opt not in keys:
+            continue
+        try:
+            # cget() can hand back a _tkinter.Tcl_Obj instead of a plain
+            # str for some widget/option combinations — unhashable, so it
+            # blows up a dict lookup unless coerced first.
+            cur = str(widget.cget(opt))
+        except Exception:
+            continue
+        new = remap.get(cur)
+        if new:
+            try:
+                widget.configure(**{opt: new})
+            except Exception:
+                pass
+
+    if isinstance(widget, tk.Canvas):
+        for item in widget.find_all():
+            for opt in ("fill", "outline"):
+                try:
+                    cur = str(widget.itemcget(item, opt))
+                except Exception:
+                    continue
+                new = remap.get(cur)
+                if new:
+                    try:
+                        widget.itemconfigure(item, **{opt: new})
+                    except Exception:
+                        pass
+
+    for child in widget.winfo_children():
+        recolor_widget_tree(child, remap)
 
 
 class Theme:
@@ -21,10 +101,20 @@ class Theme:
         card_bg="#2d2d2d", card_border="#3d3d3d",
         glass_accent="#2d2d2d", glass_shimmer="#383838",
         text="#f3f3f3", text_secondary="#d0d0d0",
-        text_muted="#9e9e9e", text_dim="#8a8a8a",
+        # was #8a8a8a — 3.99:1 against card_bg, just under WCAG AA's 4.5:1
+        # for normal-size text (this shows up on ~300 widgets: timestamps,
+        # secondary labels, etc.)
+        text_muted="#9e9e9e", text_dim="#949494",
         sidebar_icon="#c8c8c8", sidebar_icon_hover="#ffffff",
         sidebar_icon_active="#ffffff", sidebar_active_bg="#0078d4",
-        sidebar_active_bar="#0078d4", sidebar_section_text="#808080",
+        # Mode-invariant like sidebar_icon/sidebar_icon_hover — the
+        # sidebar itself stays dark in both themes, so its own "dim
+        # chrome text" (footer hint, version label, dimmed nav items)
+        # needs one fixed color that's readable against sidebar_bg in
+        # either mode, not the general (mode-swinging) text_dim.
+        # #929292 is the least-bright gray that still clears 4.5:1
+        # against both sidebar_bg shades (#252525 dark / #2b2b2b light).
+        sidebar_active_bar="#0078d4", sidebar_section_text="#929292",
         console_cmd="#9cdcfe", console_info="#d4d4d4",
         console_success="#57a300", console_error="#f14c4c",
         console_timestamp="#608b4e", console_output="#f3f3f3",
@@ -39,10 +129,11 @@ class Theme:
         card_bg="#ffffff", card_border="#d8d8d8",
         glass_accent="#ffffff", glass_shimmer="#f0f0f0",
         text="#1a1a1a", text_secondary="#3d3d3d",
-        text_muted="#666666", text_dim="#6e6e6e",
+        # was #6e6e6e — 4.05:1 against surface_dark, just under 4.5:1
+        text_muted="#666666", text_dim="#666666",
         sidebar_icon="#c8c8c8", sidebar_icon_hover="#ffffff",
         sidebar_icon_active="#ffffff", sidebar_active_bg="#0078d4",
-        sidebar_active_bar="#0078d4", sidebar_section_text="#888888",
+        sidebar_active_bar="#0078d4", sidebar_section_text="#929292",
         console_cmd="#0070c1", console_info="#1a1a1a",
         console_success="#107c10", console_error="#c50f1f",
         console_timestamp="#498205", console_output="#1a1a1a",
@@ -96,6 +187,13 @@ class Theme:
         # ── Accent / brand ────────────────────────────────────────────
         self.blue        = "#0078d4"   # Microsoft Fluent blue
         self.blue_bright = "#1a8cf3"   # hover / lighter blue
+        # blue_bright itself is a mode-constant (used as a hover glow /
+        # icon accent, where that's fine), but as small NORMAL-text on a
+        # surface it fails WCAG AA in one mode or the other depending on
+        # which surface it's testing against (e.g. Config's "Test
+        # Connection" / "+ Add..." buttons) — 4.5:1 needs a genuinely
+        # different value per mode, same as the rest of the text palette.
+        self.link_text = "#4fa6f5" if self.mode == "dark" else "#0a6fca"
         self.cyan        = "#00b4d8"
         self.yellow      = "#ffb900"   # Office amber
         self.orange      = "#da3b01"   # Office orange-red
@@ -142,6 +240,37 @@ class Theme:
         self.font_tiny    = ("Segoe UI", 10)
         self.font_mono    = ("Cascadia Code", 10) if self._font_exists("Cascadia Code") \
                             else ("Consolas", 10)
+
+    def snapshot(self):
+        """{attr: hex_str} for every color attribute currently set."""
+        return {k: v for k, v in vars(self).items()
+                if isinstance(v, str) and _HEX_RE.match(v)}
+
+    def retheme(self, mode):
+        """Re-run __init__ on this SAME instance for a new mode, in place.
+        Every tab stashed `self.theme = controller.theme` at construction
+        (a reference to this one shared object, not a copy) and every
+        hover-lambda closes over that same reference and re-reads colors
+        off it on each call — so mutating this instance in place means
+        the whole app picks up the new palette immediately, without
+        hunting down and reassigning `self.theme` on ~90 tab objects.
+        Returns {old_hex: new_hex} for recolor_widget_tree() to apply to
+        widgets that already baked the old colors in as literal strings."""
+        before = self.snapshot()
+        self.__init__(mode=mode)
+        after = self.snapshot()
+        remap = {}
+        # Foundational attributes (bg/surface/text/.... assigned early in
+        # __init__) should win over later internal helpers (_btn_def_bg
+        # etc.) on the rare occasion two attributes share an old hex value
+        # but diverge in the new one — iterate in reverse assignment
+        # order so the foundational ones are written last.
+        for k in reversed(list(before)):
+            old_v = before[k]
+            new_v = after.get(k)
+            if new_v and new_v != old_v:
+                remap[old_v] = new_v
+        return remap
 
     @staticmethod
     def _font_exists(name):
@@ -260,13 +389,24 @@ class Theme:
         danger   — red for destructive actions
         ghost    — text-only, no background
         """
-        configs = {
-            "default": (self._btn_def_bg,  self.text,           self._btn_def_hover, "#ffffff" if self.mode == "dark" else self.text),
-            "primary": (self.blue,          "#ffffff",           self.blue_bright,    "#ffffff"),
-            "danger":  ("#c42b1c",          "#ffffff",           "#d13438",           "#ffffff"),
-            "ghost":   (self.bg,            self.text_secondary, self.surface_light,  self.text),
-        }
-        bg, fg, hover_bg, hover_fg = configs.get(variant, configs["default"])
+        # Colors are resolved through this closure instead of being
+        # unpacked into plain local variables once, so the <Enter>/<Leave>
+        # handlers below re-read the CURRENT theme (self.xxx) on every
+        # hover rather than the palette that was active when the button
+        # was first built — otherwise a live theme switch (see
+        # Theme.retheme()) would get silently undone the next time the
+        # user's mouse touches any button, snapping it back to the old
+        # mode's colors.
+        def _colors():
+            configs = {
+                "default": (self._btn_def_bg,  self.text,           self._btn_def_hover, "#ffffff" if self.mode == "dark" else self.text),
+                "primary": (self.blue,          "#ffffff",           self.blue_bright,    "#ffffff"),
+                "danger":  ("#c42b1c",          "#ffffff",           "#d13438",           "#ffffff"),
+                "ghost":   (self.bg,            self.text_secondary, self.surface_light,  self.text),
+            }
+            return configs.get(variant, configs["default"])
+
+        bg, fg, hover_bg, hover_fg = _colors()
         btn.configure(
             bg=bg, fg=fg,
             activebackground=hover_bg, activeforeground=hover_fg,
@@ -275,8 +415,17 @@ class Theme:
             padx=14, pady=5,
             cursor="hand2",
         )
-        btn.bind("<Enter>", lambda e: btn.configure(bg=hover_bg, fg=hover_fg))
-        btn.bind("<Leave>", lambda e: btn.configure(bg=bg, fg=fg))
+
+        def _on_enter(_e):
+            _, _, hb, hf = _colors()
+            btn.configure(bg=hb, fg=hf)
+
+        def _on_leave(_e):
+            b, f, _, _ = _colors()
+            btn.configure(bg=b, fg=f)
+
+        btn.bind("<Enter>", _on_enter)
+        btn.bind("<Leave>", _on_leave)
 
     # ── Entry styling ─────────────────────────────────────────────────
     def style_entry(self, entry):
