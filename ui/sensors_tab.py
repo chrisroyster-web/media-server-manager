@@ -31,6 +31,52 @@ def _color_temp(t_val, theme):
     return theme.status_running
 
 
+def _reading_status(val, feature_data, prefix, is_temp, theme):
+    """Colour + short status label for one lm-sensors reading (temp, in,
+    or fan alike), judged against *that chip's own* reported min/max/crit/
+    alarm sub-fields (e.g. temp1_max, in0_alarm) rather than a hardcoded
+    guess — this is what makes it correct for whatever voltage rails, fan
+    thresholds, or temp limits a given server's sensor chip actually has,
+    instead of only working for the specific hardware in server 252.
+    """
+    siblings = {k: v for k, v in feature_data.items()
+                if k.startswith(prefix + "_") and isinstance(v, (int, float))}
+    crit_alarm = any(v for k, v in siblings.items()
+                      if "crit" in k and k.endswith("_alarm"))
+    alarm      = any(v for k, v in siblings.items() if k.endswith("_alarm"))
+    lo   = siblings.get(prefix + "_min")
+    hi   = siblings.get(prefix + "_max")
+    crit = siblings.get(prefix + "_crit")
+    has_thresholds = any(x is not None for x in (lo, hi, crit))
+
+    hw_severity = 0
+    if crit_alarm or (crit is not None and val >= crit):
+        hw_severity = 2
+    elif alarm or (hi is not None and val > hi) or (lo is not None and val < lo):
+        hw_severity = 1
+
+    if is_temp:
+        # A chip's own crit/max is usually set near its thermal-shutdown
+        # point (often 100C) — far above what a human would call "warm" —
+        # so layer in the old absolute heuristic too, otherwise a CPU that
+        # reports its own thresholds would show green all the way to ~100C
+        # instead of warning in the 65-80C band.
+        heuristic_severity = 2 if val >= 80 else 1 if val >= 65 else 0
+        severity = max(hw_severity, heuristic_severity)
+    else:
+        severity = hw_severity
+
+    if severity == 2:
+        return theme.status_stopped, "CRIT"
+    if severity == 1:
+        return theme.yellow, "WARN"
+    if is_temp:
+        return theme.status_running, ""
+    if has_thresholds:
+        return theme.status_running, "OK"
+    return None, ""
+
+
 def _spark(vals, width=20, height=14):
     """Return (canvas_data, min_v, max_v) for a simple line sparkline."""
     return vals
@@ -207,6 +253,7 @@ class SensorsTab(tk.Frame):
         self._cards = {}
 
         any_data = False
+        self._out_of_range = 0
 
         # ---- lm-sensors ----
         lm = data.get("lm", {})
@@ -224,11 +271,13 @@ class SensorsTab(tk.Frame):
                     if not isinstance(feature_data, dict):
                         continue
                     # Find the primary reading (highest priority sub-feature)
-                    val = None
-                    unit = "°C"
+                    val    = None
+                    unit   = "°C"
+                    prefix = None
                     for sub_key, sub_val in feature_data.items():
                         if "_input" in sub_key and isinstance(sub_val, (int, float)):
-                            val = sub_val
+                            val    = sub_val
+                            prefix = sub_key[:-len("_input")]
                             if "fan" in sub_key.lower():
                                 unit = "RPM"
                             elif "volt" in sub_key.lower() or "in" in sub_key.lower():
@@ -238,7 +287,12 @@ class SensorsTab(tk.Frame):
                         continue
                     key = "{}.{}".format(chip_name, feature_name)
                     self._push_history(key, val)
-                    self._make_card(card_row, key, feature_name, val, unit)
+                    color, status_label = _reading_status(
+                        val, feature_data, prefix, unit == "°C", t)
+                    if status_label in ("WARN", "CRIT"):
+                        self._out_of_range += 1
+                    self._make_card(card_row, key, feature_name, val, unit,
+                                     color=color, status_label=status_label)
 
         # ---- nvidia ----
         gpus = data.get("nvidia", [])
@@ -287,10 +341,14 @@ class SensorsTab(tk.Frame):
                      bg=t.bg, fg=t.text_muted, font=t.font_regular,
                      justify="center").pack(pady=40)
 
-        self._status.config(
-            text="{} sensor reading{}".format(
-                len(self._cards), "s" if len(self._cards) != 1 else ""),
-            bg=t.surface_dark, fg=t.text_muted)
+        status = "{} sensor reading{}".format(
+            len(self._cards), "s" if len(self._cards) != 1 else "")
+        if self._out_of_range:
+            status += "  ·  ⚠ {} out of range".format(self._out_of_range)
+            fg = t.status_stopped_text
+        else:
+            fg = t.text_muted
+        self._status.config(text=status, bg=t.surface_dark, fg=fg)
 
     def _section_header(self, text):
         t = self.theme
@@ -299,18 +357,26 @@ class SensorsTab(tk.Frame):
         tk.Label(self._body, text=text, bg=t.bg, fg=t.text_muted,
                  font=("Segoe UI", 8, "bold")).pack(anchor="w", padx=20, pady=(0, 4))
 
-    def _make_card(self, parent, key, label, val, unit):
+    def _make_card(self, parent, key, label, val, unit, color=None, status_label=""):
         t = self.theme
         is_temp = unit == "°C"
-        color = _color_temp(val if is_temp else None, t)
+        if color is None:
+            color = _color_temp(val if is_temp else None, t)
 
+        is_bad = status_label in ("WARN", "CRIT")
         card = tk.Frame(parent, bg=t.card_bg,
-                        highlightbackground=t.card_border,
-                        highlightthickness=1)
+                        highlightbackground=color if is_bad else t.card_border,
+                        highlightthickness=2 if is_bad else 1)
         card.pack(side="left", padx=(0, 8), pady=4, ipadx=12, ipady=8)
 
-        tk.Label(card, text=label, bg=t.card_bg, fg=t.text_muted,
-                 font=t.font_small).pack(anchor="w")
+        lbl_row = tk.Frame(card, bg=t.card_bg)
+        lbl_row.pack(fill="x", anchor="w")
+        tk.Label(lbl_row, text=label, bg=t.card_bg, fg=t.text_muted,
+                 font=t.font_small).pack(side="left")
+        if is_bad:
+            tk.Label(lbl_row, text="  {}  ".format(status_label),
+                     bg=color, fg="#fff", font=("Segoe UI", 7, "bold")
+                     ).pack(side="left", padx=(6, 0))
 
         val_frame = tk.Frame(card, bg=t.card_bg)
         val_frame.pack(anchor="w")
