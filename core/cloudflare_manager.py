@@ -83,6 +83,18 @@ def update_dns_record_content(token, zone_id, record_id, content):
         body={"content": content})
 
 
+def create_dns_record(token, zone_id, record_type, name, content,
+                      proxied=True, ttl=1):
+    """Create a new DNS record. ttl=1 means "automatic" (Cloudflare's
+    default for proxied records). Returns the created record dict."""
+    return _request(token, "POST",
+        "/zones/{}/dns_records".format(zone_id),
+        body={
+            "type": record_type, "name": name, "content": content,
+            "proxied": proxied, "ttl": ttl,
+        })
+
+
 # ---------------------------------------------------------------------------
 # Cache
 # ---------------------------------------------------------------------------

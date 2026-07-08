@@ -107,6 +107,42 @@ def test_update_dns_record_content_sends_patch_with_new_content():
     assert result["content"] == "5.6.7.8"
 
 
+def test_create_dns_record_sends_post_with_expected_body():
+    captured = {}
+
+    def fake_urlopen(req, timeout=None):
+        captured["method"] = req.get_method()
+        captured["data"] = json.loads(req.data.decode())
+        return _ok_response({"id": "new1", "name": "jellyseerr.example.com"})
+
+    with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+        result = cf.create_dns_record(
+            "tok", "zone123", "CNAME", "jellyseerr.example.com",
+            "tunnelid.cfargotunnel.com")
+
+    assert captured["method"] == "POST"
+    assert captured["data"] == {
+        "type": "CNAME", "name": "jellyseerr.example.com",
+        "content": "tunnelid.cfargotunnel.com", "proxied": True, "ttl": 1,
+    }
+    assert result["id"] == "new1"
+
+
+def test_create_dns_record_respects_proxied_and_ttl_overrides():
+    captured = {}
+
+    def fake_urlopen(req, timeout=None):
+        captured["data"] = json.loads(req.data.decode())
+        return _ok_response({"id": "new2"})
+
+    with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+        cf.create_dns_record("tok", "zone123", "A", "home.example.com",
+                             "1.2.3.4", proxied=False, ttl=3600)
+
+    assert captured["data"]["proxied"] is False
+    assert captured["data"]["ttl"] == 3600
+
+
 # ---------------------------------------------------------------------------
 # Cache purge
 # ---------------------------------------------------------------------------
