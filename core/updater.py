@@ -18,7 +18,7 @@ import urllib.error
 # ---------------------------------------------------------------------------
 # CONFIGURE THIS for your repository
 # ---------------------------------------------------------------------------
-GITHUB_REPO = "your-github-org/all-clear-server-services"
+GITHUB_REPO = "chrisroyster-web/media-server-manager"
 
 # ---------------------------------------------------------------------------
 # Internal constants

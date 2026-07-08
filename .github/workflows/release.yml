@@ -1,0 +1,73 @@
+# Release procedure:
+#   1. Bump APP_VERSION in main.py and AppVersion in
+#      AllClearServerServices_Setup.iss to the same new version.
+#   2. Commit that bump.
+#   3. git tag vX.Y.Z && git push origin vX.Y.Z
+# This workflow then builds the Windows installer and publishes it as a
+# GitHub Release with the .exe attached. core/updater.py's self-update
+# check reads that release via the GitHub API, and GitHub's automatic
+# per-asset SHA-256 "digest" is what download_to_temp() verifies against.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Generate default assets/config.json
+        # assets/config.json is gitignored (holds real server credentials at
+        # runtime) but MediaServerManager.spec bundles it as a data file, so
+        # a fresh checkout needs a default one on disk before building.
+        run: python -c "from core.config_manager import ConfigManager; ConfigManager()"
+
+      - name: Verify tag matches APP_VERSION / AppVersion
+        shell: bash
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          APP_VERSION=$(grep -m1 '^APP_VERSION = "' main.py | sed -E 's/^APP_VERSION = "([^"]+)"/\1/')
+          ISS_VERSION=$(grep -m1 '#define AppVersion' AllClearServerServices_Setup.iss | sed -E 's/.*"([^"]+)".*/\1/')
+
+          if [ "$TAG_VERSION" != "$APP_VERSION" ]; then
+            echo "Tag v$TAG_VERSION does not match APP_VERSION ($APP_VERSION) in main.py"
+            exit 1
+          fi
+          if [ "$TAG_VERSION" != "$ISS_VERSION" ]; then
+            echo "Tag v$TAG_VERSION does not match AppVersion ($ISS_VERSION) in AllClearServerServices_Setup.iss"
+            exit 1
+          fi
+
+      - name: Build with PyInstaller
+        run: pyinstaller MediaServerManager.spec --noconfirm
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y
+
+      - name: Compile installer
+        shell: cmd
+        run: '"C:\Program Files (x86)\Inno Setup 6\iscc.exe" AllClearServerServices_Setup.iss'
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: installer_output/*.exe

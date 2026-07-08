@@ -23,7 +23,7 @@ if "%ISCC%"=="" (
 :: ── Step 1: PyInstaller ─────────────────────────────────────
 echo [1/2] Running PyInstaller...
 echo.
-pyinstaller main.spec --noconfirm
+pyinstaller MediaServerManager.spec --noconfirm
 if errorlevel 1 (
     echo.
     echo ERROR: PyInstaller failed.
