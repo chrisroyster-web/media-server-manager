@@ -239,9 +239,13 @@ class SSHManager:
 
     @staticmethod
     def _strip_sudo_prompts(text):
+        # The real sudo prompt format is "[sudo] password for <user>: "
+        # (closing bracket, then a space) — "[sudo:" never actually
+        # matches that and let every prompt line straight through to the
+        # UI. Found via tests/test_ssh_manager.py.
         return "\n".join(
             l for l in text.splitlines()
-            if not (l.strip().startswith("[sudo:") or
+            if not (l.strip().startswith("[sudo]") or
                     l.strip().lower().startswith("password:") or
                     l.strip().lower().startswith("sudo:"))
         )

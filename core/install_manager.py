@@ -1012,7 +1012,13 @@ class InstallManager:
         if code != 0 or "present" not in status:
             return
         active, _, _ = self.ssh.run_sudo("ufw status | head -1")
-        if "active" not in active.lower():
+        # "active" is literally a substring of "inactive" — this used to
+        # match ufw's "Status: inactive" line too, meaning the "only when
+        # the firewall is actually active" guard never actually skipped
+        # anything. Match the full "status: active" phrase instead, which
+        # "status: inactive" does not contain. Found via
+        # tests/test_install_manager.py.
+        if "status: active" not in active.lower():
             return
         log(f"  Opening firewall port(s) for {app['name']}: {', '.join(ports)}\n")
         for spec in ports:
