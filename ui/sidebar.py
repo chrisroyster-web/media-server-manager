@@ -201,7 +201,7 @@ class Sidebar(tk.Frame):
             "<Button-1>", lambda e: self.controller._show_shortcut_help())
         self._ver_lbl = tk.Label(
             self,
-            text="All Clear  ·  v2.0.0",
+            text="All Clear  ·  v{}".format(controller.APP_VERSION),
             bg=t.sidebar_bg, fg=t.sidebar_icon,
             font=("Segoe UI", 9),
             anchor="center",
@@ -857,7 +857,7 @@ class Sidebar(tk.Frame):
             self._app_lbl.pack(side="left")
             self._theme_btn.pack(side="right")
             self._toggle_btn.pack(side="right", padx=4)
-            self._ver_lbl.config(text="All Clear  ·  v2.0.0")
+            self._ver_lbl.config(text="All Clear  ·  v{}".format(self.controller.APP_VERSION))
             self._shortcut_hint.pack(side="bottom", pady=(0, 4))
 
         # Section header frames — re-pack with before= to restore each

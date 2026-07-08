@@ -135,6 +135,8 @@ class MediaServerManager(tk.Tk):
     Main application window.
     """
 
+    APP_VERSION = APP_VERSION
+
     def __init__(self):
         super().__init__()
         self.withdraw()   # hidden until splash finishes

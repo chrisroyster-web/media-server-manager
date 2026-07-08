@@ -215,7 +215,7 @@ class LibraryTab(tk.Frame):
         self._tree.pack(side="left", fill="both", expand=True)
 
         col_cfg = [
-            ("title",   "Title",          340, "w"),
+            ("title",   "Title",          420, "w"),
             ("year",    "Year",            55, "center"),
             ("type",    "Type",            80, "center"),
             ("runtime", "Runtime",         75, "center"),
@@ -488,9 +488,12 @@ class LibraryTab(tk.Frame):
     # ------------------------------------------------------------------
     def _norm_jf(self, d):
         genres = ", ".join((d.get("Genres") or [])[:3])
+        name   = d.get("Name", "")
+        series = d.get("SeriesName")
+        title  = "{} - {}".format(series, name) if series else name
         return {
             "id":       d.get("Id", ""),
-            "title":    d.get("Name", ""),
+            "title":    title,
             "year":     str(d.get("ProductionYear", "")) if d.get("ProductionYear") else "",
             "type":     d.get("Type", ""),
             "runtime":  _fmt_ticks(d.get("RunTimeTicks")),
@@ -508,9 +511,12 @@ class LibraryTab(tk.Frame):
         type_label = {"movie": "Movie", "show": "TV Show",
                       "season": "Season", "episode": "Episode",
                       "track": "Track"}.get(ptype, ptype.title())
+        name   = d.get("title", "")
+        series = d.get("grandparentTitle")
+        title  = "{} - {}".format(series, name) if series else name
         return {
             "id":       d.get("ratingKey", ""),
-            "title":    d.get("title", ""),
+            "title":    title,
             "year":     str(d.get("year", "")) if d.get("year") else "",
             "type":     type_label,
             "runtime":  _fmt_ms(d.get("duration")),
