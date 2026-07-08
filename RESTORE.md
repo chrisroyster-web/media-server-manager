@@ -129,6 +129,13 @@ remount those shares again.
      working and re-establish the crontab entries if the restore didn't
      bring `etc/cron.d` and the root crontab back correctly.
 
+7. **Run `harden-server.sh`.** The restored snapshot should already carry
+   the SSH/UFW hardening (it's ordinary `/etc` config), but this confirms
+   it — and it's a safe no-op if the snapshot already had it:
+   ```
+   sudo bash harden-server.sh
+   ```
+
 ## If the NAS itself is also gone
 
 This whole plan assumes the NAS survived (it's the offsite-from-the-server
