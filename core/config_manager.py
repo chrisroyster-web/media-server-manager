@@ -44,6 +44,7 @@ class ConfigManager:
 
     DEFAULT_SERVICES = {
         "Emby":     {"service": "emby-server",  "port": 8096},
+        "Jellyfin": {"service": "jellyfin",      "port": 8096},
         "Sonarr":   {"service": "sonarr",        "port": 8989},
         "Radarr":   {"service": "radarr",        "port": 7878},
         "Prowlarr": {"service": "prowlarr",      "port": 9797},
@@ -55,7 +56,12 @@ class ConfigManager:
         "Tracearr":    {"container": "tracearr",    "port": 3000},
         "Homarr":      {"container": "homarr",      "port": 7575},
         "Uptime Kuma": {"container": "uptime-kuma", "port": 3001},
-        "Watchtower":  {"container": "watchtower",  "port": None},
+        "Portainer":   {"container": "portainer",   "port": 9000},
+        "ntfy":        {"container": "ntfy",        "port": 8090},
+        "WUD":         {"container": "wud",         "port": 3002},
+        "Glances":     {"container": "glances",     "port": 61208},
+        "Netdata":     {"container": "netdata",     "port": 19999},
+        "Jellyseerr":  {"container": "jellyseerr",  "port": 5056},
     }
 
     DEFAULT_STORAGE_MOUNTS = ["/", "/opt/media/downloads", "/mnt/nas/wsbackup"]
