@@ -872,8 +872,35 @@ class InstallManager:
     All methods are blocking and intended to be called from background threads.
     """
 
-    def __init__(self, ssh):
+    def __init__(self, ssh, config_manager=None):
         self.ssh = ssh
+        self.config_manager = config_manager
+
+    # ── Port resolution ──────────────────────────────────────────────────
+
+    @staticmethod
+    def _normalize(name: str) -> str:
+        return name.lower().replace(" ", "").replace("_", "").replace("-", "")
+
+    def _configured_port(self, app: dict):
+        """
+        The Config tab's Systemd Services / Docker Containers lists reflect
+        whatever port an app is *actually* deployed on (which can differ
+        from the registry's fresh-install default — e.g. Prowlarr running
+        on a customized 9797 instead of the default 9696). Prefer that over
+        the registry's own "port" whenever a matching entry exists.
+        """
+        if not self.config_manager:
+            return None
+        target = self._normalize(app["key"])
+        for entries in (self.config_manager.get_services(),
+                        self.config_manager.get_docker()):
+            for name, info in (entries or {}).items():
+                if self._normalize(name) == target:
+                    port = info.get("port")
+                    if port:
+                        return port
+        return None
 
     # ── Status check ────────────────────────────────────────────────────
 
@@ -985,7 +1012,7 @@ class InstallManager:
         Returns True when the HTTP status is 2xx, 3xx, 400, 401, or 403
         (apps often gate the root with auth — a 401 means the app is alive).
         """
-        port = app.get("port")
+        port = self._configured_port(app) or app.get("port")
         path = app.get("health_path")
         if not port or not path:
             return True  # no probe defined — trust Docker state
@@ -1004,7 +1031,7 @@ class InstallManager:
         health_path/port have nothing real to poll, so just wait the full
         settle time once, same as before.
         """
-        if not app.get("port") or not app.get("health_path"):
+        if not (self._configured_port(app) or app.get("port")) or not app.get("health_path"):
             time.sleep(timeout)
             return True
         deadline = time.time() + timeout
@@ -1043,7 +1070,10 @@ class InstallManager:
         Idempotent (ufw allow on an existing rule is a no-op) and never fails
         the calling operation — a missing/inactive firewall is not an error.
         """
-        ports = _ufw_ports_for(app)
+        resolved_port = self._configured_port(app)
+        effective_app = ({**app, "port": resolved_port}
+                          if resolved_port and "ufw_ports" not in app else app)
+        ports = _ufw_ports_for(effective_app)
         if not ports:
             return
         status, _, code = self.ssh.run("which ufw >/dev/null 2>&1 && echo present || echo absent")

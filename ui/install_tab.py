@@ -394,7 +394,7 @@ class InstallTab(tk.Frame):
         self._busy = True
         self._scan_btn.config(state="disabled", text="Scanning…")
         self._log("\n── Scan started ──────────────────────────────────────\n", "section")
-        self._im = InstallManager(self.controller.ssh)
+        self._im = InstallManager(self.controller.ssh, self.controller.config_manager)
 
         def _worker():
             # Pre-flight: is Docker available?
@@ -492,7 +492,7 @@ class InstallTab(tk.Frame):
         key  = app["key"]
         name = app["name"]
         if self._im is None:
-            self._im = InstallManager(self.controller.ssh)
+            self._im = InstallManager(self.controller.ssh, self.controller.config_manager)
         im = self._im
 
         self._log(f"\n── {op.title()}: {name} ───────────────────────────────\n", "section")
