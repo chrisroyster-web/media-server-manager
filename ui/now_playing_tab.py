@@ -8,6 +8,7 @@ Each card carries a server badge and routes kick/message to the correct API.
 
 import tkinter as tk
 from tkinter import messagebox
+import re
 import threading
 import urllib.request
 import json
@@ -43,6 +44,23 @@ def _fmt_bitrate(bps):
     return "{} kbps".format(bps // 1000)
 
 
+# Jellyfin/Emby report hardware acceleration as a short API-name code —
+# friendly names are cosmetic only; an unrecognized code still falls back
+# to displaying itself (upper-cased) rather than being dropped.
+_HWACCEL_NAMES = {
+    "qsv":          "Intel Quick Sync",
+    "nvenc":        "NVIDIA NVENC",
+    "amf":          "AMD AMF",
+    "vaapi":        "VAAPI",
+    "videotoolbox": "Apple VideoToolbox",
+}
+
+
+def _fmt_transcode_reasons(reasons):
+    """['VideoCodecNotSupported', ...] -> 'Video Codec Not Supported, ...'"""
+    return ", ".join(re.sub(r"(?<!^)(?=[A-Z])", " ", r) for r in (reasons or []))
+
+
 # ---------------------------------------------------------------------------
 # Session normalizers — each returns a common dict
 # ---------------------------------------------------------------------------
@@ -67,9 +85,12 @@ def _norm_plex(s):
             ts.get("videoDecision", "?").title(),
             ts.get("audioDecision", "?").title(),
             ts.get("speed", 0))
+        hw_title = ts.get("transcodeHwEncodeTitle") or ts.get("transcodeHwDecodeTitle")
+        hw_label = "Hardware ({})".format(hw_title) if hw_title else "Software (CPU)"
     else:
         stream_type   = "Direct Play"
         stream_detail = ""
+        hw_label      = ""
 
     media   = (s.get("Media") or [{}])[0]
     v_codec = media.get("videoCodec", "--").upper()
@@ -86,6 +107,7 @@ def _norm_plex(s):
         "device": player.get("title", "?"), "ip": player.get("address", "--"),
         "title": title, "state": state,
         "stream_type": stream_type, "stream_detail": stream_detail,
+        "hw_label": hw_label, "transcode_reason": "",
         "v_codec": v_codec, "a_codec": a_codec, "res": res, "bitrate": bitrate,
         "position_str": _fmt_ms(pos), "duration_str": _fmt_ms(duration),
         "progress_pct": pct, "can_message": False,
@@ -109,11 +131,17 @@ def _norm_jf(s, server="Jellyfin"):
 
     vid_direct = ti.get("IsVideoDirect", True)
     aud_direct = ti.get("IsAudioDirect", True)
+    hw_label = ""
+    transcode_reason = ""
     if not vid_direct:
         stream_type   = "Transcoding"
         stream_detail = "→ {}/{}".format(
             (ti.get("VideoCodec") or "").upper(),
             (ti.get("AudioCodec") or "").upper())
+        hwaccel = ti.get("HardwareAccelerationType") or ""
+        hw_label = ("Hardware ({})".format(_HWACCEL_NAMES.get(hwaccel, hwaccel.upper()))
+                    if hwaccel else "Software (CPU)")
+        transcode_reason = _fmt_transcode_reasons(ti.get("TranscodeReasons"))
     elif not aud_direct:
         stream_type   = "Video Direct / Audio Transcode"
         stream_detail = "Audio transcode"
@@ -137,6 +165,7 @@ def _norm_jf(s, server="Jellyfin"):
         "device": s.get("DeviceName", "?"), "ip": s.get("RemoteEndPoint", "--"),
         "title": title, "state": state,
         "stream_type": stream_type, "stream_detail": stream_detail,
+        "hw_label": hw_label, "transcode_reason": transcode_reason,
         "v_codec": v_codec, "a_codec": a_codec, "res": res, "bitrate": bitrate,
         "position_str": _fmt_ticks(pos_ticks), "duration_str": _fmt_ticks(dur_ticks),
         "progress_pct": pct, "can_message": True,
@@ -424,6 +453,12 @@ class NowPlayingTab(tk.Frame):
         tk.Label(head, text="  {}  ".format(s["stream_type"]),
                  bg=badge_col, fg="#fff", font=t.font_small).pack(side="right", padx=(4, 0))
 
+        # Hardware vs. software transcode badge (only when actually transcoding)
+        if s.get("hw_label"):
+            hw_col = t.blue_bright if s["hw_label"].startswith("Hardware") else t.yellow
+            tk.Label(head, text="  {}  ".format(s["hw_label"]),
+                     bg=hw_col, fg="#fff", font=t.font_small).pack(side="right", padx=(4, 0))
+
         # User / device row
         info = tk.Frame(card, bg=t.card_bg)
         info.pack(fill="x", padx=12, pady=2)
@@ -455,6 +490,7 @@ class NowPlayingTab(tk.Frame):
                 if s["v_codec"] != "--" else "",
             s["res"] if s["res"] != "--" else "",
             s["bitrate"] if s["bitrate"] != "--" else "",
+            "Reason: {}".format(s["transcode_reason"]) if s.get("transcode_reason") else "",
         ] if p]
         if detail_parts:
             tk.Label(card, text="   ·   ".join(detail_parts),
