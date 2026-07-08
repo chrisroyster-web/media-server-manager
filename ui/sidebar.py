@@ -201,7 +201,7 @@ class Sidebar(tk.Frame):
             "<Button-1>", lambda e: self.controller._show_shortcut_help())
         self._ver_lbl = tk.Label(
             self,
-            text="All Clear  ·  v{}".format(controller.APP_VERSION),
+            text="All Clear  ·  v{}".format(self.controller.APP_VERSION),
             bg=t.sidebar_bg, fg=t.sidebar_icon,
             font=("Segoe UI", 9),
             anchor="center",
