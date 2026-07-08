@@ -47,12 +47,16 @@ def recolor_widget_tree(widget, remap):
     the drawn item, not a widget option.
 
     Known limitation: this matches by literal color value, not by which
-    theme attribute a widget's color came from. A small number of
-    palette attributes share the same hex string in one mode but diverge
-    in the other (e.g. dark mode's surface_light/glass_shimmer/button
-    default all happen to be "#383838") — in that rare case only one of
-    them can win the remap. Cosmetic and limited to a couple of
-    rarely-touched, very similar neutral grays.
+    theme attribute a widget's color came from. If two palette attributes
+    ever share the same hex string in one mode but diverge in the other,
+    only one of them can win the remap for that value — give any
+    widely-used attribute its own distinct value rather than reusing
+    another attribute's (this bit _button_default_bg once: it shared
+    dark mode's "#383838" with surface_light/glass_shimmer, so every
+    default-styled button's remap silently landed on surface_light's
+    target instead of its own). What's left (surface_light/glass_shimmer
+    still share a value) is genuinely cosmetic — glass_shimmer has no
+    direct call sites in the codebase.
     """
     try:
         keys = widget.keys()
@@ -89,6 +93,29 @@ def recolor_widget_tree(widget, remap):
                     except Exception:
                         pass
 
+    if isinstance(widget, tk.Text):
+        # tag_config() colors (console/log output tags — cmd/info/error/
+        # etc. across ~40 tabs) live on the tag, not a widget option, so
+        # the .cget() walk above never sees them. Left unhandled, a tab's
+        # own base bg/fg gets corrected by the walk above but any text
+        # already inserted with a color tag keeps its color from whichever
+        # mode the tab was built in — e.g. a dark-mode-bright tag color
+        # sitting on a now-light background reads as barely-there, near
+        # enough to invisible that a command's output looks like it never
+        # ran.
+        for tagname in widget.tag_names():
+            for opt in ("foreground", "background"):
+                try:
+                    cur = str(widget.tag_cget(tagname, opt))
+                except Exception:
+                    continue
+                new = remap.get(cur)
+                if new:
+                    try:
+                        widget.tag_configure(tagname, **{opt: new})
+                    except Exception:
+                        pass
+
     for child in widget.winfo_children():
         recolor_widget_tree(child, remap)
 
@@ -118,7 +145,15 @@ class Theme:
         console_cmd="#9cdcfe", console_info="#d4d4d4",
         console_success="#57a300", console_error="#f14c4c",
         console_timestamp="#608b4e", console_output="#f3f3f3",
-        _button_default_bg="#383838", _button_default_hover="#4a4a4a",
+        # #363636, not #383838 — that's surface_light/glass_shimmer's dark
+        # value too, and a live theme switch (Theme.retheme()) can only
+        # map one old->new pair per source color. Every default-styled
+        # button (t.style_button(), used app-wide) was colliding with
+        # surface_light's remap and landing on light mode's near-white
+        # #f9f9f9 instead of its own #e0e0e0 — invisible against a white
+        # card until the button was hovered (whose handler reads the
+        # theme live, correcting it). One unit darker is imperceptible.
+        _button_default_bg="#363636", _button_default_hover="#4a4a4a",
         _button_ghost_bg_ref="bg",   # resolved at runtime
         _treeview_sel="#094771",
     )

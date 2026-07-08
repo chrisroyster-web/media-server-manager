@@ -256,22 +256,30 @@ class MediaUsersTab(tk.Frame):
         threading.Thread(target=self._fetch, daemon=True).start()
 
     def _fetch(self):
-        server = self._server_var.get()
+        # This runs on a background thread; if the window closes while a
+        # fetch is in flight, every Tk call below (reading _server_var,
+        # scheduling .after()) can raise once the main thread has left
+        # its event loop. There's nothing meaningful left to do at that
+        # point, so just stop.
         try:
-            users = self._api("GET", "/Users")
-            if isinstance(users, dict):
-                users = users.get("Items", []) or []
-        except Exception as e:
-            self.after(0, lambda err=str(e): self._status.config(
-                text="Cannot reach {}: {}".format(server, err),
-                bg=self.theme.surface_dark, fg=self.theme.status_stopped_text))
-            return
-        finally:
-            self._fetching = False
-            self.after(0, self._rc.schedule)
-        self.after(0, lambda: self._populate(server, users))
-        self.after(0, lambda: self._last_lbl.config(
-            text="{} · {}".format(server, time.strftime("%H:%M"))))
+            server = self._server_var.get()
+            try:
+                users = self._api("GET", "/Users")
+                if isinstance(users, dict):
+                    users = users.get("Items", []) or []
+            except Exception as e:
+                self.after(0, lambda err=str(e): self._status.config(
+                    text="Cannot reach {}: {}".format(server, err),
+                    bg=self.theme.surface_dark, fg=self.theme.status_stopped_text))
+                return
+            finally:
+                self._fetching = False
+                self.after(0, self._rc.schedule)
+            self.after(0, lambda: self._populate(server, users))
+            self.after(0, lambda: self._last_lbl.config(
+                text="{} · {}".format(server, time.strftime("%H:%M"))))
+        except RuntimeError:
+            pass
 
     # ------------------------------------------------------------------
     # POPULATE

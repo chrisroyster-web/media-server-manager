@@ -367,7 +367,37 @@ class Sidebar(tk.Frame):
             self._nav_canvas.yview_moveto(0.0)
 
     def _on_mousewheel(self, event):
-        self._nav_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        # A fast physical scroll delivers many wheel events in one burst,
+        # dispatched to Tk faster than it can settle canvas geometry
+        # between them. Calling yview_scroll() once per event (even with
+        # a post-hoc correction afterwards) let repeated rapid calls
+        # desync the embedded nav_frame window's actual on-screen position
+        # from what yview()/bbox() reported — verified directly: after a
+        # burst of ~150 synthetic events, yview() still read (0.0, 1.0)
+        # the whole time, yet the window had drifted anywhere from -600px
+        # to +550px depending on the exact sequence. Coalescing the whole
+        # burst into a single net delta, applied once after it settles,
+        # means yview_scroll() (or the "nothing to scroll" skip) only
+        # ever runs once per burst instead of once per tick, so there's
+        # nothing left to desync between repeated calls.
+        self._wheel_delta_pending = getattr(self, "_wheel_delta_pending", 0) + event.delta
+        if not getattr(self, "_wheel_scroll_scheduled", False):
+            self._wheel_scroll_scheduled = True
+            self.after_idle(self._apply_pending_wheel_scroll)
+
+    def _apply_pending_wheel_scroll(self):
+        delta = self._wheel_delta_pending
+        self._wheel_delta_pending = 0
+        self._wheel_scroll_scheduled = False
+        bbox = self._nav_canvas.bbox("all")
+        if bbox:
+            self._nav_canvas.configure(scrollregion=bbox)
+            if (bbox[3] - bbox[1]) <= self._nav_canvas.winfo_height():
+                # Nothing to scroll — make sure it's pinned at the top
+                # rather than calling yview_scroll() at all.
+                self._nav_canvas.yview_moveto(0.0)
+                return
+        self._nav_canvas.yview_scroll(int(-1 * (delta / 120)), "units")
 
     # ------------------------------------------------------------------
     # ACTIVE STATE  (Teams-style: full-width blue row, no accent bar)
@@ -783,6 +813,30 @@ class Sidebar(tk.Frame):
             else:
                 for row in rows:
                     row.pack_propagate(True)
+                # Rows that were just re-packed after sitting pack_forget()'d
+                # (and animated up from height=0) can be left showing a
+                # stale/unpainted look — the same underlying Tk-on-Windows
+                # quirk as the startup white-flash bug (see main.py's
+                # _splash_step): a widget resized/mapped while not fully
+                # visible doesn't always get a real repaint until something
+                # marks it dirty again. Re-asserting each button's own
+                # current colors is a harmless no-op value-wise, but forces
+                # that repaint, matching the same fix used there.
+                rows_set = set(rows)
+                for btn, icon, label, idx, row in self._buttons:
+                    if row in rows_set:
+                        btn.configure(bg=btn.cget("bg"), fg=btn.cget("fg"))
+
+            # A previous fix here called self._nav_canvas.lower()/.lift()
+            # to try to force a repaint of the area above the toggled
+            # section, based on a gap-above-SERVERS report that turned out
+            # to actually be caused by _on_mousewheel's scroll correction
+            # running reentrantly mid-burst (fixed there instead — see
+            # _settle_nav_scroll). Z-order-cycling the nav canvas on every
+            # single section toggle measured at ~750ms of added latency
+            # per toggle in this app's widget tree, and — worse — could
+            # hang the process outright when called back-to-back. Removed;
+            # nothing here actually needed it once the real bug was fixed.
 
     def _apply_collapsed_state(self):
         """Show/hide labels and section headers after animation completes."""

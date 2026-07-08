@@ -48,10 +48,13 @@ class ScheduledTasksHubTab(tk.Frame):
         self._nb.bind("<<NotebookTabChanged>>", self._on_subtab_changed)
 
     def _on_subtab_changed(self, _event=None):
+        # Not gated on ssh.connected: CronTab.refresh() already shows its
+        # own "Not connected" status when disconnected, so calling it
+        # unconditionally is what keeps that message accurate instead of
+        # leaving stale data on screen after a disconnect.
         current = self._nb.nametowidget(self._nb.select())
         if current is self.server_jobs_tab:
-            if self.controller.ssh.connected:
-                self.server_jobs_tab.refresh()
+            self.server_jobs_tab.refresh()
         elif current is self.automation_tab:
             self.automation_tab.on_show()
 

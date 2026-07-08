@@ -323,8 +323,11 @@ class NowPlayingTab(tk.Frame):
                     errors.append("Emby: {}".format(str(e)[:50]))
 
         if not any([plex_token, jf_key, emby_key]):
-            self.after(0, lambda: self._update_ui(
-                [], ["No media servers configured for this server profile.  →  Add API keys in Config."]))
+            try:
+                self.after(0, lambda: self._update_ui(
+                    [], ["No media servers configured for this server profile.  →  Add API keys in Config."]))
+            except RuntimeError:
+                pass  # window closed while this background fetch was in flight
             return
 
         for fn in (fetch_plex, fetch_jellyfin, fetch_emby):
@@ -334,8 +337,11 @@ class NowPlayingTab(tk.Frame):
         for t in threads:
             t.join()
 
-        self.after(0, lambda r=list(results), e=list(errors):
-                   self._update_ui(r, e))
+        try:
+            self.after(0, lambda r=list(results), e=list(errors):
+                       self._update_ui(r, e))
+        except RuntimeError:
+            pass  # window closed while this background fetch was in flight
 
     # ------------------------------------------------------------------
     # UI UPDATE

@@ -107,6 +107,13 @@ class RestartSequenceTab(tk.Frame):
         self._tree.pack(fill="both", expand=True)
         self._tree.bind("<<TreeviewSelect>>", self._on_select)
 
+        # Shown over the tree when the sequence is empty — otherwise this
+        # is just a blank table with no indication of why, or that adding
+        # items on the right is how you'd populate it.
+        self._empty_lbl = tk.Label(
+            tree_wrap, text="No sequence configured yet.\nAdd services on the right to get started.",
+            bg=t.card_bg, fg=t.text_muted, font=t.font_small, justify="center")
+
         # Sequence controls
         ctrl = tk.Frame(left, bg=t.bg)
         ctrl.pack(fill="x", pady=(8, 0))
@@ -277,6 +284,10 @@ class RestartSequenceTab(tk.Frame):
                 item.get("identifier", ""),
                 item.get("delay", 3),
             ))
+        if self._sequence:
+            self._empty_lbl.place_forget()
+        else:
+            self._empty_lbl.place(relx=0.5, rely=0.4, anchor="center")
         self._set_ctrl_state(False)
 
     def _on_select(self, _event):

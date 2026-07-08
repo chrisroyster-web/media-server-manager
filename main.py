@@ -206,8 +206,19 @@ class MediaServerManager(tk.Tk):
         style = ttk.Style()
         style.layout("Hidden.TNotebook.Tab", [])
 
+        # place(), not pack(fill="both", expand=True) — bisected this by
+        # testing against pre-session commits: a packed ttk.Notebook
+        # holding all 62 tab pages (many with deeply nested scrollable
+        # canvases) ends up never letting the *unrelated* status bar
+        # built later in __init__ (a sibling several levels up the tree,
+        # not even inside this notebook) actually map — it computes a
+        # correct position/size but winfo_ismapped()/winfo_viewable()
+        # stay false forever, so it's invisible despite "existing".
+        # place() doesn't participate in pack's recursive size-request
+        # propagation the way pack(expand=True) does, which avoids
+        # whatever geometry feedback loop pack() was triggering here.
         self.tabs = ttk.Notebook(content, style="Hidden.TNotebook")
-        self.tabs.pack(fill="both", expand=True)
+        self.tabs.place(x=0, y=0, relwidth=1.0, relheight=1.0)
 
         # Instantiate all tab panels (instantiation order = tab index)
         self.connection_panel = ConnectionPanel(self.tabs, self)   # 0
@@ -1167,9 +1178,18 @@ class MediaServerManager(tk.Tk):
         toast.update_idletasks()
         w = max(toast.winfo_reqwidth(), 320)
         h = toast.winfo_reqheight()
-        sw = self.winfo_screenwidth()
-        sh = self.winfo_screenheight()
-        toast.geometry("{}x{}+{}+{}".format(w, h, sw - w - 24, sh - h - 60))
+        # Anchor to this app's own window, not the physical monitor — on
+        # a large or multi-monitor desktop, a screen-corner toast can land
+        # far from the (possibly small, possibly off to one side) app
+        # window and go unnoticed. winfo_rootx/y + winfo_width/height is
+        # this window's actual on-screen bounds.
+        aw = self.winfo_width()
+        ah = self.winfo_height()
+        ax = self.winfo_rootx()
+        ay = self.winfo_rooty()
+        x = ax + max(0, aw - w - 24)
+        y = ay + max(0, ah - h - 60)
+        toast.geometry("{}x{}+{}+{}".format(w, h, x, y))
         toast.attributes("-alpha", 0.0)
         def _fadein(step=0, steps=10):
             try:
@@ -1288,20 +1308,39 @@ class MediaServerManager(tk.Tk):
         results_frame = tk.Frame(overlay, bg=t.surface)
         results_frame.pack(fill="x", pady=(4, 0))
         nav_items = self.sidebar._NAV_ITEMS
+
+        def _go_nav(idx):
+            _close()
+            self.sidebar._nav_click(idx)
+
+        def _go_config_section(title):
+            # Select Config first so the tab is actually mapped/laid out
+            # before _jump_to_section() measures it to compute a scroll
+            # fraction — jumping to an unmapped tab's geometry gives 0s.
+            _close()
+            self.sidebar._nav_click(8)
+            self.config_tab._jump_to_section(title)
+
         def _update(*_):
             for w in results_frame.winfo_children():
                 w.destroy()
             query = var.get().strip().lower()
             if not query:
                 return
-            matches = [(icon, label, idx) for icon, label, idx, _ in nav_items
+            # Two sources: sidebar nav items (whole tabs) and Config's
+            # individual section titles — many integrations (Sonarr,
+            # Prowlarr, Tautulli...) don't have their own nav entry at
+            # all, they're just a field group inside Config, so searching
+            # their name previously found nothing.
+            results = [("{} {}".format(icon, label), lambda i=idx: _go_nav(i))
+                       for icon, label, idx, _ in nav_items
                        if query in label.lower()]
-            for icon, label, idx in matches[:6]:
-                def _go(i=idx):
-                    _close()
-                    self.sidebar._nav_click(i)
+            results += [("⚙ {}".format(title), lambda ti=title: _go_config_section(ti))
+                        for title, _ in self.config_tab._section_anchors
+                        if query in title.lower()]
+            for text, action in results[:8]:
                 btn = tk.Button(results_frame,
-                                text="{} {}".format(icon, label), command=_go,
+                                text=text, command=action,
                                 bg=t.surface, fg=t.text,
                                 activebackground=t.blue, activeforeground="#fff",
                                 bd=0, relief="flat", font=t.font_regular,
@@ -1442,11 +1481,13 @@ class MediaServerManager(tk.Tk):
         close_btn.pack(pady=(20, 0))
 
         win.update_idletasks()
-        sw = self.winfo_screenwidth()
-        sh = self.winfo_screenheight()
+        # Center on this app's own window, not the physical screen — same
+        # reasoning as show_toast()'s positioning fix.
         w  = win.winfo_reqwidth()
         h  = win.winfo_reqheight()
-        win.geometry("{}x{}+{}+{}".format(w, h, (sw - w) // 2, (sh - h) // 2))
+        x  = self.winfo_rootx() + max(0, (self.winfo_width() - w) // 2)
+        y  = self.winfo_rooty() + max(0, (self.winfo_height() - h) // 2)
+        win.geometry("{}x{}+{}+{}".format(w, h, x, y))
         win.bind("<Escape>", lambda e: win.destroy())
 
     # ---------------------------------------------------------
@@ -1527,11 +1568,13 @@ class MediaServerManager(tk.Tk):
                   padx=12, pady=5, cursor="hand2").pack(side="left")
 
         win.update_idletasks()
-        sw = self.winfo_screenwidth()
-        sh = self.winfo_screenheight()
+        # Center on this app's own window, not the physical screen — same
+        # reasoning as show_toast()'s positioning fix.
         w  = win.winfo_reqwidth()
         h  = win.winfo_reqheight()
-        win.geometry("{}x{}+{}+{}".format(w, h, (sw - w) // 2, (sh - h) // 2))
+        x  = self.winfo_rootx() + max(0, (self.winfo_width() - w) // 2)
+        y  = self.winfo_rooty() + max(0, (self.winfo_height() - h) // 2)
+        win.geometry("{}x{}+{}+{}".format(w, h, x, y))
         win.bind("<Escape>", lambda e: win.destroy())
 
     # --------------------------------------------------

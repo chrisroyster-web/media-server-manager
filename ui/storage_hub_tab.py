@@ -49,15 +49,23 @@ class StorageHubTab(tk.Frame):
     def _on_subtab_changed(self, _event=None):
         # The three wrapped tabs have inconsistent entry-point method
         # names — dispatch each explicitly rather than normalizing three
-        # unrelated tabs just for this.
-        if not self.controller.ssh.connected:
-            return
+        # unrelated tabs just for this. Unlike the old version, this no
+        # longer gates the whole thing on ssh.connected: health_tab and
+        # filesystems_tab both show a proper "Not connected" status when
+        # disconnected, so calling them unconditionally is what actually
+        # keeps that message accurate (e.g. after connecting, using this
+        # tab, then disconnecting again) instead of leaving whatever was
+        # last fetched on screen.
         current = self._nb.nametowidget(self._nb.select())
         if current is self.health_tab:
-            self.health_tab._fetch()
+            self.health_tab._refresh()
         elif current is self.filesystems_tab:
             self.filesystems_tab.refresh()
-        elif current is self.usage_tab:
+        elif current is self.usage_tab and self.controller.ssh.connected:
+            # _scan() pops up a "select a root path" dialog when no path
+            # is set yet, checked *before* its own connection check, so
+            # unlike the other two this one still needs to be skipped
+            # while disconnected rather than shown a proper status.
             self.usage_tab._scan()
 
     def on_show(self):

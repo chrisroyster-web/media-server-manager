@@ -51,9 +51,11 @@ class DockerHubTab(tk.Frame):
     def _on_subtab_changed(self, _event=None):
         # The three wrapped tabs have inconsistent entry-point method
         # names (refresh_all() vs on_show()) — dispatch each explicitly
-        # rather than normalizing three unrelated tabs just for this.
-        if not self.controller.ssh.connected:
-            return
+        # rather than normalizing three unrelated tabs just for this. Not
+        # gated on ssh.connected: all three already show a proper "Not
+        # connected" status on their own when disconnected, and calling
+        # them unconditionally is what keeps that message accurate after
+        # a disconnect instead of leaving stale data on screen.
         current = self._nb.nametowidget(self._nb.select())
         if current is self.containers_tab:
             self.containers_tab.refresh_all()

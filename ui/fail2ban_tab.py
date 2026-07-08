@@ -339,5 +339,6 @@ class Fail2banTab(tk.Frame):
     # ──────────────────────────────────────────────────────────────────────
 
     def on_show(self):
-        if self.controller.ssh.connected:
-            self._fetch()
+        # Always call _fetch() — see docker_stats_tab.py for why gating
+        # this on connection state hid the "Not connected" message too.
+        self._fetch()

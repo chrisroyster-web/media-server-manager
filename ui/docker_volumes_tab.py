@@ -484,8 +484,9 @@ class DockerVolumesTab(tk.Frame):
     # on_show
     # -----------------------------------------------------------------------
     def on_show(self):
-        if self.controller.ssh.connected:
-            self.refresh()
+        # Always call refresh() — see docker_stats_tab.py for why gating
+        # this on connection state hid the "Not connected" message too.
+        self.refresh()
 
 
 class _CreateNetworkDialog(tk.Toplevel):

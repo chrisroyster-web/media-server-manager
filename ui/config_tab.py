@@ -38,17 +38,12 @@ class ConfigTab(tk.Frame):
         tk.Label(header, text="CONFIGURATION", bg=t.bg,
                  fg=t.text, font=t.font_title).pack(side="left")
 
-        # Quick-jump to section — this tab is one long continuous scroll
-        # covering every integration in the app, so jumping straight to
-        # e.g. "Prowlarr" beats scroll-hunting through 20+ sections.
-        # Populated once all _section_header() calls below have run.
+        # Section anchors, recorded by _section_header() as it's called
+        # below — used to populate the persistent nav list built after it
+        # (see the end of this method) and to scroll to a section on click.
         self._section_anchors = []   # [(title, wrap_frame), ...]
-        self._jump_var = tk.StringVar(value="Jump to section…")
-        self._jump_box = ttk.Combobox(
-            header, textvariable=self._jump_var, state="readonly",
-            font=t.font_small, width=24)
-        self._jump_box.pack(side="left", padx=(20, 0))
-        self._jump_box.bind("<<ComboboxSelected>>", self._on_jump_selected)
+        self._nav_buttons = {}       # title -> button, for highlighting
+        self._nav_active = None      # title of the currently-highlighted section
 
         self.save_btn = tk.Button(header, text="Save & Apply", command=self._save)
         t.style_button(self.save_btn)
@@ -70,9 +65,38 @@ class ConfigTab(tk.Frame):
                                     fg=t.text_secondary, font=t.font_small)
         self.status_lbl.pack(side="right", padx=12)
 
-        # ---- Scrollable body ----
-        self._canvas = tk.Canvas(self, bg=t.bg, highlightthickness=0)
-        sb = tk.Scrollbar(self, orient="vertical", command=self._canvas.yview)
+        # ---- Body: persistent section nav (left) + scrollable form (right) ----
+        # This tab is one long continuous scroll covering every integration
+        # in the app — a "jump to section" dropdown solved finding a
+        # section, but it disappears the moment you use it, so there's no
+        # sense of where you are or what else is nearby. A persistent list
+        # (same idea as a documentation page's sidebar TOC) stays visible
+        # the whole time and highlights your current section as you scroll.
+        split = tk.Frame(self, bg=t.bg)
+        split.pack(fill="both", expand=True)
+
+        nav_outer = tk.Frame(split, bg=t.surface_dark, width=190)
+        nav_outer.pack(side="left", fill="y")
+        nav_outer.pack_propagate(False)
+
+        nav_canvas = tk.Canvas(nav_outer, bg=t.surface_dark, highlightthickness=0)
+        nav_sb = tk.Scrollbar(nav_outer, orient="vertical", command=nav_canvas.yview)
+        nav_canvas.configure(yscrollcommand=nav_sb.set)
+        nav_sb.pack(side="right", fill="y")
+        nav_canvas.pack(side="left", fill="both", expand=True)
+
+        self._nav_list = tk.Frame(nav_canvas, bg=t.surface_dark)
+        nav_canvas.create_window((0, 0), window=self._nav_list, anchor="nw")
+        self._nav_list.bind("<Configure>", lambda e: nav_canvas.configure(
+            scrollregion=nav_canvas.bbox("all")))
+
+        def _nav_mw(e):
+            nav_canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+        for w in (nav_canvas, self._nav_list):
+            w.bind("<MouseWheel>", _nav_mw)
+
+        self._canvas = tk.Canvas(split, bg=t.bg, highlightthickness=0)
+        sb = tk.Scrollbar(split, orient="vertical", command=self._canvas.yview)
         self._canvas.configure(yscrollcommand=sb.set)
         sb.pack(side="right", fill="y")
         self._canvas.pack(side="left", fill="both", expand=True)
@@ -850,11 +874,6 @@ class ConfigTab(tk.Frame):
         # Bottom spacer
         tk.Frame(self.body, bg=t.bg, height=40).pack()
 
-        # Now that every _section_header() call above has registered its
-        # anchor, the quick-jump box (built at the top of this method,
-        # before any sections existed) can finally be filled in.
-        self._jump_box["values"] = [title for title, _ in self._section_anchors]
-
     # =========================================================
     # SECTION / COLUMN HELPERS
     # =========================================================
@@ -1164,8 +1183,31 @@ class ConfigTab(tk.Frame):
                      font=t.font_small).pack(anchor="w")
         self._section_anchors.append((title, wrap))
 
-    def _on_jump_selected(self, _event=None):
-        title = self._jump_var.get()
+        btn = tk.Button(
+            self._nav_list, text=title, anchor="w",
+            command=lambda ti=title: self._jump_to_section(ti),
+            bg=t.surface_dark, fg=t.text_muted,
+            bd=0, relief="flat", font=t.font_small,
+            padx=12, pady=5, cursor="hand2",
+        )
+        btn.pack(fill="x")
+        btn.bind("<Enter>", lambda e, ti=title: self._set_nav_button_color(ti, entering=True))
+        btn.bind("<Leave>", lambda e, ti=title: self._set_nav_button_color(ti, entering=False))
+        self._nav_buttons[title] = btn
+
+    def _set_nav_button_color(self, title, entering):
+        """fg only — never swap font weight here, since that changes the
+        button's text metrics and would jitter the whole nav list's width."""
+        t = self.theme
+        btn = self._nav_buttons.get(title)
+        if btn is None:
+            return
+        if title == self._nav_active:
+            btn.configure(fg=t.blue_bright)
+        else:
+            btn.configure(fg=t.text if entering else t.text_muted)
+
+    def _jump_to_section(self, title):
         wrap = next((w for t, w in self._section_anchors if t == title), None)
         if wrap is None:
             return
@@ -1173,7 +1215,12 @@ class ConfigTab(tk.Frame):
         body_h = self.body.winfo_height()
         if body_h:
             self._canvas.yview_moveto(wrap.winfo_y() / body_h)
-        self._jump_var.set("Jump to section…")
+
+        prev_active = self._nav_active
+        self._nav_active = title
+        if prev_active is not None:
+            self._set_nav_button_color(prev_active, entering=False)
+        self._set_nav_button_color(title, entering=False)
 
     def _col_header(self, cols, weights):
         t = self.theme

@@ -262,5 +262,6 @@ class PortsTab(tk.Frame):
         self._apply_filter()
 
     def on_show(self):
-        if self.controller.ssh.connected:
-            self.refresh()
+        # Always call refresh() — see docker_stats_tab.py for why gating
+        # this on connection state hid the "Not connected" message too.
+        self.refresh()

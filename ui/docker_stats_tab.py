@@ -177,8 +177,11 @@ class DockerStatsTab(tk.Frame):
     # ------------------------------------------------------------------
 
     def on_show(self):
-        if self.controller.ssh.connected:
-            self.refresh()
+        # Always call refresh() rather than gating it on connection state —
+        # refresh() already shows a proper "Not connected" status when
+        # disconnected; gating here meant that message never appeared at
+        # all and the tab just looked permanently blank instead.
+        self.refresh()
 
     # ------------------------------------------------------------------
     # REFRESH / FETCH

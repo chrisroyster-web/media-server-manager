@@ -151,6 +151,11 @@ class DockerTab(CardConsoleTab):
         if getattr(self, "_fetching", False): return
         self._rc.cancel()
         if not self.controller.ssh.connected:
+            # Without this, the tab just silently stayed blank — no
+            # "not connected" message anywhere, the same look as a bug.
+            self._sync_cards([], {}, {})
+            self._populate_images_tree([])
+            self._img_count_lbl.config(text="Not connected")
             return
         self._fetching = True
         threading.Thread(target=self._fetch_worker, daemon=True).start()
