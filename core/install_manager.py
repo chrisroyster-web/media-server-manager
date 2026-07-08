@@ -142,6 +142,44 @@ APP_REGISTRY = [
              f"{_RSU} jc21/nginx-proxy-manager:latest"),
         ],
     },
+    {
+        "key":          "tailscale",
+        "name":         "Tailscale",
+        "category":     "Infrastructure",
+        "desc":         "Mesh VPN for secure remote access to this server",
+        "port":         None,
+        "container":    None,
+        "image":        None,
+        "health_path":  None,
+        # Native install, not Docker — Tailscale needs host-level networking
+        # (its own network interface, routing) that a container would only
+        # get via --net=host anyway, and the Tailscale tab (ui/tailscale_tab.py)
+        # already expects a host-level `tailscale` CLI to SSH into.
+        "check_cmd":    "which tailscale",
+        "version_cmd":  "tailscale version 2>&1 | head -1",
+        "install_cmds": [
+            "curl -fsSL https://tailscale.com/install.sh -o /tmp/install-tailscale.sh",
+            "sudo sh /tmp/install-tailscale.sh",
+            "sudo systemctl enable --now tailscaled",
+            # Deliberately NOT running `tailscale up` here — it requires
+            # visiting a login URL in a browser to authenticate this device,
+            # which can't be scripted blind over SSH without risking the
+            # install hanging while it waits for an auth that never comes.
+            "echo 'Tailscale installed. Run: sudo tailscale up  -- then open the printed login URL to authenticate this device.'",
+        ],
+        "fix_cmds": [
+            "sudo systemctl restart tailscaled",
+        ],
+        "reinstall_cmds": [
+            "sudo apt-get install -y --reinstall tailscale",
+            "sudo systemctl restart tailscaled",
+        ],
+        "uninstall_cmds": [
+            "sudo tailscale down",
+            "sudo systemctl disable --now tailscaled",
+            "sudo apt-get remove -y tailscale",
+        ],
+    },
 
     # ── Media Servers ────────────────────────────────────────────────────
     {
