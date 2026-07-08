@@ -136,3 +136,15 @@ def test_property_wrappers_use_the_same_per_server_mechanism(cfg):
 
     cfg.dashboard_refresh_interval = 15
     assert cfg.dashboard_refresh_interval == 15
+
+
+def test_minimize_to_tray_on_close_defaults_true_and_round_trips(cfg):
+    """Defaults to True to preserve the app's original (pre-toggle)
+    behavior — minimizing to tray whenever a tray icon actually started."""
+    assert cfg.minimize_to_tray_on_close is True
+
+    cfg.minimize_to_tray_on_close = False
+    assert cfg.minimize_to_tray_on_close is False
+
+    on_disk = json.loads(open(cfg.CONFIG_PATH).read())
+    assert on_disk["minimize_to_tray_on_close"] is False

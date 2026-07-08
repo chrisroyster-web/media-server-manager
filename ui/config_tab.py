@@ -871,6 +871,21 @@ class ConfigTab(tk.Frame):
             padx=8, pady=6, wrap="none")
         self.apprise_urls_text.pack(fill="x")
 
+        # ---- Application Behavior ----
+        self._section_header("Application Behavior",
+                             "Controls for this app's own window, not a server setting")
+        app_behavior_frame = tk.Frame(self.body, bg=t.surface, padx=12, pady=10)
+        app_behavior_frame.pack(fill="x", padx=16, pady=(0, 8))
+
+        self.minimize_to_tray_var = tk.BooleanVar()
+        tk.Checkbutton(
+            app_behavior_frame,
+            text="Minimize to the system tray when closing the window (instead of exiting)",
+            variable=self.minimize_to_tray_var,
+            bg=t.surface, fg=t.text, selectcolor=t.surface_dark,
+            activebackground=t.surface,
+            font=t.font_regular).pack(anchor="w")
+
         # Bottom spacer
         tk.Frame(self.body, bg=t.bg, height=40).pack()
 
@@ -1416,6 +1431,9 @@ class ConfigTab(tk.Frame):
         self.apprise_urls_text.delete("1.0", "end")
         self.apprise_urls_text.insert("1.0", cfg.notify_apprise_urls)
 
+        # Application Behavior
+        self.minimize_to_tray_var.set(cfg.minimize_to_tray_on_close)
+
     # =========================================================
     # ROW BUILDERS
     # =========================================================
@@ -1693,6 +1711,9 @@ class ConfigTab(tk.Frame):
         notify_apprise_enabled = self.apprise_enabled_var.get()
         notify_apprise_urls     = self.apprise_urls_text.get("1.0", "end").strip()
 
+        # --- Application Behavior ---
+        minimize_to_tray_on_close = self.minimize_to_tray_var.get()
+
         # --- Persist ---
         cfg = self.controller.config_manager
 
@@ -1787,6 +1808,7 @@ class ConfigTab(tk.Frame):
         cfg.config["notify_smtp_pass"]       = notify_smtp_pass
         cfg.config["notify_apprise_enabled"] = notify_apprise_enabled
         cfg.config["notify_apprise_urls"]    = notify_apprise_urls
+        cfg.config["minimize_to_tray_on_close"] = minimize_to_tray_on_close
         cfg.save()
 
         server_name = (cfg.get_active_server() or {}).get("name", "default")

@@ -86,6 +86,7 @@ class ConfigManager:
         "sidebar_collapsed":          False,
         "sidebar_auto_collapse":      True,
         "sidebar_section_collapsed":  {},
+        "minimize_to_tray_on_close":  True,
         "last_host":                  "",
         "last_username":              "",
         "dashboard_refresh_interval": 30,
@@ -302,6 +303,17 @@ class ConfigManager:
     @sidebar_auto_collapse.setter
     def sidebar_auto_collapse(self, value):
         self.config["sidebar_auto_collapse"] = value; self.save()
+
+    @property
+    def minimize_to_tray_on_close(self):
+        """Whether clicking the window's X button minimizes to the system
+        tray instead of exiting. Defaults to True, matching the app's
+        original (non-configurable) behavior — closing to tray whenever a
+        tray icon is actually available (see main.py's _on_close)."""
+        return self.config.get("minimize_to_tray_on_close", True)
+    @minimize_to_tray_on_close.setter
+    def minimize_to_tray_on_close(self, value):
+        self.config["minimize_to_tray_on_close"] = value; self.save()
 
     @property
     def last_host(self):

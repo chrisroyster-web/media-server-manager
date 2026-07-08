@@ -519,8 +519,11 @@ class MediaServerManager(tk.Tk):
             self.after(500, self._auto_connect)
 
     def _on_close(self):
-        """Minimize to tray instead of closing (if tray is active)."""
-        if self.tray._icon is not None:
+        """Minimize to tray instead of closing, if the user wants that
+        (Config tab toggle) and a tray icon actually started — falling
+        back to a real exit either way the icon never came up avoids the
+        app becoming invisible with no way to bring it back."""
+        if self.config_manager.minimize_to_tray_on_close and self.tray._icon is not None:
             self.withdraw()
         else:
             self.tray.stop()
