@@ -1560,6 +1560,13 @@ class ConfigTab(tk.Frame):
     def _save(self):
         self.save_btn.config(state="disabled", text="Saving...")
 
+        # Snapshot the security-relevant toggles before they're overwritten
+        # below, so the audit log can call out an actual VPN/reverse-proxy
+        # exposure change specifically rather than just "config was saved".
+        prev_settings = (self.controller.config_manager.get_active_server() or {}).get("settings", {})
+        prev_vpn_enabled   = bool(prev_settings.get("vpn_enabled"))
+        prev_proxy_enabled = bool(prev_settings.get("proxy_enabled"))
+
         # --- Collect services ---
         services = {}
         for row in self._service_rows:
@@ -1781,6 +1788,17 @@ class ConfigTab(tk.Frame):
         cfg.config["notify_apprise_enabled"] = notify_apprise_enabled
         cfg.config["notify_apprise_urls"]    = notify_apprise_urls
         cfg.save()
+
+        server_name = (cfg.get_active_server() or {}).get("name", "default")
+        self.controller.audit_log("config.save_and_apply", server_name)
+        if vpn_enabled != prev_vpn_enabled:
+            self.controller.audit_log(
+                "vpn.enable" if vpn_enabled else "vpn.disable", server_name,
+                detail=vpn_type)
+        if proxy_enabled != prev_proxy_enabled:
+            self.controller.audit_log(
+                "proxy.enable" if proxy_enabled else "proxy.disable", server_name,
+                detail=proxy_type)
 
         self.controller.apply_config()
         self.save_btn.config(state="normal", text="Save & Apply")

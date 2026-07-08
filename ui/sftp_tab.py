@@ -409,8 +409,10 @@ class SFTPTab(tk.Frame):
                 self.after(0, lambda: self._set_status(
                     "Uploaded  " + filename, "success"))
                 self.after(0, self._refresh)
+                self.controller.audit_log("sftp.upload", remote, result="ok")
             except Exception as e:
                 self.after(0, lambda err=str(e): self._set_status("Upload failed: " + err, "error"))
+                self.controller.audit_log("sftp.upload", remote, detail=str(e)[:200], result="fail")
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -431,8 +433,10 @@ class SFTPTab(tk.Frame):
                 sftp.mkdir(remote)
                 self.after(0, lambda: self._set_status("Created folder  " + name, "success"))
                 self.after(0, self._refresh)
+                self.controller.audit_log("sftp.mkdir", remote, result="ok")
             except Exception as e:
                 self.after(0, lambda err=str(e): self._set_status("Create folder failed: " + err, "error"))
+                self.controller.audit_log("sftp.mkdir", remote, detail=str(e)[:200], result="fail")
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -458,8 +462,10 @@ class SFTPTab(tk.Frame):
                 self.after(0, lambda: self._set_status(
                     "Renamed  " + name + "  →  " + new_name.strip(), "success"))
                 self.after(0, self._refresh)
+                self.controller.audit_log("sftp.rename", old_remote, detail="-> " + new_remote, result="ok")
             except Exception as e:
                 self.after(0, lambda err=str(e): self._set_status("Rename failed: " + err, "error"))
+                self.controller.audit_log("sftp.rename", old_remote, detail=str(e)[:200], result="fail")
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -492,8 +498,14 @@ class SFTPTab(tk.Frame):
                 self.after(0, lambda: self._set_status(
                     "Deleted  " + name, "success"))
                 self.after(0, self._refresh)
+                self.controller.audit_log(
+                    "sftp.delete_folder" if is_dir else "sftp.delete_file",
+                    remote, result="ok")
             except Exception as e:
                 self.after(0, lambda err=str(e): self._set_status("Delete failed: " + err, "error"))
+                self.controller.audit_log(
+                    "sftp.delete_folder" if is_dir else "sftp.delete_file",
+                    remote, detail=str(e)[:200], result="fail")
 
         threading.Thread(target=worker, daemon=True).start()
 

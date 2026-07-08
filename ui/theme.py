@@ -254,7 +254,16 @@ class Theme:
         # already tuned for legibility at text size in both modes.
         self.status_stopped_text = palette["console_error"]
 
-        self.glow_green = "#57a300"
+        # #57a301, not #57a300 — that's console_success/status_running's
+        # dark-mode value too, and unlike those two this one doesn't
+        # change between modes. A live retheme's remap can only carry one
+        # target per source color, and status_running's (correctly) wins
+        # the shared "#57a300" — which meant a widget colored with
+        # glow_green specifically (the status-dot glow ring in main.py's
+        # status bar) got incorrectly dragged to light mode's "#107c10"
+        # instead of staying put. One unit off is imperceptible; found via
+        # tests/test_theme.py's per-attribute retheme check.
+        self.glow_green = "#57a301"
         self.glow_blue  = "#0078d4"
         self.glow_red   = "#d13438"
 
