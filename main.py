@@ -68,7 +68,7 @@ from core.scheduler import TaskScheduler
 from ui.theme import Theme
 
 
-APP_VERSION = "3.0.0"
+APP_VERSION = "3.0.1"
 
 
 def _crash_log_path():
