@@ -5,28 +5,19 @@ so a single tab with a server picker replaces two identical tabs.
 """
 
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox
 import threading
-import urllib.request
-import json
 import time
 
 from ui.refresh_control import RefreshControl
 from ui.empty_state import EmptyState
+from core.request_client import api_get as _api, api_post as _api_post
 
 _STATUS     = {1: "Pending", 2: "Approved", 3: "Declined", 4: "Available", 5: "Processing"}
 _STATUS_TAG = {1: "pending", 2: "approved", 3: "declined", 4: "available", 5: "processing"}
 
 _SERVER_OVERSEERR  = "Overseerr"
 _SERVER_JELLYSEERR = "Jellyseerr"
-
-
-def _api(host, port, apikey, path):
-    host = host.removeprefix("https://").removeprefix("http://").strip("/").strip()
-    url  = "http://{}:{}/api/v1/{}".format(host, port, path)
-    req  = urllib.request.Request(url, headers={"X-Api-Key": apikey})
-    with urllib.request.urlopen(req, timeout=8) as r:
-        return json.loads(r.read().decode())
 
 
 class MediaRequestsTab(tk.Frame):
@@ -36,6 +27,7 @@ class MediaRequestsTab(tk.Frame):
         super().__init__(parent, bg=controller.theme.bg)
         self.controller = controller
         self.theme      = controller.theme
+        self._req_by_row = {}   # tree iid -> request dict (for approve/decline)
         self._build_ui()
 
     # ------------------------------------------------------------------
@@ -146,6 +138,22 @@ class MediaRequestsTab(tk.Frame):
 
     def _build_requests_tab(self):
         t = self.theme
+
+        action_row = tk.Frame(self._req_frame, bg=t.bg)
+        action_row.pack(fill="x", pady=(0, 6))
+        self._approve_btn = tk.Button(action_row, text="✓ Approve",
+                                      command=lambda: self._act_on_selected("approve"),
+                                      state="disabled")
+        t.style_button(self._approve_btn)
+        self._approve_btn.configure(fg=t.status_running)
+        self._approve_btn.pack(side="left", padx=(0, 6))
+        self._decline_btn = tk.Button(action_row, text="✗ Decline",
+                                      command=lambda: self._act_on_selected("decline"),
+                                      state="disabled")
+        t.style_button(self._decline_btn)
+        self._decline_btn.configure(fg=t.status_stopped_text)
+        self._decline_btn.pack(side="left")
+
         style = ttk.Style()
         style.configure("MR.Treeview",
                         background=t.card_bg, foreground=t.text,
@@ -182,6 +190,14 @@ class MediaRequestsTab(tk.Frame):
         self._req_tree.configure(yscrollcommand=vsb.set)
         vsb.pack(side="right", fill="y")
         self._req_tree.pack(fill="both", expand=True)
+        self._req_tree.bind("<<TreeviewSelect>>", self._on_request_select)
+
+    def _on_request_select(self, _event=None):
+        sel = self._req_tree.selection()
+        req = self._req_by_row.get(sel[0]) if sel else None
+        is_pending = bool(req) and req.get("status", 1) == 1
+        self._approve_btn.config(state="normal" if is_pending else "disabled")
+        self._decline_btn.config(state="normal" if is_pending else "disabled")
 
     def _build_users_tab(self):
         cols = ("rank", "name", "requests")
@@ -282,7 +298,9 @@ class MediaRequestsTab(tk.Frame):
         self._card_processing.config(text=str(processing))
         self._card_available.config(text=str(available))
 
+        self._current_server = server
         self._req_tree.delete(*self._req_tree.get_children())
+        self._req_by_row = {}
         for req in requests:
             code   = req.get("status", 1)
             media  = req.get("media", {}) or {}
@@ -290,10 +308,12 @@ class MediaRequestsTab(tk.Frame):
                       media.get("name") or "--")
             rname  = ((req.get("requestedBy") or {}).get("displayName") or
                       (req.get("requestedBy") or {}).get("username") or "--")
-            self._req_tree.insert("", "end", tags=(_STATUS_TAG.get(code, "pending"),),
+            iid = self._req_tree.insert("", "end", tags=(_STATUS_TAG.get(code, "pending"),),
                                   values=(req.get("createdAt", "")[:10],
                                           req.get("type", "").capitalize(),
                                           title, rname, _STATUS.get(code, "?")))
+            self._req_by_row[iid] = {**req, "_title": title}
+        self._on_request_select()
 
         self._user_tree.delete(*self._user_tree.get_children())
         for i, user in enumerate(users, 1):
@@ -305,3 +325,54 @@ class MediaRequestsTab(tk.Frame):
             text="{} total | {} pending | {} available  ({})".format(
                 total, pending, available, server),
             bg=t.surface_dark, fg=t.yellow if pending else t.status_running)
+
+    # ------------------------------------------------------------------
+    # APPROVE / DECLINE
+    # ------------------------------------------------------------------
+    def _act_on_selected(self, action: str):
+        sel = self._req_tree.selection()
+        if not sel:
+            return
+        req = self._req_by_row.get(sel[0])
+        if not req or req.get("status", 1) != 1:
+            return
+
+        title = req.get("_title", "this request")
+        verb  = "Approve" if action == "approve" else "Decline"
+        if not messagebox.askyesno(
+                "{} Request".format(verb),
+                '{} the request for "{}"?'.format(verb, title),
+                parent=self):
+            return
+
+        self._approve_btn.config(state="disabled")
+        self._decline_btn.config(state="disabled")
+        self._status.config(text="{}ing request…".format(verb.rstrip("e")),
+                             bg=self.theme.blue, fg="#ffffff")
+        threading.Thread(target=self._do_act, args=(req["id"], action), daemon=True).start()
+
+    def _do_act(self, request_id, action):
+        cfg    = self.controller.config_manager
+        server = self._current_server
+        if server == _SERVER_OVERSEERR:
+            host, port, key = cfg.overseerr_host, cfg.overseerr_port, cfg.overseerr_apikey
+        else:
+            host, port, key = cfg.jellyseerr_host, cfg.jellyseerr_port, cfg.jellyseerr_apikey
+
+        try:
+            _api_post(host, port, key, "request/{}/{}".format(request_id, action))
+            ok, err = True, ""
+        except Exception as e:
+            ok, err = False, str(e)
+
+        self.after(0, lambda: self._finish_act(ok, err, action))
+
+    def _finish_act(self, ok, err, action):
+        if ok:
+            self._status.config(text="Request {}d.".format(action),
+                                bg=self.theme.surface_dark, fg=self.theme.status_running)
+            self.refresh()
+        else:
+            self._status.config(text="Failed to {}: {}".format(action, err[:80]),
+                                bg=self.theme.surface_dark, fg=self.theme.status_stopped_text)
+            self._on_request_select()
