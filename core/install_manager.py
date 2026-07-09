@@ -832,12 +832,24 @@ APP_REGISTRY = [
         "image": "ghcr.io/homarr-labs/homarr:latest",
         "health_path": "/",
         "install_cmds": [
-            "mkdir -p $HOME/docker/homarr/config $HOME/docker/homarr/data",
+            # v1.x rewrite: a single /appdata volume and a required
+            # SECRET_ENCRYPTION_KEY — the old /app/data/configs + /data
+            # split (from the pre-1.0 ajnart/homarr image) no longer
+            # applies and sets the container up to crash-loop on port
+            # 7575 (its internal nginx already owns that port; a stray
+            # PORT env var makes Next.js fight it for the same socket).
+            # The key is generated once into a file and reused by
+            # reinstall_cmds below — regenerating it on every recreate
+            # would silently break decryption of anything already
+            # encrypted with the original key.
+            "mkdir -p $HOME/docker/homarr/appdata",
+            "[ -f $HOME/docker/homarr/.env ] || "
+            'echo "SECRET_ENCRYPTION_KEY=$(openssl rand -hex 32)" > $HOME/docker/homarr/.env',
             "docker pull ghcr.io/homarr-labs/homarr:latest",
             (f"docker run -d --name homarr -p 7575:7575 "
              "-v /var/run/docker.sock:/var/run/docker.sock "
-             "-v $HOME/docker/homarr/config:/app/data/configs "
-             "-v $HOME/docker/homarr/data:/data "
+             "-v $HOME/docker/homarr/appdata:/appdata "
+             "--env-file $HOME/docker/homarr/.env "
              f"{_RSU} ghcr.io/homarr-labs/homarr:latest"),
         ],
         "fix_cmds": ["docker restart homarr"],
@@ -845,10 +857,12 @@ APP_REGISTRY = [
             "docker stop homarr 2>/dev/null || true",
             "docker rm   homarr 2>/dev/null || true",
             "docker pull ghcr.io/homarr-labs/homarr:latest",
+            "[ -f $HOME/docker/homarr/.env ] || "
+            'echo "SECRET_ENCRYPTION_KEY=$(openssl rand -hex 32)" > $HOME/docker/homarr/.env',
             (f"docker run -d --name homarr -p 7575:7575 "
              "-v /var/run/docker.sock:/var/run/docker.sock "
-             "-v $HOME/docker/homarr/config:/app/data/configs "
-             "-v $HOME/docker/homarr/data:/data "
+             "-v $HOME/docker/homarr/appdata:/appdata "
+             "--env-file $HOME/docker/homarr/.env "
              f"{_RSU} ghcr.io/homarr-labs/homarr:latest"),
         ],
     },
