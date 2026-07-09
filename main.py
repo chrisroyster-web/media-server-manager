@@ -63,6 +63,7 @@ from ui.watchstate_tab import WatchstateTab
 from ui.cloudflare_tab import CloudflareTab
 from ui.audit_log_tab import AuditLogTab
 from ui.vuln_scan_tab import VulnScanTab
+from ui.media_dedup_tab import MediaDedupTab
 from core.metrics_store import MetricsStore
 from core.scheduler import TaskScheduler
 
@@ -287,6 +288,7 @@ class MediaServerManager(tk.Tk):
         self.cloudflare_tab        = CloudflareTab(self.tabs, self)        # 60
         self.audit_log_tab         = AuditLogTab(self.tabs, self)          # 61
         self.vuln_scan_tab         = VulnScanTab(self.tabs, self)          # 62
+        self.media_dedup_tab       = MediaDedupTab(self.tabs, self)        # 63
 
         for tab in [
             self.connection_panel, self.quick_commands, self.dashboard_tab,
@@ -315,6 +317,7 @@ class MediaServerManager(tk.Tk):
             self._stub_57, self._stub_58,
             self.watchstate_tab, self.cloudflare_tab, self.audit_log_tab,
             self.vuln_scan_tab,
+            self.media_dedup_tab,
         ]:
             self.tabs.add(tab)
 
@@ -875,6 +878,7 @@ class MediaServerManager(tk.Tk):
             60: lambda: self.cloudflare_tab.on_show(),
             61: lambda: self.audit_log_tab.on_show(),
             62: lambda: self.vuln_scan_tab.on_show(),
+            63: lambda: self.media_dedup_tab.on_show(),
         }
         fn = m.get(idx)
         if fn:

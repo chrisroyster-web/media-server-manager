@@ -7,32 +7,9 @@ Pulls data directly from their REST APIs (no SSH needed).
 import tkinter as tk
 from tkinter import ttk
 import threading
-import urllib.request
-import urllib.error
-import json
 import time
 
-
-def _api_get(host, port, apikey, path):
-    """GET /api/v3/<path> and return parsed JSON, or raise on error."""
-    host = host.removeprefix("https://").removeprefix("http://").strip("/").strip()
-    url = "http://{}:{}/api/v3/{}".format(host, port, path)
-    req = urllib.request.Request(url, headers={"X-Api-Key": apikey})
-    with urllib.request.urlopen(req, timeout=8) as resp:
-        return json.loads(resp.read().decode())
-
-
-def _api_post(host, port, apikey, path, body=None):
-    """POST /api/v3/<path> with optional JSON body."""
-    host = host.removeprefix("https://").removeprefix("http://").strip("/").strip()
-    url = "http://{}:{}/api/v3/{}".format(host, port, path)
-    data = json.dumps(body).encode() if body else b"{}"
-    req = urllib.request.Request(
-        url, data=data, method="POST",
-        headers={"X-Api-Key": apikey, "Content-Type": "application/json"},
-    )
-    with urllib.request.urlopen(req, timeout=8) as resp:
-        return json.loads(resp.read().decode())
+from core.arr_client import api_get as _api_get, api_post as _api_post
 
 
 def _fmt_size(mb):

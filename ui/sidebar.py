@@ -42,6 +42,7 @@ class Sidebar(tk.Frame):
         ("\U0001f4da", "Media Library",  40,  None),
         ("\U0001f4fa", "Play History",   21,  None),
         ("\U0001f465", "Media Users",    42,  None),
+        ("\U0001f5c2", "Duplicate Media", 63,  None),
 
         ("\U0001f3ac", "Arr",            11,  "REQUESTS"),
         ("\U0001f50d", "Prowlarr",       30,  None),
