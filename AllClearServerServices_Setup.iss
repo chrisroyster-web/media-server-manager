@@ -12,7 +12,7 @@
 ; ============================================================================
 
 #define AppName      "All Clear Server Services"
-#define AppVersion   "3.0.1"
+#define AppVersion   "3.0.2"
 #define AppPublisher "All Clear Server Services LLC"
 #define AppURL       "https://www.allclearserverservices.com"
 #define AppExeName   "main.exe"
