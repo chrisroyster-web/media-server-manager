@@ -185,6 +185,21 @@ class ConfigTab(tk.Frame):
         self._rules_container = tk.Frame(rules_outer, bg=t.surface)
         self._rules_container.pack(fill="x")
 
+        # ---- Daily Digest ----
+        self._section_header("Daily Digest",
+                             "One consolidated notification each morning — "
+                             "backup status, disk/CPU/RAM trend, and alerts fired")
+        digest_frame = tk.Frame(self.body, bg=t.surface, padx=12, pady=10)
+        digest_frame.pack(fill="x", padx=16, pady=(0, 8))
+        self.daily_digest_var = tk.BooleanVar()
+        tk.Checkbutton(
+            digest_frame,
+            text="Send a daily digest (uses the notification channels configured below)",
+            variable=self.daily_digest_var,
+            bg=t.surface, fg=t.text, selectcolor=t.surface_dark,
+            activebackground=t.surface,
+            font=t.font_regular).pack(anchor="w")
+
         # ---- SABnzbd ----
         self._section_header("SABnzbd", "HTTP API credentials for the SABnzbd tab")
         sab_frame = tk.Frame(self.body, bg=t.surface, padx=12, pady=10)
@@ -1313,6 +1328,9 @@ class ConfigTab(tk.Frame):
         self._alert_rules = [dict(r) for r in cfg.get_alert_rules()]
         self._redraw_rule_rows()
 
+        # Daily digest
+        self.daily_digest_var.set(cfg.get_daily_digest_enabled())
+
         # SABnzbd
         self.sab_host_var.set(cfg.sabnzbd_host)
         self.sab_port_var.set(cfg.sabnzbd_port)
@@ -1792,6 +1810,7 @@ class ConfigTab(tk.Frame):
             "proxy_enabled":             proxy_enabled,
             "proxy_type":                proxy_type,
             "tailscale_enabled":         self.tailscale_enabled_var.get(),
+            "daily_digest_enabled":      self.daily_digest_var.get(),
         })
 
         # Global settings — shared across all servers

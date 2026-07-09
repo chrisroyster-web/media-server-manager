@@ -513,6 +513,7 @@ class MediaServerManager(tk.Tk):
                 self.after(5000,  self.start_sab_toast_watcher)
                 self.after(6000,  self.scheduler.start)
                 self.after(8000,  self.start_vuln_scan_watchdog)
+                self.after(10000, self.start_daily_digest_watchdog)
                 self.after(12000, self._check_for_update_bg)
                 self._maybe_show_onboarding()
         except tk.TclError:
@@ -1347,6 +1348,41 @@ class MediaServerManager(tk.Tk):
                         self.after(0, lambda t=title, b=body: self.show_toast(
                             t, b, level="error"))
                         self.notification_manager.send_alert(title, body)
+                except Exception:
+                    pass
+        threading.Thread(target=_loop, daemon=True).start()
+
+    # ---------------------------------------------------------
+    # DAILY DIGEST WATCHDOG
+    # ---------------------------------------------------------
+    def start_daily_digest_watchdog(self):
+        import threading
+        from datetime import datetime
+        from core.digest import build_digest
+
+        stop = threading.Event()
+        self._digest_watchdog_stop = stop
+
+        def _loop():
+            while not stop.wait(1800):
+                if not self.ssh.connected:
+                    continue
+                cfg = self.config_manager
+                if not cfg.get_daily_digest_enabled():
+                    continue
+                now = datetime.now()
+                if now.hour < 8:
+                    continue
+                today_str = now.strftime("%Y-%m-%d")
+                if cfg.get_daily_digest_last_date() == today_str:
+                    continue
+                try:
+                    server_id = (cfg.get_active_server() or {}).get("name", "default")
+                    body = build_digest(self.ssh, self.metrics_store, server_id)
+                    cfg.set_daily_digest_last_date(today_str)
+                    title = "Daily Digest"
+                    self.after(0, lambda t=title, b=body: self.show_toast(t, b, level="info"))
+                    self.notification_manager.send_alert(title, body)
                 except Exception:
                     pass
         threading.Thread(target=_loop, daemon=True).start()

@@ -48,6 +48,7 @@ def app_session(tmp_path_factory):
     appmod.MediaServerManager.start_service_watchdog = lambda self: None
     appmod.MediaServerManager.start_sab_toast_watcher = lambda self: None
     appmod.MediaServerManager.start_vuln_scan_watchdog = lambda self: None
+    appmod.MediaServerManager.start_daily_digest_watchdog = lambda self: None
     appmod.MediaServerManager._check_for_update_bg = lambda self: None
 
     instance = appmod.MediaServerManager()

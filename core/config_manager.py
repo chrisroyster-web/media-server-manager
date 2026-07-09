@@ -255,6 +255,22 @@ class ConfigManager:
         self._ss("vuln_scan_baseline", baseline)
 
     # ---------------------------------------------------------
+    # DAILY DIGEST  (per-server)
+    # ---------------------------------------------------------
+    def get_daily_digest_enabled(self):
+        return self._gs("daily_digest_enabled", False)
+
+    def set_daily_digest_enabled(self, value: bool):
+        self._ss("daily_digest_enabled", value)
+
+    def get_daily_digest_last_date(self):
+        """'YYYY-MM-DD' string, or '' if never sent."""
+        return self._gs("daily_digest_last_date", "")
+
+    def set_daily_digest_last_date(self, date_str):
+        self._ss("daily_digest_last_date", date_str)
+
+    # ---------------------------------------------------------
     # SERVER PROFILES
     # ---------------------------------------------------------
     def get_servers(self):

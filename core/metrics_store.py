@@ -159,6 +159,25 @@ class MetricsStore:
             con.close()
         return dict(row) if row else None
 
+    def get_metric_near(self, server_id: str, target_ts: int) -> dict | None:
+        """
+        Return the single metric row whose timestamp is closest to
+        `target_ts` (e.g. "same time yesterday"), or None if there's no
+        history for this server at all. Unlike query_metrics's DESC+LIMIT
+        (which is for "most recent N points"), this is a point-in-time
+        lookup, so it orders by distance from the target instead.
+        """
+        with self._lock:
+            con = self._connect()
+            row = con.execute(
+                "SELECT ts, cpu, ram, disk, rx_bps, tx_bps, gpu "
+                "FROM server_metrics WHERE server_id = ? "
+                "ORDER BY ABS(ts - ?) ASC LIMIT 1",
+                (server_id, target_ts)
+            ).fetchone()
+            con.close()
+        return dict(row) if row else None
+
     # ------------------------------------------------------------------
     # Notifications
     # ------------------------------------------------------------------
