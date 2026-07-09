@@ -12,11 +12,15 @@ import tkinter as tk
 from tkinter import ttk
 import threading
 import time
+from datetime import datetime
 
-from core.vuln_scanner import list_scan_targets, scan_image
+from core.vuln_scanner import list_scan_targets, scan_image, diff_new_findings
 
 
 _SEVERITY_ORDER = ("critical", "high", "medium", "low")
+
+_SCHEDULE_LABELS = {"disabled": "Disabled", "daily": "Daily", "weekly": "Weekly"}
+_SCHEDULE_KEYS   = {v: k for k, v in _SCHEDULE_LABELS.items()}
 
 
 class VulnScanTab(tk.Frame):
@@ -45,6 +49,17 @@ class VulnScanTab(tk.Frame):
         self._last_lbl = tk.Label(hdr, text="", bg=t.bg,
                                    fg=t.text_muted, font=t.font_small)
         self._last_lbl.pack(side="right", padx=12)
+
+        self._auto_var = tk.StringVar(
+            value=_SCHEDULE_LABELS.get(
+                self.controller.config_manager.get_vuln_scan_schedule(), "Disabled"))
+        ttk.Combobox(hdr, textvariable=self._auto_var,
+                     values=list(_SCHEDULE_LABELS.values()),
+                     state="readonly", width=9, font=t.font_small
+                     ).pack(side="right", padx=(0, 12))
+        tk.Label(hdr, text="Auto-scan:", bg=t.bg, fg=t.text_muted,
+                 font=t.font_small).pack(side="right", padx=(0, 4))
+        self._auto_var.trace_add("write", self._on_schedule_change)
 
         # Summary cards
         self._summary_frame = tk.Frame(self, bg=t.bg)
@@ -156,6 +171,10 @@ class VulnScanTab(tk.Frame):
                 totals[sev] += result.get(sev, 0)
         return totals
 
+    def _on_schedule_change(self, *_args):
+        key = _SCHEDULE_KEYS.get(self._auto_var.get(), "disabled")
+        self.controller.config_manager.set_vuln_scan_schedule(key)
+
     # =========================================================
     # ON SHOW — checks Trivy availability only, never auto-scans
     # =========================================================
@@ -250,6 +269,23 @@ class VulnScanTab(tk.Frame):
             "Scan complete — {} critical, {} high, {} medium, {} low.".format(
                 totals["critical"], totals["high"], totals["medium"], totals["low"]),
             "error" if totals["critical"] or totals["high"] else "ok")
+
+        # Share the same baseline the background watchdog uses (main.py's
+        # start_vuln_scan_watchdog) so a manual scan and a scheduled one
+        # never double-notify about the same finding.
+        cfg = self.controller.config_manager
+        results = {info["image"]: info["result"] for info in self._row_info.values()
+                   if info.get("result") is not None}
+        new_baseline, new_findings = diff_new_findings(cfg.get_vuln_scan_baseline(), results)
+        cfg.set_vuln_scan_baseline(new_baseline)
+        cfg.set_vuln_scan_last_run(datetime.now().isoformat(timespec="seconds"))
+        if new_findings:
+            total = sum(len(cves) for cves in new_findings.values())
+            images = ", ".join(sorted(new_findings.keys()))
+            title = "New vulnerabilities found"
+            body  = "{} new critical/high CVE{} in: {}".format(
+                total, "s" if total != 1 else "", images)
+            self.controller.notification_manager.send_alert(title, body)
 
     # =========================================================
     # DETAIL PANEL

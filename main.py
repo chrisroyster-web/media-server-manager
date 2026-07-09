@@ -512,6 +512,7 @@ class MediaServerManager(tk.Tk):
                 self.after(3000,  self.start_service_watchdog)
                 self.after(5000,  self.start_sab_toast_watcher)
                 self.after(6000,  self.scheduler.start)
+                self.after(8000,  self.start_vuln_scan_watchdog)
                 self.after(12000, self._check_for_update_bg)
                 self._maybe_show_onboarding()
         except tk.TclError:
@@ -1292,6 +1293,60 @@ class MediaServerManager(tk.Tk):
                             if len(self._sab_seen_ids) > 1:
                                 self.after(0, lambda n=name: self.show_toast(
                                     "Download Complete", n, level="ok"))
+                except Exception:
+                    pass
+        threading.Thread(target=_loop, daemon=True).start()
+
+    # ---------------------------------------------------------
+    # VULNERABILITY SCAN WATCHDOG
+    # ---------------------------------------------------------
+    def start_vuln_scan_watchdog(self):
+        import threading
+        from datetime import datetime, timedelta
+        from core.vuln_scanner import list_scan_targets, scan_image, diff_new_findings
+
+        stop = threading.Event()
+        self._vuln_watchdog_stop = stop
+
+        def _is_due(cfg):
+            schedule = cfg.get_vuln_scan_schedule()
+            if schedule == "disabled":
+                return False
+            last_run = cfg.get_vuln_scan_last_run()
+            if not last_run:
+                return True
+            try:
+                last = datetime.fromisoformat(last_run)
+            except ValueError:
+                return True
+            days = 1 if schedule == "daily" else 7
+            return datetime.now() >= last + timedelta(days=days)
+
+        def _loop():
+            while not stop.wait(1800):
+                if not self.ssh.connected:
+                    continue
+                cfg = self.config_manager
+                if not _is_due(cfg):
+                    continue
+                try:
+                    targets = list_scan_targets(self.ssh)
+                    results = {t["image"]: scan_image(self.ssh, t["image"])
+                               for t in targets}
+                    baseline = cfg.get_vuln_scan_baseline()
+                    new_baseline, new_findings = diff_new_findings(baseline, results)
+                    cfg.set_vuln_scan_baseline(new_baseline)
+                    cfg.set_vuln_scan_last_run(datetime.now().isoformat(timespec="seconds"))
+
+                    if new_findings:
+                        total = sum(len(cves) for cves in new_findings.values())
+                        images = ", ".join(sorted(new_findings.keys()))
+                        title = "New vulnerabilities found"
+                        body  = ("{} new critical/high CVE{} in: {}".format(
+                            total, "s" if total != 1 else "", images))
+                        self.after(0, lambda t=title, b=body: self.show_toast(
+                            t, b, level="error"))
+                        self.notification_manager.send_alert(title, body)
                 except Exception:
                     pass
         threading.Thread(target=_loop, daemon=True).start()

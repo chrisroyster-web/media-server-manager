@@ -232,6 +232,29 @@ class ConfigManager:
         self._ss("alert_rules", rules)
 
     # ---------------------------------------------------------
+    # VULNERABILITY SCAN SCHEDULE  (per-server)
+    # ---------------------------------------------------------
+    def get_vuln_scan_schedule(self):
+        """'disabled' | 'daily' | 'weekly'"""
+        return self._gs("vuln_scan_schedule", "disabled")
+
+    def set_vuln_scan_schedule(self, value):
+        self._ss("vuln_scan_schedule", value)
+
+    def get_vuln_scan_last_run(self):
+        return self._gs("vuln_scan_last_run", "")
+
+    def set_vuln_scan_last_run(self, iso_timestamp):
+        self._ss("vuln_scan_last_run", iso_timestamp)
+
+    def get_vuln_scan_baseline(self):
+        """{image: [cve_id, ...]} — critical+high IDs as of the last check."""
+        return self._gs("vuln_scan_baseline", {})
+
+    def set_vuln_scan_baseline(self, baseline):
+        self._ss("vuln_scan_baseline", baseline)
+
+    # ---------------------------------------------------------
     # SERVER PROFILES
     # ---------------------------------------------------------
     def get_servers(self):

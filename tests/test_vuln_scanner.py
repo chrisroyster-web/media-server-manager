@@ -1,6 +1,6 @@
 import json
 
-from core.vuln_scanner import list_scan_targets, scan_image
+from core.vuln_scanner import list_scan_targets, scan_image, diff_new_findings
 
 
 class _FakeSSH:
@@ -121,3 +121,66 @@ def test_scan_image_ignores_unknown_severity():
     result = scan_image(ssh, "example/image:latest")
     assert result["critical"] == result["high"] == result["medium"] == result["low"] == 0
     assert len(result["cves"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# diff_new_findings
+# ---------------------------------------------------------------------------
+
+def _cve(id_, sev="CRITICAL"):
+    return {"id": id_, "severity": sev, "pkg": "x", "installed": "1",
+            "fixed": "", "title": "t"}
+
+
+def test_diff_first_seen_image_populates_baseline_but_reports_nothing():
+    results = {"img/a": {"critical": 1, "high": 0, "medium": 0, "low": 0,
+                         "cves": [_cve("CVE-1")]}}
+    new_baseline, new_findings = diff_new_findings({}, results)
+    assert new_baseline == {"img/a": ["CVE-1"]}
+    assert new_findings == {}
+
+
+def test_diff_reports_genuinely_new_cve_for_known_image():
+    baseline = {"img/a": ["CVE-1"]}
+    results = {"img/a": {"critical": 2, "high": 0, "medium": 0, "low": 0,
+                         "cves": [_cve("CVE-1"), _cve("CVE-2")]}}
+    new_baseline, new_findings = diff_new_findings(baseline, results)
+    assert new_baseline == {"img/a": ["CVE-1", "CVE-2"]}
+    assert [c["id"] for c in new_findings["img/a"]] == ["CVE-2"]
+
+
+def test_diff_no_change_reports_nothing():
+    baseline = {"img/a": ["CVE-1"]}
+    results = {"img/a": {"critical": 1, "high": 0, "medium": 0, "low": 0,
+                         "cves": [_cve("CVE-1")]}}
+    new_baseline, new_findings = diff_new_findings(baseline, results)
+    assert new_baseline == {"img/a": ["CVE-1"]}
+    assert new_findings == {}
+
+
+def test_diff_dropped_cve_not_reported_as_new():
+    # Old CVE no longer present (e.g. image was rebuilt) — should just
+    # disappear from the baseline, not be treated as a "new" finding.
+    baseline = {"img/a": ["CVE-1", "CVE-2"]}
+    results = {"img/a": {"critical": 1, "high": 0, "medium": 0, "low": 0,
+                         "cves": [_cve("CVE-1")]}}
+    new_baseline, new_findings = diff_new_findings(baseline, results)
+    assert new_baseline == {"img/a": ["CVE-1"]}
+    assert new_findings == {}
+
+
+def test_diff_ignores_medium_and_low_severity():
+    baseline = {"img/a": []}
+    results = {"img/a": {"critical": 0, "high": 0, "medium": 1, "low": 1,
+                         "cves": [_cve("CVE-3", "MEDIUM"), _cve("CVE-4", "LOW")]}}
+    new_baseline, new_findings = diff_new_findings(baseline, results)
+    assert new_baseline == {"img/a": []}
+    assert new_findings == {}
+
+
+def test_diff_skips_images_with_scan_errors():
+    baseline = {"img/a": ["CVE-1"]}
+    results = {"img/a": {"error": "scan failed"}}
+    new_baseline, new_findings = diff_new_findings(baseline, results)
+    assert new_baseline == {}
+    assert new_findings == {}

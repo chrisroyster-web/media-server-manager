@@ -74,3 +74,43 @@ def scan_image(ssh, image: str) -> dict:
             })
 
     return {**counts, "cves": cves}
+
+
+def diff_new_findings(baseline: dict, results: dict) -> tuple:
+    """
+    Compare this run's scan results against the last-known baseline to find
+    genuinely NEW critical/high CVEs — not the full set every time, which
+    would just re-alert forever about the same permanently-unfixed findings
+    (e.g. an EOL package with no available fix).
+
+    baseline: {image: [cve_id, ...]} — critical+high IDs as of last check.
+    results:  {image: scan_image()-shaped dict} for this run.
+
+    Returns (new_baseline, new_findings):
+      new_baseline:  {image: [cve_id, ...]} to persist for next time.
+      new_findings:  {image: [cve dict, ...]} — only for images that already
+                      had a baseline entry. An image seen for the first time
+                      populates new_baseline but is never reported as "new"
+                      here, so enabling this feature doesn't immediately dump
+                      every pre-existing CVE as a fresh alert.
+    """
+    new_baseline = {}
+    new_findings = {}
+
+    for image, result in results.items():
+        if "error" in result:
+            continue
+        crit_high = [c for c in result.get("cves", [])
+                     if c.get("severity") in ("CRITICAL", "HIGH")]
+        current_ids = [c["id"] for c in crit_high]
+        new_baseline[image] = current_ids
+
+        if image not in baseline:
+            continue  # first time seeing this image — establish baseline only
+
+        previously_seen = set(baseline[image])
+        new_for_image = [c for c in crit_high if c["id"] not in previously_seen]
+        if new_for_image:
+            new_findings[image] = new_for_image
+
+    return new_baseline, new_findings
