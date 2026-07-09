@@ -846,7 +846,7 @@ class MediaServerManager(tk.Tk):
             35: lambda: self.monitoring_tab.on_show(),
             28: lambda: self.bandwidth_tab.refresh(),
             9:  lambda: self.sftp_tab._navigate(self.sftp_tab._current_path, push_history=False),
-            6:  lambda: self.log_viewer.fetch(),
+            6:  lambda: (self.log_viewer._rebuild_sources(), self.log_viewer.fetch()),
             29: lambda: self.backup_tab.refresh(),
             15: lambda: self.compose_tab.refresh(),
             16: lambda: self.cron_tab.on_show(),

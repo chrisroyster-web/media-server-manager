@@ -5,6 +5,8 @@ import threading
 import os
 import time
 
+from core.log_sources import list_docker_log_sources, search_sources
+
 
 class LogViewerTab(tk.Frame):
     """
@@ -47,6 +49,7 @@ class LogViewerTab(tk.Frame):
         self._filter_var   = tk.StringVar()
         self._refresh_var  = tk.StringVar(value="15s")
         self._last_content = ""
+        self._aggregated_mode = False
         self._build_ui()
 
     # =========================================================
@@ -96,6 +99,13 @@ class LogViewerTab(tk.Frame):
         self._filter_var.trace_add("write", lambda *a: self._apply_filter())
 
         # Buttons
+        self._search_all_btn = tk.Button(ctrl, text="Search All Sources",
+                                         command=self._search_all_sources, state="disabled")
+        self.theme.style_button(self._search_all_btn)
+        self._search_all_btn.pack(side="left", padx=4)
+        self._filter_var.trace_add("write", lambda *a: self._search_all_btn.config(
+            state="normal" if self._filter_var.get().strip() else "disabled"))
+
         for label, cmd in [("Refresh", self.fetch),
                             ("Clear",   self._clear),
                             ("Export",  self._export)]:
@@ -144,35 +154,52 @@ class LogViewerTab(tk.Frame):
     # DYNAMIC SOURCE LIST
     # =========================================================
     def _rebuild_sources(self):
-        """Rebuild LOG_SOURCES and the source-list panel based on current config."""
+        """
+        Rebuild LOG_SOURCES and the source-list panel from current config,
+        then (if connected) refresh Docker container sources in the
+        background — discovered live since which containers exist varies
+        per server, unlike the fixed systemd-service sources above.
+        """
         cfg = self.controller.config_manager
 
-        # Start from base set
         sources = dict(self._BASE_SOURCES)
-
-        # Inject Plex if token is set
         if cfg.plex_token:
             sources["Plex"] = (
                 "journalctl -u plexmediaserver -n 100 --no-pager --output=short 2>/dev/null"
             )
-
-        # Inject Jellyfin if API key is set
         if cfg.jellyfin_apikey:
             sources["Jellyfin"] = (
                 "journalctl -u jellyfin -n 100 --no-pager --output=short 2>/dev/null"
             )
-
-        # Nothing changed and panel already built — skip redraw
-        if self._src_btns and list(sources.keys()) == list(self.LOG_SOURCES.keys()):
-            return
+        # Preserve any previously-discovered Docker sources until the async
+        # refresh below replaces them, so switching tabs/servers doesn't
+        # flash the panel empty of Docker entries for a moment.
+        for name, cmd in self.LOG_SOURCES.items():
+            if name.startswith("Docker: "):
+                sources[name] = cmd
 
         self.LOG_SOURCES = sources
-
-        # If the currently selected source was removed, reset to first
         if self._current_src not in self.LOG_SOURCES:
             self._current_src = list(self.LOG_SOURCES.keys())[0]
+        self._render_source_panel()
 
-        # Rebuild the button panel
+        if self.controller.ssh.connected:
+            threading.Thread(target=self._refresh_docker_sources, daemon=True).start()
+
+    def _refresh_docker_sources(self):
+        docker_sources = list_docker_log_sources(self.controller.ssh)
+        self.after(0, lambda d=docker_sources: self._merge_docker_sources(d))
+
+    def _merge_docker_sources(self, docker_sources):
+        sources = {name: cmd for name, cmd in self.LOG_SOURCES.items()
+                   if not name.startswith("Docker: ")}
+        sources.update(docker_sources)
+        self.LOG_SOURCES = sources
+        if self._current_src not in self.LOG_SOURCES:
+            self._current_src = list(self.LOG_SOURCES.keys())[0]
+        self._render_source_panel()
+
+    def _render_source_panel(self):
         self._src_panel_outer.pack_forget()
         for w in self._src_panel_outer.winfo_children():
             w.destroy()
@@ -204,6 +231,7 @@ class LogViewerTab(tk.Frame):
     # SOURCE SELECTION
     # =========================================================
     def _select_source(self, name):
+        self._aggregated_mode = False
         self._current_src  = name
         self._last_content = ""
         self._highlight_source(name)
@@ -256,8 +284,46 @@ class LogViewerTab(tk.Frame):
             return "success"
         return "dim"
     def _apply_filter(self):
+        if self._aggregated_mode:
+            return  # aggregated results are a search result, not a live re-render
         if self._last_content:
             self._render(self._last_content)
+
+    # =========================================================
+    # SEARCH ALL SOURCES
+    # =========================================================
+    def _search_all_sources(self):
+        keyword = self._filter_var.get().strip()
+        if not keyword or not self.controller.ssh.connected:
+            return
+        if self._refresh_job:
+            self.after_cancel(self._refresh_job)
+            self._refresh_job = None
+        self._aggregated_mode = True
+        self._search_all_btn.config(state="disabled", text="Searching…")
+        self._set_text("Searching {} source{} for \"{}\"…".format(
+            len(self.LOG_SOURCES), "s" if len(self.LOG_SOURCES) != 1 else "", keyword))
+        threading.Thread(target=self._do_search_all, args=(keyword,), daemon=True).start()
+
+    def _do_search_all(self, keyword):
+        results = search_sources(self.controller.ssh, dict(self.LOG_SOURCES), keyword)
+        self.after(0, lambda r=results, k=keyword: self._render_aggregated(r, k))
+
+    def _render_aggregated(self, results, keyword):
+        self._search_all_btn.config(state="normal", text="Search All Sources")
+
+        self.log_text.configure(state="normal")
+        self.log_text.delete("1.0", "end")
+        if not results:
+            self.log_text.insert("end", 'No matches for "{}" in any source.\n'.format(keyword))
+        else:
+            for name, lines in results.items():
+                self.log_text.insert("end", "=== {} ===\n".format(name), "dim")
+                for line in lines:
+                    self.log_text.insert("end", "[{}] {}\n".format(name, line), self._classify(line))
+        self.log_text.configure(state="disabled")
+        if self._autoscroll.get():
+            self.log_text.see("end")
 
     # =========================================================
     # CLEAR / EXPORT
