@@ -12,6 +12,18 @@ class ConfigTab(tk.Frame):
     Changes are saved to config.json and applied live without restarting.
     """
 
+    # Every "Host:" field across the integrations below — used by the
+    # Quick Setup "auto-fill" checkbox to keep them all in sync with this
+    # server's own IP for the common single-box setup.
+    _HOST_VAR_NAMES = [
+        "sab_host_var", "qb_host_var", "ph_host_var",
+        "emby_host_var", "plex_host_var", "jf_host_var",
+        "sonarr_host_var", "radarr_host_var", "prowlarr_host_var",
+        "overseerr_host_var", "jellyseerr_host_var", "tautulli_host_var",
+        "uptime_kuma_host_var", "netdata_host_var", "glances_host_var",
+        "wud_host_var", "watchstate_host_var",
+    ]
+
     def __init__(self, parent, controller):
         super().__init__(parent, bg=controller.theme.bg)
         self.controller = controller
@@ -115,6 +127,29 @@ class ConfigTab(tk.Frame):
             w.bind("<MouseWheel>", _mw)
             w.bind("<Button-4>",   _mw)
             w.bind("<Button-5>",   _mw)
+
+        # ---- Quick Setup ----
+        self._section_header("Quick Setup",
+                             "Convenience options for this server profile")
+        quick_frame = tk.Frame(self.body, bg=t.surface, padx=12, pady=10)
+        quick_frame.pack(fill="x", padx=16, pady=(0, 8))
+
+        self.auto_fill_hosts_var = tk.BooleanVar()
+        tk.Checkbutton(
+            quick_frame,
+            text="Auto-fill every service Host field below with this server's IP address",
+            variable=self.auto_fill_hosts_var,
+            command=self._on_auto_fill_toggle,
+            bg=t.surface, fg=t.text, selectcolor=t.surface_dark,
+            activebackground=t.surface,
+            font=t.font_regular).pack(anchor="w")
+        tk.Label(quick_frame,
+                 text="Turn this on if Sonarr, Radarr, Emby, and everything else run on "
+                      "this same server — switching servers will keep every Host field in "
+                      "sync automatically. Leave it off if any service lives on a "
+                      "different machine, since this will overwrite those fields too.",
+                 bg=t.surface, fg=t.text_muted, font=t.font_small,
+                 justify="left", wraplength=640).pack(anchor="w", pady=(4, 0))
 
         # ---- Systemd Services ----
         self._section_header("Systemd Services",
@@ -1452,6 +1487,27 @@ class ConfigTab(tk.Frame):
         # Application Behavior
         self.minimize_to_tray_var.set(cfg.minimize_to_tray_on_close)
 
+        # Auto-fill service hosts — must run last, after every individual
+        # Host field above has already been loaded, so it can override them
+        # with the active server's own IP when the toggle is enabled.
+        self.auto_fill_hosts_var.set(cfg.get_auto_fill_service_hosts())
+        if self.auto_fill_hosts_var.get():
+            self._fill_all_hosts_with_server_ip()
+
+    def _fill_all_hosts_with_server_ip(self):
+        server = self.controller.config_manager.get_active_server()
+        ip = (server or {}).get("host", "").strip()
+        if not ip:
+            return
+        for name in self._HOST_VAR_NAMES:
+            var = getattr(self, name, None)
+            if var is not None:
+                var.set(ip)
+
+    def _on_auto_fill_toggle(self):
+        if self.auto_fill_hosts_var.get():
+            self._fill_all_hosts_with_server_ip()
+
     # =========================================================
     # ROW BUILDERS
     # =========================================================
@@ -1811,6 +1867,7 @@ class ConfigTab(tk.Frame):
             "proxy_type":                proxy_type,
             "tailscale_enabled":         self.tailscale_enabled_var.get(),
             "daily_digest_enabled":      self.daily_digest_var.get(),
+            "auto_fill_service_hosts":   self.auto_fill_hosts_var.get(),
         })
 
         # Global settings — shared across all servers

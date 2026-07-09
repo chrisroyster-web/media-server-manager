@@ -271,6 +271,19 @@ class ConfigManager:
         self._ss("daily_digest_last_date", date_str)
 
     # ---------------------------------------------------------
+    # AUTO-FILL SERVICE HOSTS  (per-server)
+    # ---------------------------------------------------------
+    def get_auto_fill_service_hosts(self):
+        """When True, the Config tab keeps every service's Host field in
+        sync with this server's own IP — for the common case where every
+        integration runs on the same box as the SSH connection. Off by
+        default since some setups split services across machines."""
+        return self._gs("auto_fill_service_hosts", False)
+
+    def set_auto_fill_service_hosts(self, value: bool):
+        self._ss("auto_fill_service_hosts", value)
+
+    # ---------------------------------------------------------
     # SERVER PROFILES
     # ---------------------------------------------------------
     def get_servers(self):
