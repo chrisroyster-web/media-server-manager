@@ -2,8 +2,11 @@
 """
 Finds duplicate/orphaned video files by comparing what's actually on disk
 (via SSH) against what Sonarr/Radarr's own API says is the current file for
-each episode/movie. Read-only reporting only — this never deletes anything;
-see ui/media_dedup_tab.py.
+each episode/movie. Scanning is pure/read-only; delete_file() below is the
+one operation that touches disk, and it's deliberately narrow — one
+absolute path at a time, no globbing/recursion — so the UI's confirmation
+step (see ui/media_dedup_tab.py) is the only thing standing between a click
+and a real file deletion, with no room for a wildcard mistake to widen it.
 
 Under normal Sonarr/Radarr operation (delete-on-upgrade is the default), a
 genuine duplicate *in their database* is rare — what actually happens is a
@@ -183,3 +186,20 @@ def _group_files(files: list, tracked: set, app_name: str, known_folders=None) -
             "files": entries, "extra_bytes": extra_bytes,
         })
     return groups
+
+
+def delete_file(ssh, path: str):
+    """
+    Delete exactly one file on the server. Returns (True, "") on success,
+    (False, error_message) on failure. Never raises. Refuses anything that
+    isn't a plain absolute path — no globs, no relative paths, no shell
+    metacharacters get a chance to matter since the path is quoted and
+    passed to `rm -f` on a single literal file.
+    """
+    if not path or not path.startswith("/") or any(c in path for c in ("*", "?", "\n")):
+        return False, "Refusing to delete: not a plain absolute file path."
+    cmd = "rm -f {} && echo DELETED".format(shlex.quote(path))
+    out, err, code = ssh.run(cmd)
+    if code == 0 and "DELETED" in (out or ""):
+        return True, ""
+    return False, (err or out or "Unknown error").strip()[:200]

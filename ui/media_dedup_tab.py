@@ -3,8 +3,11 @@
 Duplicate / Orphaned Media tab.
 Compares what's actually on disk under Sonarr/Radarr's root folders against
 what their APIs say is the current tracked file, via
-core/media_dedup.find_duplicate_and_orphaned_media(). Read-only reporting
-only — this never deletes anything; use the Files/SFTP tab for that.
+core/media_dedup.find_duplicate_and_orphaned_media(). Deleting a file is a
+deliberately narrow, explicit action: select exactly one file from the
+selected folder's file list, confirm it (the dialog names the path, size,
+and whether Sonarr/Radarr currently point at it), and only that one file is
+removed — no bulk/multi-select delete.
 
 Deliberately does NOT auto-scan on tab show — this walks entire media root
 folders over SSH plus two REST APIs per show/movie, not something to fire
@@ -12,11 +15,11 @@ just from clicking the tab.
 """
 
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox
 import threading
 import time
 
-from core.media_dedup import find_duplicate_and_orphaned_media
+from core.media_dedup import find_duplicate_and_orphaned_media, delete_file
 
 
 def _fmt_size(num_bytes):
@@ -81,15 +84,31 @@ class MediaDedupTab(tk.Frame):
             ])
         self._tree.bind("<<TreeviewSelect>>", self._on_select)
 
-        # File detail console
-        tk.Label(self, text="Files in Folder (select a row)", bg=t.bg, fg=t.text_muted,
-                 font=t.font_small).pack(anchor="w", padx=16, pady=(4, 0))
-        self._console = tk.Text(self, height=8, bg=t.surface_dark,
-                                 fg=t.text_secondary, font=t.font_mono,
-                                 state="disabled", relief="flat", padx=8, pady=6)
-        self._console.pack(fill="x", padx=16, pady=(0, 4))
-        self._console.tag_config("tracked",   foreground=t.status_running)
-        self._console.tag_config("untracked", foreground=t.yellow)
+        # File detail — one row per file in the selected folder, selectable
+        detail_hdr = tk.Frame(self, bg=t.bg)
+        detail_hdr.pack(fill="x", padx=16, pady=(4, 0))
+        tk.Label(detail_hdr, text="Files in Folder (select a row, then choose one to delete)",
+                 bg=t.bg, fg=t.text_muted, font=t.font_small).pack(side="left")
+        self._delete_btn = tk.Button(detail_hdr, text="Delete Selected File",
+                                     command=self._delete_selected_file, state="disabled")
+        t.style_button(self._delete_btn)
+        self._delete_btn.configure(fg=t.status_stopped_text)
+        self._delete_btn.pack(side="right")
+
+        file_frame = tk.Frame(self, bg=t.bg)
+        file_frame.pack(fill="x", padx=16, pady=(4, 4))
+        self._file_tree = self._make_tree(file_frame,
+            cols=("size", "tracked", "path"),
+            headings=[
+                ("size",    "Size",    90,  "center"),
+                ("tracked", "Tracked", 90,  "center"),
+                ("path",    "Path",    600, "w"),
+            ], height=6)
+        self._file_tree.tag_configure("tracked",   foreground=t.status_running)
+        self._file_tree.tag_configure("untracked", foreground=t.yellow)
+        self._file_tree.bind("<<TreeviewSelect>>", self._on_file_select)
+        self._file_info = {}   # file-tree iid -> {"path", "size", "tracked"}
+        self._current_group_iid = None
 
         # Status bar
         self._status_lbl = tk.Label(self, text="Not connected",
@@ -211,20 +230,84 @@ class MediaDedupTab(tk.Frame):
     # =========================================================
     def _on_select(self, _event=None):
         sel = self._tree.selection()
+        self._file_tree.delete(*self._file_tree.get_children())
+        self._file_info = {}
+        self._delete_btn.config(state="disabled")
         if not sel:
+            self._current_group_iid = None
             return
+        self._current_group_iid = sel[0]
         group = self._row_info.get(sel[0])
-        self._console.config(state="normal")
-        self._console.delete("1.0", "end")
         if not group:
-            self._console.insert("end", "No details available.")
-        else:
-            for f in sorted(group["files"], key=lambda x: x["size"], reverse=True):
-                tag = "tracked" if f["tracked"] else "untracked"
-                label = "tracked" if f["tracked"] else "NOT tracked by Sonarr/Radarr"
-                self._console.insert("end", "[{}]  {}  ({})\n".format(
-                    _fmt_size(f["size"]), f["path"], label), tag)
-        self._console.config(state="disabled")
+            return
+        for f in sorted(group["files"], key=lambda x: x["size"], reverse=True):
+            tag = "tracked" if f["tracked"] else "untracked"
+            iid = self._file_tree.insert("", "end",
+                values=(_fmt_size(f["size"]), "Yes" if f["tracked"] else "No", f["path"]),
+                tags=(tag,))
+            self._file_info[iid] = f
+
+    def _on_file_select(self, _event=None):
+        sel = self._file_tree.selection()
+        self._delete_btn.config(state="normal" if sel else "disabled")
+
+    # =========================================================
+    # DELETE
+    # =========================================================
+    def _delete_selected_file(self):
+        sel = self._file_tree.selection()
+        if not sel or not self._current_group_iid:
+            return
+        file_info = self._file_info.get(sel[0])
+        if not file_info:
+            return
+
+        warning = ""
+        if file_info["tracked"]:
+            warning = ("\n\n⚠ This file is currently tracked by Sonarr/Radarr — "
+                       "deleting it will make that episode/movie show as missing "
+                       "until it's re-downloaded.")
+        msg = (
+            "Permanently delete this file from the server?\n\n"
+            "{}\n"
+            "Size: {}{}\n\n"
+            "This cannot be undone."
+        ).format(file_info["path"], _fmt_size(file_info["size"]), warning)
+        if not messagebox.askyesno("Delete File", msg, parent=self):
+            return
+
+        self._delete_btn.config(state="disabled", text="Deleting…")
+        threading.Thread(target=self._do_delete, args=(file_info,), daemon=True).start()
+
+    def _do_delete(self, file_info):
+        ok, err = delete_file(self.controller.ssh, file_info["path"])
+        self.after(0, lambda: self._finish_delete(file_info, ok, err))
+
+    def _finish_delete(self, file_info, ok, err):
+        self._delete_btn.config(text="Delete Selected File")
+        if not ok:
+            self._set_status("Delete failed: " + err, "error")
+            self._delete_btn.config(state="normal")
+            return
+
+        group_iid = self._current_group_iid
+        group = self._row_info.get(group_iid)
+        if group:
+            group["files"] = [f for f in group["files"] if f["path"] != file_info["path"]]
+            if len(group["files"]) < 2:
+                # No longer a duplicate/orphan situation — drop the row entirely.
+                self._tree.delete(group_iid)
+                del self._row_info[group_iid]
+            else:
+                sizes = sorted((f["size"] for f in group["files"]), reverse=True)
+                group["extra_bytes"] = sum(sizes[1:])
+                self._tree.item(group_iid, values=(
+                    group["folder"], group["app"].title(),
+                    len(group["files"]), _fmt_size(group["extra_bytes"])))
+
+        self._on_select()  # refresh the file list for the (possibly now-gone) group
+        self._draw_summary_cards()
+        self._set_status("Deleted: " + file_info["path"], "ok")
 
     # =========================================================
     # HELPERS

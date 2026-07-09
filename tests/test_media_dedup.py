@@ -177,3 +177,54 @@ def test_api_failure_contributes_to_errors_not_a_crash(monkeypatch):
     assert result["groups"] == []
     assert len(result["errors"]) == 1
     assert "sonarr" in result["errors"][0]
+
+
+# ---------------------------------------------------------------------------
+# delete_file
+# ---------------------------------------------------------------------------
+
+class _FakeDeleteSSH:
+    def __init__(self, out="DELETED\n", err="", code=0):
+        self.out, self.err, self.code = out, err, code
+        self.last_cmd = None
+
+    def run(self, cmd):
+        self.last_cmd = cmd
+        return (self.out, self.err, self.code)
+
+
+def test_delete_file_success():
+    ssh = _FakeDeleteSSH(out="DELETED\n", code=0)
+    ok, err = media_dedup.delete_file(ssh, "/media/tv/Show/S01E01.old.mkv")
+    assert ok is True
+    assert err == ""
+    assert "rm -f" in ssh.last_cmd
+    assert "/media/tv/Show/S01E01.old.mkv" in ssh.last_cmd
+
+
+def test_delete_file_failure_reports_error():
+    ssh = _FakeDeleteSSH(out="", err="Permission denied", code=1)
+    ok, err = media_dedup.delete_file(ssh, "/media/tv/Show/S01E01.old.mkv")
+    assert ok is False
+    assert "Permission denied" in err
+
+
+def test_delete_file_refuses_relative_path():
+    ssh = _FakeDeleteSSH()
+    ok, err = media_dedup.delete_file(ssh, "relative/path.mkv")
+    assert ok is False
+    assert ssh.last_cmd is None  # never even attempted
+
+
+def test_delete_file_refuses_empty_path():
+    ssh = _FakeDeleteSSH()
+    ok, err = media_dedup.delete_file(ssh, "")
+    assert ok is False
+    assert ssh.last_cmd is None
+
+
+def test_delete_file_refuses_glob_characters():
+    ssh = _FakeDeleteSSH()
+    ok, err = media_dedup.delete_file(ssh, "/media/tv/Show/*.mkv")
+    assert ok is False
+    assert ssh.last_cmd is None
