@@ -79,6 +79,7 @@ class Sidebar(tk.Frame):
         (">_",         "Custom Commands", 5,  None),
         ("\U0001f510", "SSL Certs",      26,  None),
         ("\U0001f6ab", "Fail2ban",       46,  None),
+        ("\U0001f41e", "Vuln Scan",      62,  None),
         ("\U0001f4be", "Backups",        29,  None),
         ("\U0001f504", "Updates",        12,  None),
         ("\U0001f514", "Notifications",  19,  None),

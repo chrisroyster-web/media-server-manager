@@ -789,6 +789,38 @@ APP_REGISTRY = [
         ],
     },
 
+    {
+        "key":          "trivy",
+        "name":         "Trivy",
+        "category":     "Monitoring",
+        "desc":         "Scans running container images for known CVEs",
+        "port":         None,
+        "container":    None,
+        "image":        None,
+        "health_path":  None,
+        "check_cmd":    "which trivy",
+        "version_cmd":  "trivy --version 2>&1 | head -1",
+        "install_cmds": [
+            "sudo apt-get update -qq",
+            "sudo apt-get install -y wget gnupg",
+            "wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key "
+            "| sudo gpg --dearmor -o /usr/share/keyrings/trivy.gpg",
+            'echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] '
+            'https://aquasecurity.github.io/trivy-repo/deb generic main" '
+            "| sudo tee /etc/apt/sources.list.d/trivy.list",
+            "sudo apt-get update -qq",
+            "sudo apt-get install -y trivy",
+        ],
+        "fix_cmds": [],
+        "reinstall_cmds": [
+            "sudo apt-get install -y --reinstall trivy",
+        ],
+        "uninstall_cmds": [
+            "sudo apt-get remove -y trivy",
+            "sudo rm -f /etc/apt/sources.list.d/trivy.list /usr/share/keyrings/trivy.gpg",
+        ],
+    },
+
     # ── Dashboard ────────────────────────────────────────────────────────
     {
         "key": "homarr",
