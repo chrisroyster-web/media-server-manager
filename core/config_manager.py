@@ -513,6 +513,22 @@ class ConfigManager:
     @radarr_apikey.setter
     def radarr_apikey(self, v): self._ss("radarr_apikey", v)
 
+    # --- Bazarr ---
+    @property
+    def bazarr_host(self): return self._gs("bazarr_host", "localhost")
+    @bazarr_host.setter
+    def bazarr_host(self, v): self._ss("bazarr_host", v)
+
+    @property
+    def bazarr_port(self): return self._gs("bazarr_port", "6767")
+    @bazarr_port.setter
+    def bazarr_port(self, v): self._ss("bazarr_port", str(v))
+
+    @property
+    def bazarr_apikey(self): return self._gs("bazarr_apikey", "")
+    @bazarr_apikey.setter
+    def bazarr_apikey(self, v): self._ss("bazarr_apikey", v)
+
     # --- Prowlarr ---
     @property
     def prowlarr_host(self): return self._gs("prowlarr_host", "localhost")

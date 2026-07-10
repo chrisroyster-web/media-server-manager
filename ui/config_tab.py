@@ -18,7 +18,7 @@ class ConfigTab(tk.Frame):
     _HOST_VAR_NAMES = [
         "sab_host_var", "qb_host_var", "ph_host_var",
         "emby_host_var", "plex_host_var", "jf_host_var",
-        "sonarr_host_var", "radarr_host_var", "prowlarr_host_var",
+        "sonarr_host_var", "radarr_host_var", "bazarr_host_var", "prowlarr_host_var",
         "overseerr_host_var", "jellyseerr_host_var", "tautulli_host_var",
         "uptime_kuma_host_var", "netdata_host_var", "glances_host_var",
         "wud_host_var", "watchstate_host_var",
@@ -496,6 +496,31 @@ class ConfigTab(tk.Frame):
 
         self._radarr_test_lbl = self._test_button(radarr_frame, 3,
             lambda: self._test_arr("radarr"))
+
+        # ---- Bazarr ----
+        self._section_header("Bazarr", "API connection for the Bazarr subtitles tab")
+        bazarr_frame = tk.Frame(self.body, bg=t.surface, padx=12, pady=10)
+        bazarr_frame.pack(fill="x", padx=16, pady=(0, 8))
+        bazarr_frame.columnconfigure(1, weight=1)
+
+        for row_i, (label, attr) in enumerate([
+            ("Host:", "bazarr_host_var"),
+            ("Port:", "bazarr_port_var"),
+            ("API Key:", "bazarr_key_var"),
+        ]):
+            tk.Label(bazarr_frame, text=label, bg=t.surface, fg=t.text,
+                     font=t.font_regular).grid(row=row_i, column=0, sticky="w", pady=4)
+            var = tk.StringVar()
+            setattr(self, attr, var)
+            show = "*" if attr == "bazarr_key_var" else ""
+            e = tk.Entry(bazarr_frame, textvariable=var, font=t.font_regular, show=show)
+            t.style_entry(e)
+            e.grid(row=row_i, column=1, sticky="ew", padx=12, pady=4)
+            if show == "*":
+                self._eye_btn(bazarr_frame, e, row_i)
+
+        self._bazarr_test_lbl = self._test_button(bazarr_frame, 3,
+            lambda: self._test_bazarr())
 
         # ---- Prowlarr ----
         self._section_header("Prowlarr", "API connection for the Prowlarr indexer tab")
@@ -1328,6 +1353,7 @@ class ConfigTab(tk.Frame):
             self._sab_test_lbl, self._qb_test_lbl, self._ph_test_lbl,
             self._emby_test_lbl, self._plex_test_lbl,
             self._jf_test_lbl, self._sonarr_test_lbl, self._radarr_test_lbl,
+            self._bazarr_test_lbl,
             self._prowlarr_test_lbl, self._overseerr_test_lbl,
             self._jellyseerr_test_lbl, self._tautulli_test_lbl,
             self._uk_test_lbl, self._nd_test_lbl, self._gl_test_lbl,
@@ -1408,6 +1434,11 @@ class ConfigTab(tk.Frame):
         self.radarr_host_var.set(cfg.radarr_host)
         self.radarr_port_var.set(cfg.radarr_port)
         self.radarr_key_var.set(cfg.radarr_apikey)
+
+        # Bazarr
+        self.bazarr_host_var.set(cfg.bazarr_host)
+        self.bazarr_port_var.set(cfg.bazarr_port)
+        self.bazarr_key_var.set(cfg.bazarr_apikey)
 
         # Prowlarr
         self.prowlarr_host_var.set(cfg.prowlarr_host)
@@ -1743,6 +1774,11 @@ class ConfigTab(tk.Frame):
         radarr_port = self.radarr_port_var.get().strip() or "7878"
         radarr_key  = self.radarr_key_var.get().strip()
 
+        # --- Bazarr ---
+        bazarr_host = self.bazarr_host_var.get().strip() or "localhost"
+        bazarr_port = self.bazarr_port_var.get().strip() or "6767"
+        bazarr_key  = self.bazarr_key_var.get().strip()
+
         # --- Prowlarr ---
         prowlarr_host = self.prowlarr_host_var.get().strip() or "localhost"
         prowlarr_port = self.prowlarr_port_var.get().strip() or "9797"
@@ -1832,6 +1868,9 @@ class ConfigTab(tk.Frame):
             "radarr_host":               radarr_host,
             "radarr_port":               radarr_port,
             "radarr_apikey":             radarr_key,
+            "bazarr_host":               bazarr_host,
+            "bazarr_port":               bazarr_port,
+            "bazarr_apikey":             bazarr_key,
             "prowlarr_host":             prowlarr_host,
             "prowlarr_port":             prowlarr_port,
             "prowlarr_apikey":           prowlarr_key,
@@ -1990,6 +2029,27 @@ class ConfigTab(tk.Frame):
                 self.after(0, lambda err=str(e): self._set_test_result(lbl, False, err[:60]))
         threading.Thread(target=_run, daemon=True).start()
 
+    def _test_bazarr(self):
+        import threading, urllib.request, urllib.error, json as _json
+        lbl  = self._bazarr_test_lbl
+        host = self.bazarr_host_var.get().strip()
+        port = self.bazarr_port_var.get().strip()
+        key  = self.bazarr_key_var.get().strip()
+
+        lbl.configure(text="Testing…", fg=self.controller.theme.text_muted)
+        host = self._resolve_host(host.removeprefix("https://").removeprefix("http://").strip("/"))
+
+        def _run():
+            try:
+                url = "http://{}:{}/api/system/status".format(host, port)
+                req = urllib.request.Request(url, headers={"X-API-KEY": key})
+                with urllib.request.urlopen(req, timeout=6) as r:
+                    data = _json.loads(r.read())
+                ver = data.get("data", {}).get("bazarr_version", "?")
+                self.after(0, lambda: self._set_test_result(lbl, True, "Connected  ·  v{}".format(ver)))
+            except Exception as e:
+                self.after(0, lambda err=str(e): self._set_test_result(lbl, False, err[:60]))
+        threading.Thread(target=_run, daemon=True).start()
 
     def _test_seerr(self, app):
         import threading, urllib.request, urllib.error, json as _json

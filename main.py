@@ -27,6 +27,7 @@ from ui.config_tab import ConfigTab
 from ui.sftp_tab import SFTPTab
 from ui.storage_hub_tab import StorageHubTab
 from ui.arr_tab import ArrTab
+from ui.bazarr_tab import BazarrTab
 from ui.updates_tab import UpdatesTab
 from ui.sessions_tab import SessionsTab
 from ui.compose_tab import ComposeTab
@@ -129,6 +130,7 @@ _TAB_NAMES = {
     56: "Net Toolkit",
     59: "Watchstate",
     60: "Cloudflare",   61: "Audit Log",
+    64: "Bazarr",
 }
 
 
@@ -289,6 +291,7 @@ class MediaServerManager(tk.Tk):
         self.audit_log_tab         = AuditLogTab(self.tabs, self)          # 61
         self.vuln_scan_tab         = VulnScanTab(self.tabs, self)          # 62
         self.media_dedup_tab       = MediaDedupTab(self.tabs, self)        # 63
+        self.bazarr_tab            = BazarrTab(self.tabs, self)            # 64
 
         for tab in [
             self.connection_panel, self.quick_commands, self.dashboard_tab,
@@ -318,6 +321,7 @@ class MediaServerManager(tk.Tk):
             self.watchstate_tab, self.cloudflare_tab, self.audit_log_tab,
             self.vuln_scan_tab,
             self.media_dedup_tab,
+            self.bazarr_tab,
         ]:
             self.tabs.add(tab)
 
@@ -879,6 +883,7 @@ class MediaServerManager(tk.Tk):
             61: lambda: self.audit_log_tab.on_show(),
             62: lambda: self.vuln_scan_tab.on_show(),
             63: lambda: self.media_dedup_tab.on_show(),
+            64: lambda: self.bazarr_tab.on_show(),
         }
         fn = m.get(idx)
         if fn:
