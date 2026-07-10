@@ -193,12 +193,23 @@ class UpdatesTab(tk.Frame):
             # the *running* container was never recreated and is still on
             # the old image. Comparing IDs directly avoids that false
             # negative regardless of local cache state.)
+            # Discover containers live rather than from a fixed list, so
+            # anything running on the host gets checked -- including sidecars
+            # (e.g. a stack's db/redis containers) that aren't individually
+            # registered in config. Config is still used to give known
+            # containers a friendly display name; anything else falls back
+            # to its raw container name.
             docker_cfg = self.controller.config_manager.get_docker()
+            container_to_name = {data.get("container", ""): name
+                                  for name, data in docker_cfg.items() if data.get("container")}
+
+            names_out, _, names_code = ssh.run("docker ps -a --format '{{.Names}}'")
+            containers = sorted(c.strip() for c in names_out.strip().splitlines() if c.strip()) \
+                if names_code == 0 else []
+
             docker_results = []
-            for name, data in docker_cfg.items():
-                container = data.get("container", "")
-                if not container:
-                    continue
+            for container in containers:
+                name = container_to_name.get(container, container)
                 q = shlex.quote(container)
                 # .Config.Image = the tag the container was created from
                 # .Image        = the image ID it's actually running right now
@@ -454,6 +465,10 @@ class UpdatesTab(tk.Frame):
             parts += ["-e", shlex.quote(e)]
 
         parts.append(shlex.quote(image))
+
+        for arg in (cfg.get("Cmd") or []):
+            parts.append(shlex.quote(arg))
+
         return " ".join(parts)
 
     def _finish_apply(self, ok, message):
