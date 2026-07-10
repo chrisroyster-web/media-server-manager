@@ -238,13 +238,13 @@ class GlancesTab(tk.Frame):
         threading.Thread(target=self._fetch, daemon=True).start()
 
     def _fetch(self):
-        cfg  = self.controller.config_manager
-        host = cfg.glances_host.removeprefix("https://").removeprefix("http://").strip("/")
-        port = cfg.glances_port or "61208"
-        user = cfg.glances_username
-        pwd  = cfg.glances_password
-
         try:
+            cfg  = self.controller.config_manager
+            host = cfg.glances_host.removeprefix("https://").removeprefix("http://").strip("/")
+            port = cfg.glances_port or "61208"
+            user = cfg.glances_username
+            pwd  = cfg.glances_password
+
             # Auto-detect API version on first call, then reuse
             cpu,    v = _get(host, port, "cpu",         user, pwd)
             mem,    _ = _get(host, port, "mem",         user, pwd, v)

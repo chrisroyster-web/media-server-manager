@@ -230,11 +230,11 @@ class NetdataTab(tk.Frame):
         threading.Thread(target=self._fetch, daemon=True).start()
 
     def _fetch(self):
-        cfg  = self.controller.config_manager
-        host = cfg.netdata_host.removeprefix("https://").removeprefix("http://").strip("/")
-        port = cfg.netdata_port or "19999"
-
         try:
+            cfg  = self.controller.config_manager
+            host = cfg.netdata_host.removeprefix("https://").removeprefix("http://").strip("/")
+            port = cfg.netdata_port or "19999"
+
             info    = _get(host, port, "info")
             metrics = _all_metrics(host, port)
 

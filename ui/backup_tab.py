@@ -302,8 +302,8 @@ class BackupTab(tk.Frame):
         threading.Thread(target=self._fetch, daemon=True).start()
 
     def _fetch(self):
-        ssh = self.controller.ssh
         try:
+            ssh = self.controller.ssh
             jobs = check_backup_jobs(ssh)
             self.after(0, lambda: self._populate(jobs))
             self.after(0, lambda: self._last_lbl.config(

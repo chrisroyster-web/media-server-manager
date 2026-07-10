@@ -402,12 +402,12 @@ class LibraryTab(tk.Frame):
             daemon=True).start()
 
     def _do_fetch_items(self, server, lib, search, type_key, start, reset):
-        cfg     = self.controller.config_manager
-        jf_type, plex_type = _TYPE_MAP.get(type_key, (None, None))
-        items   = []
-        total   = 0
-
         try:
+            cfg     = self.controller.config_manager
+            jf_type, plex_type = _TYPE_MAP.get(type_key, (None, None))
+            items   = []
+            total   = 0
+
             if server in (_EMBY, _JELLYFIN):
                 host   = cfg.emby_host   if server == _EMBY else cfg.jellyfin_host
                 port   = cfg.emby_port   if server == _EMBY else cfg.jellyfin_port
@@ -476,10 +476,10 @@ class LibraryTab(tk.Frame):
             self.after(0, lambda err=str(e): self._status(
                 "Fetch error: " + err[:80], error=True))
             self.after(0, self._reset_refresh_btn)
-            self._loading = False
             return
+        finally:
+            self._loading = False
 
-        self._loading = False
         self.after(0, lambda i=items, t=total, r=reset:
                    self._populate_tree(i, t, r))
 

@@ -239,7 +239,13 @@ class PlayHistoryTab(tk.Frame):
             self.after(0, lambda: self._done(entries, status,
                                               level="ok" if entries else "info"))
         finally:
+            # _done() (which also clears _loading) only runs if nothing
+            # above escapes -- e.g. entries.sort()'s key lookup, or the
+            # after() call itself if the window is closing. Without this
+            # backstop, a stuck _loading permanently blocks refresh() even
+            # though _fetching itself resets fine.
             self._fetching = False
+            self._loading = False
 
     # ── Plex ──────────────────────────────────────────────────
     def _fetch_plex(self, cfg):

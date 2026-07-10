@@ -175,10 +175,10 @@ class BazarrTab(tk.Frame):
         threading.Thread(target=self._fetch, daemon=True).start()
 
     def _fetch(self):
-        cfg  = self.controller.config_manager
-        host, port, key = cfg.bazarr_host, cfg.bazarr_port, cfg.bazarr_apikey
-        rows, errors = [], []
         try:
+            cfg  = self.controller.config_manager
+            host, port, key = cfg.bazarr_host, cfg.bazarr_port, cfg.bazarr_apikey
+            rows, errors = [], []
             try:
                 data = _api_get(host, port, key, "episodes/wanted?start=0&length=-1")
                 for item in data.get("data", []) or []:

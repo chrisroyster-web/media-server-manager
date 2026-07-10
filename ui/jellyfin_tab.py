@@ -133,15 +133,15 @@ class JellyfinTab(tk.Frame):
         threading.Thread(target=self._do_fetch, daemon=True).start()
 
     def _do_fetch(self):
-        cfg    = self.controller.config_manager
-        host   = cfg.jellyfin_host
-        port   = cfg.jellyfin_port
-        apikey = cfg.jellyfin_apikey
-        if not apikey:
-            self.after(0, lambda: self._show_error(
-                "No Jellyfin API key configured — add it in Config."))
-            return
         try:
+            cfg    = self.controller.config_manager
+            host   = cfg.jellyfin_host
+            port   = cfg.jellyfin_port
+            apikey = cfg.jellyfin_apikey
+            if not apikey:
+                self.after(0, lambda: self._show_error(
+                    "No Jellyfin API key configured — add it in Config."))
+                return
             url = "http://{}:{}/Sessions?activeWithinSeconds=30".format(host, port)
             req = urllib.request.Request(url, headers={
                 "X-Emby-Token": apikey,

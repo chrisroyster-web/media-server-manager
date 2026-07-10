@@ -163,13 +163,13 @@ class UptimeKumaTab(tk.Frame):
         threading.Thread(target=self._fetch, daemon=True).start()
 
     def _fetch(self):
-        cfg  = self.controller.config_manager
-        host = cfg.uptime_kuma_host
-        port = cfg.uptime_kuma_port
-        slug = cfg.uptime_kuma_slug or "default"
-        key  = cfg.uptime_kuma_apikey
-
         try:
+            cfg  = self.controller.config_manager
+            host = cfg.uptime_kuma_host
+            port = cfg.uptime_kuma_port
+            slug = cfg.uptime_kuma_slug or "default"
+            key  = cfg.uptime_kuma_apikey
+
             page, hb, hb_err = _api(host, port, slug, key)
         except Exception as e:
             self.after(0, lambda err=str(e): self._status.config(

@@ -207,16 +207,16 @@ class EmbyTab(tk.Frame):
         threading.Thread(target=self._do_fetch, daemon=True).start()
 
     def _do_fetch(self):
-        cfg    = self.controller.config_manager
-        host   = cfg.emby_host
-        port   = cfg.emby_port
-        apikey = cfg.emby_apikey
-
-        if not apikey:
-            self.after(0, lambda: self._show_error("No Emby API key configured.\nGo to Config > Emby."))
-            return
-
         try:
+            cfg    = self.controller.config_manager
+            host   = cfg.emby_host
+            port   = cfg.emby_port
+            apikey = cfg.emby_apikey
+
+            if not apikey:
+                self.after(0, lambda: self._show_error("No Emby API key configured.\nGo to Config > Emby."))
+                return
+
             data     = _emby_get(host, port, apikey,
                                  "Sessions?ControllableByUserId=&ActiveWithinSeconds=60")
             sessions = [s for s in data if s.get("NowPlayingItem")]

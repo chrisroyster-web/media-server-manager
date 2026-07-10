@@ -135,14 +135,14 @@ class PlexTab(tk.Frame):
         threading.Thread(target=self._do_fetch, daemon=True).start()
 
     def _do_fetch(self):
-        cfg   = self.controller.config_manager
-        host  = cfg.plex_host
-        port  = cfg.plex_port
-        token = cfg.plex_token
-        if not token:
-            self.after(0, lambda: self._show_error("No Plex token configured — add it in Config."))
-            return
         try:
+            cfg   = self.controller.config_manager
+            host  = cfg.plex_host
+            port  = cfg.plex_port
+            token = cfg.plex_token
+            if not token:
+                self.after(0, lambda: self._show_error("No Plex token configured — add it in Config."))
+                return
             url = "http://{}:{}/status/sessions".format(host, port)
             req = urllib.request.Request(url, headers={
                 "X-Plex-Token": token,

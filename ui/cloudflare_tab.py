@@ -215,30 +215,37 @@ class CloudflareTab(tk.Frame):
 
     def _fetch(self, token, zone, account_id):
         try:
-            records = cf.list_dns_records(token, zone)
-        except cf.CloudflareError as e:
-            self.after(0, lambda err=str(e): self._fail("DNS records: {}".format(err)))
-            return
-        except Exception as e:
-            self.after(0, lambda err=str(e): self._fail("DNS records: {}".format(err)))
-            return
-
-        try:
-            events = cf.list_security_events(token, zone)
-        except Exception:
-            events = None  # token may lack Analytics scope — not fatal
-
-        tunnels = []
-        if account_id:
             try:
-                tunnels = cf.list_tunnels(token, account_id)
-            except Exception:
-                tunnels = None  # token may lack Tunnel scope — not fatal
+                records = cf.list_dns_records(token, zone)
+            except cf.CloudflareError as e:
+                self.after(0, lambda err=str(e): self._fail("DNS records: {}".format(err)))
+                return
+            except Exception as e:
+                self.after(0, lambda err=str(e): self._fail("DNS records: {}".format(err)))
+                return
 
-        self._records = records
-        self._events  = events or []
-        self._tunnels = tunnels or []
-        self.after(0, lambda: self._populate(events is None, tunnels is None and bool(account_id)))
+            try:
+                events = cf.list_security_events(token, zone)
+            except Exception:
+                events = None  # token may lack Analytics scope — not fatal
+
+            tunnels = []
+            if account_id:
+                try:
+                    tunnels = cf.list_tunnels(token, account_id)
+                except Exception:
+                    tunnels = None  # token may lack Tunnel scope — not fatal
+
+            self._records = records
+            self._events  = events or []
+            self._tunnels = tunnels or []
+            self.after(0, lambda: self._populate(events is None, tunnels is None and bool(account_id)))
+        finally:
+            # Must always clear no matter what fails above -- refresh() no-ops
+            # while this is True, so an unreset flag permanently wedges the
+            # tab. _fail()/_populate() also clear it on their own paths;
+            # this is the backstop for anything that escapes both.
+            self._fetching = False
 
     def _fail(self, msg):
         self._fetching = False

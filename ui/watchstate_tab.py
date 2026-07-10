@@ -133,8 +133,8 @@ class WatchstateTab(tk.Frame):
         threading.Thread(target=self._fetch, daemon=True).start()
 
     def _fetch(self):
-        cfg = self.controller.config_manager
         try:
+            cfg = self.controller.config_manager
             code = _check_health(cfg.watchstate_host, cfg.watchstate_port)
             ok, detail = True, "HTTP {}".format(code)
         except urllib.error.HTTPError as e:
