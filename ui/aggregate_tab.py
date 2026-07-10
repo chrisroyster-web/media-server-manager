@@ -15,6 +15,8 @@ import threading
 import time
 import tkinter as tk
 
+from ui.refresh_control import RefreshControl
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -382,6 +384,10 @@ class AggregateTab(tk.Frame):
                                     font=t.font_small)
         self._status_lbl.pack(side="left", padx=(0, 12))
 
+        self._rc = RefreshControl(ctrl, self.controller, "all_servers",
+                                  default=60, on_refresh=self.refresh)
+        self._rc.pack(side="left", padx=(0, 12))
+
         self._refresh_btn = tk.Button(
             ctrl, text="⟳  Refresh All",
             command=self.refresh,
@@ -475,6 +481,7 @@ class AggregateTab(tk.Frame):
     def refresh(self):
         if self._polling:
             return
+        self._rc.cancel()
         self._polling = True
         self._refresh_btn.config(state="disabled", text="Polling…")
         self._status_lbl.config(text="")
@@ -483,6 +490,7 @@ class AggregateTab(tk.Frame):
         if not profiles:
             self._polling = False
             self._refresh_btn.config(state="normal", text="⟳  Refresh All")
+            self._rc.schedule()
             return
 
         self._sync_cards()
@@ -532,3 +540,4 @@ class AggregateTab(tk.Frame):
         offline = sum(1 for c in self._cards.values() if c._status == "offline")
         self._status_lbl.config(
             text="{} online  ·  {} offline".format(online, offline))
+        self._rc.schedule()

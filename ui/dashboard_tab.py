@@ -671,6 +671,7 @@ class DashboardTab(tk.Frame):
 
     def refresh(self):
         if getattr(self, "_fetching", False): return
+        self._rc.cancel()
         if not self.controller.ssh.connected:
             self._set_disconnected()
             return
@@ -1136,6 +1137,7 @@ class DashboardTab(tk.Frame):
             self.after(0, lambda: self.last_updated_lbl.config(text="Updated " + ts))
             self.after(0, lambda: self.refresh_btn.config(state="normal", text="⟳ Refresh"))
             self.after(0, self._spinner.stop)
+            self.after(0, self._rc.schedule)
 
         # =========================================================
         # HELPERS
