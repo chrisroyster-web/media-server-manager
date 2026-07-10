@@ -272,14 +272,21 @@ class MediaUsersTab(tk.Frame):
                     text="Cannot reach {}: {}".format(server, err),
                     bg=self.theme.surface_dark, fg=self.theme.status_stopped_text))
                 return
-            finally:
-                self._fetching = False
-                self.after(0, self._rc.schedule)
             self.after(0, lambda: self._populate(server, users))
             self.after(0, lambda: self._last_lbl.config(
                 text="{} · {}".format(server, time.strftime("%H:%M"))))
         except RuntimeError:
             pass
+        finally:
+            # Must always clear, no matter what failed above (even before
+            # the API call ran) -- refresh() no-ops while this is True, so
+            # any unreset flag permanently wedges the tab: no button click,
+            # auto-refresh tick, or server switch will ever fetch again.
+            self._fetching = False
+            try:
+                self.after(0, self._rc.schedule)
+            except RuntimeError:
+                pass
 
     # ------------------------------------------------------------------
     # POPULATE
