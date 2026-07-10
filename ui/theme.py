@@ -15,6 +15,65 @@ from tkinter import ttk
 
 _HEX_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 
+# ── Custom ttk style capture ───────────────────────────────────────────
+# ~44 tab modules each call ttk.Style().configure()/.map() with their own
+# style name (e.g. "MR.TNotebook.Tab", "Jobs.Treeview") instead of reusing
+# the generic names apply_ttk_styles() refreshes below. Wrapping the two
+# ttk.Style methods once, here, records every such call (style name +
+# kwargs, with whatever literal colors were live at the time) so a live
+# theme toggle can replay them with old colors swapped for new — without
+# every one of those 44 files needing to know this mechanism exists.
+_style_calls = {}   # style_name -> [("configure"|"map", {opt: value, ...}), ...]
+
+if not getattr(ttk.Style, "_theme_capture_installed", False):
+    _orig_style_configure = ttk.Style.configure
+    _orig_style_map = ttk.Style.map
+
+    def _capturing_configure(self, style, query_opt=None, **kw):
+        result = _orig_style_configure(self, style, query_opt, **kw)
+        if kw:
+            _style_calls.setdefault(style, []).append(("configure", dict(kw)))
+        return result
+
+    def _capturing_map(self, style, query_opt=None, **kw):
+        result = _orig_style_map(self, style, query_opt, **kw)
+        if kw:
+            _style_calls.setdefault(style, []).append(("map", dict(kw)))
+        return result
+
+    ttk.Style.configure = _capturing_configure
+    ttk.Style.map = _capturing_map
+    ttk.Style._theme_capture_installed = True
+
+# Generic style names apply_ttk_styles() already refreshes directly —
+# skip these during replay so a stale recorded call can't clobber the
+# freshly (and sometimes mode-conditionally) computed values it just set.
+_GENERIC_STYLE_NAMES = {
+    "Treeview", "Treeview.Heading",
+    "Vertical.TScrollbar", "Horizontal.TScrollbar",
+    "TNotebook", "TNotebook.Tab",
+    "TCombobox", "TSeparator", "TProgressbar",
+}
+
+
+def _remap_style_value(value, remap):
+    """Apply {old_hex: new_hex} to a single ttk configure()/map() value —
+    either a literal color string, or (for .map()) a list of
+    (state_spec, value) tuples."""
+    if isinstance(value, str):
+        return remap.get(value, value)
+    if isinstance(value, (list, tuple)):
+        new_items = []
+        for item in value:
+            if isinstance(item, (list, tuple)) and len(item) == 2:
+                state_spec, color = item
+                new_items.append((state_spec, remap.get(color, color)
+                                   if isinstance(color, str) else color))
+            else:
+                new_items.append(item)
+        return new_items
+    return value
+
 # Color-bearing widget options worth checking during a live theme switch.
 # Every plain tk widget bakes its bg=/fg=/etc. in as a literal string at
 # construction time (unlike ttk, there's no dynamic style to just
@@ -142,6 +201,12 @@ class Theme:
         # #929292 is the least-bright gray that still clears 4.5:1
         # against both sidebar_bg shades (#252525 dark / #2b2b2b light).
         sidebar_active_bar="#0078d4", sidebar_section_text="#929292",
+        # Mode-invariant for the same reason as sidebar_icon_hover above —
+        # the hover tint on a nav row must stay a dark tone in both themes
+        # since the sidebar itself never lightens. Reusing surface_light
+        # here used to pick up light mode's near-white #f9f9f9, which paired
+        # with sidebar_icon_hover's white text made hovered labels unreadable.
+        sidebar_hover_bg="#333333", sidebar_dim_hover_bg="#161616",
         console_cmd="#9cdcfe", console_info="#d4d4d4",
         console_success="#57a300", console_error="#f14c4c",
         console_timestamp="#608b4e", console_output="#f3f3f3",
@@ -169,6 +234,7 @@ class Theme:
         sidebar_icon="#c8c8c8", sidebar_icon_hover="#ffffff",
         sidebar_icon_active="#ffffff", sidebar_active_bg="#0078d4",
         sidebar_active_bar="#0078d4", sidebar_section_text="#929292",
+        sidebar_hover_bg="#333333", sidebar_dim_hover_bg="#161616",
         console_cmd="#0070c1", console_info="#1a1a1a",
         console_success="#107c10", console_error="#c50f1f",
         console_timestamp="#498205", console_output="#1a1a1a",
@@ -213,6 +279,8 @@ class Theme:
         self.sidebar_active_bg    = palette["sidebar_active_bg"]
         self.sidebar_active_bar   = palette["sidebar_active_bar"]
         self.sidebar_section_text = palette["sidebar_section_text"]
+        self.sidebar_hover_bg     = palette["sidebar_hover_bg"]
+        self.sidebar_dim_hover_bg = palette["sidebar_dim_hover_bg"]
 
         # ── Internal button palette refs ──────────────────────────────
         self._btn_def_bg    = palette["_button_default_bg"]
@@ -423,6 +491,23 @@ class Theme:
             relief="flat",
             thickness=4,
         )
+
+    def refresh_custom_styles(self, root, remap):
+        """Replay every custom-named ttk style call captured by the
+        ttk.Style.configure()/.map() wrapper above, substituting any color
+        that changed value in this retheme via `remap` (the same dict
+        recolor_widget_tree() uses). Covers the ~44 tab modules' own
+        "Foo.TNotebook.Tab" / "Foo.Treeview" styles that apply_ttk_styles()
+        doesn't know the names of, so they stop being stuck in the old
+        theme's colors until the next full restart."""
+        s = ttk.Style(root)
+        for style_name, calls in _style_calls.items():
+            if style_name in _GENERIC_STYLE_NAMES:
+                continue
+            for method, kw in calls:
+                new_kw = {opt: _remap_style_value(val, remap) for opt, val in kw.items()}
+                if new_kw != kw:
+                    getattr(s, method)(style_name, **new_kw)
 
     # ── Button styling ────────────────────────────────────────────────
     def style_button(self, btn, variant="default"):

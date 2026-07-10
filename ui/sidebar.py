@@ -538,14 +538,14 @@ class Sidebar(tk.Frame):
             # Subtle tint on hover to indicate it's interactive, but don't
             # brighten the text — keeps it clearly "not enabled"
             if entering:
-                row.configure(bg=t.surface_dark)
-                btn.configure(bg=t.surface_dark)
+                row.configure(bg=t.sidebar_dim_hover_bg)
+                btn.configure(bg=t.sidebar_dim_hover_bg)
             else:
                 row.configure(bg=t.sidebar_bg)
                 btn.configure(bg=t.sidebar_bg)
         elif entering and not is_active:
-            btn.configure(fg=t.sidebar_icon_hover, bg=t.surface_light)
-            row.configure(bg=t.surface_light)
+            btn.configure(fg=t.sidebar_icon_hover, bg=t.sidebar_hover_bg)
+            row.configure(bg=t.sidebar_hover_bg)
         elif not entering and not is_active:
             btn.configure(fg=t.sidebar_icon, bg=t.sidebar_bg)
             row.configure(bg=t.sidebar_bg)

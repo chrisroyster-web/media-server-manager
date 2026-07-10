@@ -922,6 +922,7 @@ class MediaServerManager(tk.Tk):
         remap = self.theme.retheme(new_mode)
         recolor_widget_tree(self, remap)
         self.theme.apply_ttk_styles(self)
+        self.theme.refresh_custom_styles(self, remap)
         is_dark = (new_mode == "dark")
         self.sidebar._theme_btn.configure(text="☀" if is_dark else "🌙")
 
