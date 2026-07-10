@@ -129,6 +129,10 @@ _COLOR_OPTS = (
     # reading as a solid black box regardless of checked state once the
     # rest of the tab had recolored to light.
     "selectcolor",
+    # Spinbox's up/down arrow background (config_tab's numeric spinboxes) —
+    # same class of gap as selectcolor above, found by auditing every
+    # color-bearing widget option against this tuple.
+    "buttonbackground",
 )
 
 
