@@ -857,8 +857,8 @@ class Sidebar(tk.Frame):
             self._toggle_btn.pack_forget()
             self._icon_lbl.pack(side="left", padx=(14, 4), pady=14)
             self._app_lbl.pack(side="left")
-            self._theme_btn.pack(side="right")
             self._toggle_btn.pack(side="right", padx=4)
+            self._theme_btn.pack(side="right")
             self._ver_lbl.config(text="All Clear  ·  v{}".format(self.controller.APP_VERSION))
             self._shortcut_hint.pack(side="bottom", pady=(0, 4))
 
