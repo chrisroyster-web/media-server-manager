@@ -122,6 +122,13 @@ _COLOR_OPTS = (
     "highlightbackground", "highlightcolor",
     "insertbackground", "selectbackground", "selectforeground",
     "readonlybackground", "troughcolor",
+    # Checkbutton/Radiobutton indicator-box fill — distinct from
+    # selectbackground/selectforeground (Entry/Listbox text selection).
+    # Missing this meant a live toggle left the indicator box on whatever
+    # mode it was built under (e.g. dark mode's near-black surface_dark),
+    # reading as a solid black box regardless of checked state once the
+    # rest of the tab had recolored to light.
+    "selectcolor",
 )
 
 
