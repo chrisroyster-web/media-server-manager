@@ -45,6 +45,34 @@ if not getattr(ttk.Style, "_theme_capture_installed", False):
     ttk.Style.map = _capturing_map
     ttk.Style._theme_capture_installed = True
 
+# Row-striping/source-color tags on ttk.Treeview (e.g. play_history_tab's
+# "odd"/"even"/"plex" tags) live per-widget-instance via tag_configure(),
+# a completely different API from ttk.Style — so the capture above never
+# sees them, and recolor_widget_tree()'s existing tk.Text tag_configure()
+# handling doesn't apply either (Treeview isn't a tk.Text). Without this,
+# a live toggle recolors the Treeview's own background/header (generic
+# "Treeview" style) but every already-inserted row keeps its old-mode tag
+# colors — e.g. dark-mode near-black row backgrounds surviving a toggle
+# to light, reading as content stuck on a black screen. Recorded per
+# widget instance (not a module-level dict like the style capture above)
+# since tags are scoped to one Treeview, not shared globally by name.
+if not getattr(ttk.Treeview, "_theme_capture_installed", False):
+    _orig_treeview_tag_configure = ttk.Treeview.tag_configure
+
+    def _capturing_tag_configure(self, tagname, option=None, **kw):
+        if option is not None:
+            result = _orig_treeview_tag_configure(self, tagname, option, **kw)
+        else:
+            result = _orig_treeview_tag_configure(self, tagname, **kw)
+        if kw:
+            if not hasattr(self, "_captured_tag_calls"):
+                self._captured_tag_calls = {}
+            self._captured_tag_calls[tagname] = dict(kw)
+        return result
+
+    ttk.Treeview.tag_configure = _capturing_tag_configure
+    ttk.Treeview._theme_capture_installed = True
+
 # Generic style names apply_ttk_styles() already refreshes directly —
 # skip these during replay so a stale recorded call can't clobber the
 # freshly (and sometimes mode-conditionally) computed values it just set.
@@ -174,6 +202,16 @@ def recolor_widget_tree(widget, remap):
                         widget.tag_configure(tagname, **{opt: new})
                     except Exception:
                         pass
+
+    if isinstance(widget, ttk.Treeview):
+        for tagname, kw in getattr(widget, "_captured_tag_calls", {}).items():
+            new_kw = {opt: (remap.get(val, val) if isinstance(val, str) else val)
+                      for opt, val in kw.items()}
+            if new_kw != kw:
+                try:
+                    widget.tag_configure(tagname, **new_kw)
+                except Exception:
+                    pass
 
     for child in widget.winfo_children():
         recolor_widget_tree(child, remap)
