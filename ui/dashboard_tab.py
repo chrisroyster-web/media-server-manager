@@ -84,6 +84,12 @@ class DashboardTab(tk.Frame):
             if not getattr(self, "_wheel_scroll_scheduled", False):
                 self._wheel_scroll_scheduled = True
                 self.after_idle(_apply_pending_wheel_scroll)
+            # Scrollbar has a built-in Tk class-level <MouseWheel> binding
+            # (tk::ScrollByUnits) that calls canvas.yview directly, bypassing
+            # this handler's guard entirely. Binding this same handler onto
+            # scrollbar too (below) and returning "break" here stops that
+            # default.
+            return "break"
 
         def _apply_pending_wheel_scroll():
             delta = self._wheel_delta_pending
@@ -97,7 +103,7 @@ class DashboardTab(tk.Frame):
                     return
             canvas.yview_scroll(int(-1 * (delta / 120)), "units")
 
-        for w in (canvas, self.body):
+        for w in (canvas, self.body, scrollbar):
             w.bind("<MouseWheel>", _on_wheel)
             w.bind("<Button-4>",   _on_wheel)
             w.bind("<Button-5>",   _on_wheel)

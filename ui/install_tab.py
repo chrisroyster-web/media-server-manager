@@ -148,6 +148,11 @@ class InstallTab(tk.Frame):
             if not getattr(self, "_wheel_scroll_scheduled", False):
                 self._wheel_scroll_scheduled = True
                 self.after_idle(_apply_pending_wheel_scroll)
+            # Scrollbar has a built-in Tk class-level <MouseWheel> binding
+            # (tk::ScrollByUnits) that calls canvas.yview directly, bypassing
+            # this guard entirely. Binding this handler onto sb too (below)
+            # and returning "break" here stops that default.
+            return "break"
 
         def _apply_pending_wheel_scroll():
             delta = self._wheel_delta_pending
@@ -162,6 +167,7 @@ class InstallTab(tk.Frame):
             canvas.yview_scroll(int(-1 * (delta / 120)), "units")
 
         canvas.bind("<MouseWheel>", _on_wheel)
+        sb.bind("<MouseWheel>", _on_wheel)
 
         self._build_app_rows()
 

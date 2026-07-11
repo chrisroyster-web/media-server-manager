@@ -261,18 +261,26 @@ class NowPlayingTab(tk.Frame):
             # between them. Calling yview_scroll() once per event let
             # repeated rapid calls desync the embedded session_frame
             # window's actual on-screen position from what yview()/bbox()
-            # reported -- verified directly: yview() kept reading (0.0, 1.0)
-            # the whole time, yet the card had visibly drifted hundreds of
-            # pixels. Coalescing the whole burst into a single net delta,
+            # reported. Coalescing the whole burst into a single net delta,
             # applied once after it settles, means yview_scroll() (or the
             # "nothing to scroll" skip) only ever runs once per burst
             # instead of once per tick, so there's nothing left to desync
             # between repeated calls. Same fix as ui/sidebar.py's nav
             # scroll (see git history for that one).
+            #
+            # The "break" return matters just as much: Scrollbar has a
+            # built-in Tk class-level <MouseWheel> binding (tk::ScrollByUnits,
+            # baked into Tk's own library scripts) that calls canvas.yview
+            # directly, completely bypassing this handler and its guard.
+            # sidebar.py's nav list never hit this because it has no visible
+            # Scrollbar widget at all. Binding this same handler onto sb too
+            # (below) and returning "break" here stops Tk's default
+            # class-level handler for the scrollbar from ever firing.
             self._wheel_delta_pending = getattr(self, "_wheel_delta_pending", 0) + e.delta
             if not getattr(self, "_wheel_scroll_scheduled", False):
                 self._wheel_scroll_scheduled = True
                 self.after_idle(_apply_pending_wheel_scroll)
+            return "break"
 
         def _apply_pending_wheel_scroll():
             delta = self._wheel_delta_pending
@@ -290,6 +298,7 @@ class NowPlayingTab(tk.Frame):
 
         canvas.bind("<MouseWheel>", _on_wheel)
         self._session_frame.bind("<MouseWheel>", _on_wheel)
+        sb.bind("<MouseWheel>", _on_wheel)
         self._canvas = canvas
 
         self._fetch()

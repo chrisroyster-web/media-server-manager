@@ -108,6 +108,11 @@ class SABnzbdTab(tk.Frame):
             if not getattr(self, "_wheel_scroll_scheduled", False):
                 self._wheel_scroll_scheduled = True
                 self.after_idle(_apply_pending_wheel_scroll)
+            # Scrollbar has a built-in Tk class-level <MouseWheel> binding
+            # (tk::ScrollByUnits) that calls canvas.yview directly, bypassing
+            # this handler's guard entirely. Binding this same handler onto
+            # vsb too (below) and returning "break" here stops that default.
+            return "break"
 
         def _apply_pending_wheel_scroll():
             delta = self._wheel_delta_pending
@@ -124,6 +129,7 @@ class SABnzbdTab(tk.Frame):
         canvas.bind("<MouseWheel>", _on_wheel)
         canvas.bind("<Button-4>",   _on_wheel)
         canvas.bind("<Button-5>",   _on_wheel)
+        vsb.bind("<MouseWheel>", _on_wheel)
 
         self._canvas = canvas
 

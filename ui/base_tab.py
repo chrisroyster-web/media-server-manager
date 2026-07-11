@@ -77,6 +77,11 @@ class CardConsoleTab(tk.Frame):
 
         self._bind_mousewheel(self._canvas)
         self._bind_mousewheel(self.inner)
+        # Scrollbar has a built-in Tk class-level <MouseWheel> binding
+        # (tk::ScrollByUnits) that calls canvas.yview directly, bypassing
+        # _on_mousewheel's guard entirely. Binding the same handler onto it
+        # (return "break" in _on_mousewheel stops that default) closes that.
+        self._bind_mousewheel(_sb)
 
         self._populate_cards()
 
@@ -142,6 +147,11 @@ class CardConsoleTab(tk.Frame):
         if not getattr(self, "_wheel_scroll_scheduled", False):
             self._wheel_scroll_scheduled = True
             self.after_idle(self._apply_pending_wheel_scroll)
+        # Scrollbar has a built-in Tk class-level <MouseWheel> binding
+        # (tk::ScrollByUnits) that calls canvas.yview directly, bypassing
+        # this guard entirely. Binding this handler onto the scrollbar too
+        # and returning "break" here stops that default from also firing.
+        return "break"
 
     def _apply_pending_wheel_scroll(self):
         delta = self._wheel_delta_pending

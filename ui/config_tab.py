@@ -114,6 +114,11 @@ class ConfigTab(tk.Frame):
             if not getattr(self, "_nav_wheel_scroll_scheduled", False):
                 self._nav_wheel_scroll_scheduled = True
                 self.after_idle(_nav_apply_pending_wheel_scroll)
+            # Scrollbar has a built-in Tk class-level <MouseWheel> binding
+            # (tk::ScrollByUnits) that calls canvas.yview directly, bypassing
+            # this guard entirely. Binding this handler onto nav_sb too
+            # (below) and returning "break" here stops that default.
+            return "break"
 
         def _nav_apply_pending_wheel_scroll():
             delta = self._nav_wheel_delta_pending
@@ -127,7 +132,7 @@ class ConfigTab(tk.Frame):
                     return
             nav_canvas.yview_scroll(int(-1 * (delta / 120)), "units")
 
-        for w in (nav_canvas, self._nav_list):
+        for w in (nav_canvas, self._nav_list, nav_sb):
             w.bind("<MouseWheel>", _nav_on_wheel)
 
         self._canvas = tk.Canvas(split, bg=t.bg, highlightthickness=0)
@@ -155,6 +160,11 @@ class ConfigTab(tk.Frame):
             if not getattr(self, "_wheel_scroll_scheduled", False):
                 self._wheel_scroll_scheduled = True
                 self.after_idle(_apply_pending_wheel_scroll)
+            # Scrollbar has a built-in Tk class-level <MouseWheel> binding
+            # (tk::ScrollByUnits) that calls canvas.yview directly, bypassing
+            # this guard entirely. Binding this handler onto sb too (below)
+            # and returning "break" here stops that default.
+            return "break"
 
         def _apply_pending_wheel_scroll():
             delta = self._wheel_delta_pending
@@ -168,7 +178,7 @@ class ConfigTab(tk.Frame):
                     return
             self._canvas.yview_scroll(int(-1 * (delta / 120)), "units")
 
-        for w in (self._canvas, self.body):
+        for w in (self._canvas, self.body, sb):
             w.bind("<MouseWheel>", _on_wheel)
             w.bind("<Button-4>",   _on_wheel)
             w.bind("<Button-5>",   _on_wheel)
