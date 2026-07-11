@@ -387,11 +387,21 @@ class Sidebar(tk.Frame):
         if not getattr(self, "_wheel_scroll_scheduled", False):
             self._wheel_scroll_scheduled = True
             self.after_idle(self._apply_pending_wheel_scroll)
+        # main.py also has a *global* bind_all("<MouseWheel>", ...) that
+        # routes scroll from any unbound child widget up to its nearest
+        # scrollable Canvas ancestor -- without "break" here, an event
+        # already handled by this binding would also reach that global
+        # handler via the "all" bindtag, double-scrolling nav_canvas.
+        return "break"
 
     def _apply_pending_wheel_scroll(self):
         delta = self._wheel_delta_pending
         self._wheel_delta_pending = 0
         self._wheel_scroll_scheduled = False
+        # Force geometry to settle before trusting bbox/winfo_height --
+        # reading them mid-transition can make the "nothing to scroll"
+        # check below misjudge, letting a stray yview_scroll() through.
+        self._nav_canvas.update_idletasks()
         bbox = self._nav_canvas.bbox("all")
         if bbox:
             self._nav_canvas.configure(scrollregion=bbox)

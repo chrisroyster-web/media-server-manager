@@ -286,6 +286,12 @@ class NowPlayingTab(tk.Frame):
             delta = self._wheel_delta_pending
             self._wheel_delta_pending = 0
             self._wheel_scroll_scheduled = False
+            # Force geometry to settle before trusting bbox/winfo_height --
+            # reading them mid-transition (e.g. while a stray redraw from an
+            # earlier event is still pending) can make the "does this even
+            # need to scroll" check below misjudge, letting a stray
+            # yview_scroll() through even when the content fits.
+            canvas.update_idletasks()
             bbox = canvas.bbox("all")
             if bbox:
                 canvas.configure(scrollregion=bbox)
@@ -293,8 +299,20 @@ class NowPlayingTab(tk.Frame):
                     # Nothing to scroll -- make sure it's pinned at the top
                     # rather than calling yview_scroll() at all.
                     canvas.yview_moveto(0.0)
+                    # Belt-and-suspenders: re-confirm shortly after. Some
+                    # residual drift has been observed happening slightly
+                    # *after* this synchronous reset, from redraw activity
+                    # Tk itself schedules independently -- catch and correct
+                    # it rather than trust one synchronous call is final.
+                    self.after(50, _reconfirm_pinned)
                     return
             canvas.yview_scroll(int(-1 * (delta / 120)), "units")
+
+        def _reconfirm_pinned():
+            bbox = canvas.bbox("all")
+            if bbox and (bbox[3] - bbox[1]) <= canvas.winfo_height():
+                if canvas.yview()[0] != 0.0:
+                    canvas.yview_moveto(0.0)
 
         canvas.bind("<MouseWheel>", _on_wheel)
         self._session_frame.bind("<MouseWheel>", _on_wheel)

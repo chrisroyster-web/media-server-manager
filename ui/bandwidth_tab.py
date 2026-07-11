@@ -91,13 +91,44 @@ class BandwidthTab(tk.Frame):
         vsb.pack(side="right", fill="y")
         self._canvas.pack(fill="both", expand=True)
         self._canvas.bind("<Configure>", lambda _: self._draw())
-        self._canvas.bind("<MouseWheel>",
-                          lambda e: self._canvas.yview_scroll(
-                              int(-1 * (e.delta / 120)), "units"))
-        self._canvas.bind("<Button-4>",
-                          lambda e: self._canvas.yview_scroll(-1, "units"))
-        self._canvas.bind("<Button-5>",
-                          lambda e: self._canvas.yview_scroll(1, "units"))
+
+        def _on_wheel(e):
+            # A fast physical scroll delivers many wheel events in one burst,
+            # faster than Tk can settle canvas geometry between them.
+            # Calling yview_scroll() once per event let repeated rapid calls
+            # desync the canvas's actual on-screen draw position from what
+            # yview()/bbox() reported. Coalescing the whole burst into a
+            # single net delta, applied once after it settles, avoids that.
+            # Same fix as ui/sidebar.py's nav scroll.
+            delta = 120 if e.num == 4 else -120 if e.num == 5 else e.delta
+            self._wheel_delta_pending = getattr(self, "_wheel_delta_pending", 0) + delta
+            if not getattr(self, "_wheel_scroll_scheduled", False):
+                self._wheel_scroll_scheduled = True
+                self.after_idle(_apply_pending_wheel_scroll)
+            # Scrollbar has a built-in Tk class-level <MouseWheel> binding
+            # (tk::ScrollByUnits) that calls canvas.yview directly, bypassing
+            # this guard entirely. Binding this handler onto vsb too (below)
+            # and returning "break" here stops that default.
+            return "break"
+
+        def _apply_pending_wheel_scroll():
+            delta = self._wheel_delta_pending
+            self._wheel_delta_pending = 0
+            self._wheel_scroll_scheduled = False
+            self._canvas.update_idletasks()
+            bbox = self._canvas.bbox("all")
+            if bbox:
+                if (bbox[3] - bbox[1]) <= self._canvas.winfo_height():
+                    # Nothing to scroll -- make sure it's pinned at the top
+                    # rather than calling yview_scroll() at all.
+                    self._canvas.yview_moveto(0.0)
+                    return
+            self._canvas.yview_scroll(int(-1 * (delta / 120)), "units")
+
+        self._canvas.bind("<MouseWheel>", _on_wheel)
+        self._canvas.bind("<Button-4>",   _on_wheel)
+        self._canvas.bind("<Button-5>",   _on_wheel)
+        vsb.bind("<MouseWheel>", _on_wheel)
 
         # Status bar
         self._status = tk.Label(self, text="Press 'Refresh' to load bandwidth data",

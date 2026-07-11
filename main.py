@@ -557,7 +557,6 @@ class MediaServerManager(tk.Tk):
             scrollregion set, and scroll that instead.
         This fixes scroll-over-buttons on every tab without touching each tab file.
         """
-        units = int(-1 * (event.delta / 120))
         w = event.widget
 
         # In Python 3.14+, event.widget may be a path string if the widget
@@ -586,11 +585,48 @@ class MediaServerManager(tk.Tk):
                 if w.winfo_class() == "Canvas":
                     sr = w.cget("scrollregion")
                     if sr:
-                        w.yview_scroll(units, "units")
+                        self._route_global_scroll(w, event.delta)
                         return
                 w = w.master
             except Exception:
                 break
+
+    def _route_global_scroll(self, canvas, delta):
+        # Every tab's own canvas binding coalesces wheel bursts into a
+        # single net delta and skips yview_scroll() entirely when the
+        # content already fits (guards against Tk's yview_scroll desyncing
+        # the embedded window's actual on-screen position from what
+        # yview()/bbox() report under rapid repeated calls -- see git
+        # history on ui/sidebar.py and the individual tab files). This
+        # global handler exists purely to make scrolling work while
+        # hovering over a button/label/frame that has no binding of its
+        # own -- routing straight to yview_scroll() here bypassed all of
+        # that per-tab work entirely, since most of a card's visible area
+        # is exactly this kind of unbound child widget. Apply the same
+        # fix here, scoped per-canvas since this one handler serves every
+        # tab in the app.
+        pending = getattr(canvas, "_global_wheel_delta_pending", 0) + delta
+        canvas._global_wheel_delta_pending = pending
+        if getattr(canvas, "_global_wheel_scroll_scheduled", False):
+            return
+        canvas._global_wheel_scroll_scheduled = True
+        canvas.after_idle(lambda: self._apply_global_pending_scroll(canvas))
+
+    def _apply_global_pending_scroll(self, canvas):
+        delta = getattr(canvas, "_global_wheel_delta_pending", 0)
+        canvas._global_wheel_delta_pending = 0
+        canvas._global_wheel_scroll_scheduled = False
+        try:
+            canvas.update_idletasks()
+            bbox = canvas.bbox("all")
+        except tk.TclError:
+            return  # canvas destroyed mid-scroll (tab switch, etc.)
+        if bbox:
+            canvas.configure(scrollregion=bbox)
+            if (bbox[3] - bbox[1]) <= canvas.winfo_height():
+                canvas.yview_moveto(0.0)
+                return
+        canvas.yview_scroll(int(-1 * (delta / 120)), "units")
 
     # ---------------------------------------------------------
     # STATUS BAR
