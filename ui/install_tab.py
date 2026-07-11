@@ -135,8 +135,33 @@ class InstallTab(tk.Frame):
             lambda e: canvas.itemconfig(self._list_win, width=e.width))
         self._list_body.bind("<Configure>",
             lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.bind("<MouseWheel>",
-            lambda e: canvas.yview_scroll(int(-1*(e.delta/120)), "units"))
+
+        def _on_wheel(e):
+            # A fast physical scroll delivers many wheel events in one burst,
+            # faster than Tk can settle canvas geometry between them.
+            # Calling yview_scroll() once per event let repeated rapid calls
+            # desync the embedded list_body window's actual on-screen
+            # position from what yview()/bbox() reported. Coalescing the
+            # whole burst into a single net delta, applied once after it
+            # settles, avoids that. Same fix as ui/sidebar.py's nav scroll.
+            self._wheel_delta_pending = getattr(self, "_wheel_delta_pending", 0) + e.delta
+            if not getattr(self, "_wheel_scroll_scheduled", False):
+                self._wheel_scroll_scheduled = True
+                self.after_idle(_apply_pending_wheel_scroll)
+
+        def _apply_pending_wheel_scroll():
+            delta = self._wheel_delta_pending
+            self._wheel_delta_pending = 0
+            self._wheel_scroll_scheduled = False
+            bbox = canvas.bbox("all")
+            if bbox:
+                canvas.configure(scrollregion=bbox)
+                if (bbox[3] - bbox[1]) <= canvas.winfo_height():
+                    canvas.yview_moveto(0.0)
+                    return
+            canvas.yview_scroll(int(-1 * (delta / 120)), "units")
+
+        canvas.bind("<MouseWheel>", _on_wheel)
 
         self._build_app_rows()
 

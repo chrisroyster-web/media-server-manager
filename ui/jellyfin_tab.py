@@ -103,11 +103,35 @@ class JellyfinTab(tk.Frame):
         self._session_frame.bind("<Configure>",
             lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
 
-        def _mw(e):
-            canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
-        canvas.bind("<MouseWheel>", _mw)
-        self._session_frame.bind("<MouseWheel>", _mw)
+        def _on_wheel(e):
+            # A fast physical scroll delivers many wheel events in one burst,
+            # faster than Tk can settle canvas geometry between them.
+            # Calling yview_scroll() once per event let repeated rapid calls
+            # desync the embedded session_frame window's actual on-screen
+            # position from what yview()/bbox() reported. Coalescing the
+            # whole burst into a single net delta, applied once after it
+            # settles, avoids that. Same fix as ui/sidebar.py's nav scroll.
+            self._wheel_delta_pending = getattr(self, "_wheel_delta_pending", 0) + e.delta
+            if not getattr(self, "_wheel_scroll_scheduled", False):
+                self._wheel_scroll_scheduled = True
+                self.after_idle(_apply_pending_wheel_scroll)
 
+        def _apply_pending_wheel_scroll():
+            delta = self._wheel_delta_pending
+            self._wheel_delta_pending = 0
+            self._wheel_scroll_scheduled = False
+            bbox = canvas.bbox("all")
+            if bbox:
+                canvas.configure(scrollregion=bbox)
+                if (bbox[3] - bbox[1]) <= canvas.winfo_height():
+                    canvas.yview_moveto(0.0)
+                    return
+            canvas.yview_scroll(int(-1 * (delta / 120)), "units")
+
+        canvas.bind("<MouseWheel>", _on_wheel)
+        self._session_frame.bind("<MouseWheel>", _on_wheel)
+
+        self._canvas = canvas
         self._fetch()
 
     def _stat_card(self, parent, label, value):
@@ -167,6 +191,11 @@ class JellyfinTab(tk.Frame):
     def _update_ui(self, sessions):
         for w in self._session_frame.winfo_children():
             w.destroy()
+        # Rebuilding can shrink the list (fewer active streams than before);
+        # the canvas keeps its old scroll fraction otherwise, which now
+        # points past the shorter content and shows as blank space above
+        # the cards. Pin back to the top on every rebuild.
+        self._canvas.yview_moveto(0)
 
         self._active_sessions = sessions
         total     = len(sessions)
@@ -183,13 +212,22 @@ class JellyfinTab(tk.Frame):
                      bg=self.theme.bg, fg=self.theme.text_muted,
                      font=("Segoe UI", 13)).pack(pady=40)
             self._show_status("No active sessions  ·  " + time.strftime("%H:%M:%S"))
-            return
+        else:
+            for s in sessions:
+                self._build_session_card(s)
+            self._show_status("{} stream{} active  ·  {}".format(
+                total, "s" if total != 1 else "", time.strftime("%H:%M:%S")))
 
-        for s in sessions:
-            self._build_session_card(s)
-
-        self._show_status("{} stream{} active  ·  {}".format(
-            total, "s" if total != 1 else "", time.strftime("%H:%M:%S")))
+        # The scrollregion is normally kept in sync by the <Configure>
+        # binding on _session_frame, but that fires on Tk's own schedule --
+        # relying on it left stale (too-tall) scrollregions in place after a
+        # rebuild, so a short list could still be scrolled down into blank
+        # space even though yview_moveto(0) above put it back at the top.
+        # Force the geometry pass now and recompute directly so the region
+        # always matches what was actually just built.
+        self._session_frame.update_idletasks()
+        self._canvas.configure(scrollregion=self._canvas.bbox("all"))
+        self._canvas.yview_moveto(0)
 
     def _build_session_card(self, s):
         t     = self.theme

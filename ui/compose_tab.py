@@ -75,8 +75,33 @@ class ComposeTab(tk.Frame):
             lambda e: canvas.itemconfig(self._win, width=e.width))
         self._body.bind("<Configure>",
             lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.bind("<MouseWheel>",
-            lambda e: canvas.yview_scroll(int(-1*(e.delta/120)), "units"))
+
+        def _on_wheel(e):
+            # A fast physical scroll delivers many wheel events in one burst,
+            # faster than Tk can settle canvas geometry between them.
+            # Calling yview_scroll() once per event let repeated rapid calls
+            # desync the embedded body window's actual on-screen position
+            # from what yview()/bbox() reported. Coalescing the whole burst
+            # into a single net delta, applied once after it settles, avoids
+            # that. Same fix as ui/sidebar.py's nav scroll.
+            self._wheel_delta_pending = getattr(self, "_wheel_delta_pending", 0) + e.delta
+            if not getattr(self, "_wheel_scroll_scheduled", False):
+                self._wheel_scroll_scheduled = True
+                self.after_idle(_apply_pending_wheel_scroll)
+
+        def _apply_pending_wheel_scroll():
+            delta = self._wheel_delta_pending
+            self._wheel_delta_pending = 0
+            self._wheel_scroll_scheduled = False
+            bbox = canvas.bbox("all")
+            if bbox:
+                canvas.configure(scrollregion=bbox)
+                if (bbox[3] - bbox[1]) <= canvas.winfo_height():
+                    canvas.yview_moveto(0.0)
+                    return
+            canvas.yview_scroll(int(-1 * (delta / 120)), "units")
+
+        canvas.bind("<MouseWheel>", _on_wheel)
 
         self._canvas = canvas
 
@@ -207,6 +232,11 @@ class ComposeTab(tk.Frame):
         for f in self._stack_frames:
             f.destroy()
         self._stack_frames.clear()
+        # Rebuilding can shrink the list (fewer stacks than before); the
+        # canvas keeps its old scroll fraction otherwise, which now points
+        # past the shorter content and shows as blank space above the cards.
+        # Pin back to the top on every rebuild.
+        self._canvas.yview_moveto(0)
 
         ts = time.strftime("%H:%M:%S")
         self._status_lbl.config(text="Updated {}".format(ts),
@@ -215,6 +245,17 @@ class ComposeTab(tk.Frame):
         for name, config_file, status, services in stack_data:
             frame = self._build_stack_card(name, config_file, status, services)
             self._stack_frames.append(frame)
+
+        # The scrollregion is normally kept in sync by the <Configure>
+        # binding on _body, but that fires on Tk's own schedule -- relying
+        # on it left stale (too-tall) scrollregions in place after a
+        # rebuild, so a short list could still be scrolled down into blank
+        # space even though yview_moveto(0) above put it back at the top.
+        # Force the geometry pass now and recompute directly so the region
+        # always matches what was actually just built.
+        self._body.update_idletasks()
+        self._canvas.configure(scrollregion=self._canvas.bbox("all"))
+        self._canvas.yview_moveto(0)
 
     def _build_stack_card(self, name, config_file, status, services):
         t = self.theme
@@ -505,6 +546,7 @@ class ComposeTab(tk.Frame):
         for f in self._stack_frames:
             f.destroy()
         self._stack_frames.clear()
+        self._canvas.yview_moveto(0)
         if disconnected:
             state = EmptyState(
                 self._body, self.theme,
@@ -523,3 +565,7 @@ class ComposeTab(tk.Frame):
         state.pack(fill="both", expand=True)
         self._stack_frames.append(state)
         self._status_lbl.config(text="", bg=self.theme.surface_dark)
+
+        self._body.update_idletasks()
+        self._canvas.configure(scrollregion=self._canvas.bbox("all"))
+        self._canvas.yview_moveto(0)

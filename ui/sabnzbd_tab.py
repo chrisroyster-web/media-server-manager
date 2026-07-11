@@ -95,13 +95,37 @@ class SABnzbdTab(tk.Frame):
         canvas.bind(
             "<Configure>", lambda e: canvas.itemconfig(self._canvas_win, width=e.width))
 
-        def _mw(e):
-            if e.num == 4:   canvas.yview_scroll(-1, "units")
-            elif e.num == 5: canvas.yview_scroll(1,  "units")
-            else:            canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
-        canvas.bind("<MouseWheel>", _mw)
-        canvas.bind("<Button-4>",   _mw)
-        canvas.bind("<Button-5>",   _mw)
+        def _on_wheel(e):
+            # A fast physical scroll delivers many wheel events in one burst,
+            # faster than Tk can settle canvas geometry between them.
+            # Calling yview_scroll() once per event let repeated rapid calls
+            # desync the embedded queue_frame window's actual on-screen
+            # position from what yview()/bbox() reported. Coalescing the
+            # whole burst into a single net delta, applied once after it
+            # settles, avoids that. Same fix as ui/sidebar.py's nav scroll.
+            delta = 120 if e.num == 4 else -120 if e.num == 5 else e.delta
+            self._wheel_delta_pending = getattr(self, "_wheel_delta_pending", 0) + delta
+            if not getattr(self, "_wheel_scroll_scheduled", False):
+                self._wheel_scroll_scheduled = True
+                self.after_idle(_apply_pending_wheel_scroll)
+
+        def _apply_pending_wheel_scroll():
+            delta = self._wheel_delta_pending
+            self._wheel_delta_pending = 0
+            self._wheel_scroll_scheduled = False
+            bbox = canvas.bbox("all")
+            if bbox:
+                canvas.configure(scrollregion=bbox)
+                if (bbox[3] - bbox[1]) <= canvas.winfo_height():
+                    canvas.yview_moveto(0.0)
+                    return
+            canvas.yview_scroll(int(-1 * (delta / 120)), "units")
+
+        canvas.bind("<MouseWheel>", _on_wheel)
+        canvas.bind("<Button-4>",   _on_wheel)
+        canvas.bind("<Button-5>",   _on_wheel)
+
+        self._canvas = canvas
 
         self._empty_lbl = tk.Label(self._queue_frame, text="No items in queue.",
                                     bg=self.theme.bg, fg=self.theme.text_muted,
@@ -198,12 +222,30 @@ class SABnzbdTab(tk.Frame):
         for w in self._slot_widgets:
             w.destroy()
         self._slot_widgets = []
+        # Rebuilding can shrink the queue (fewer downloads than before); the
+        # canvas keeps its old scroll fraction otherwise, which now points
+        # past the shorter content and shows as blank space above the cards.
+        # Pin back to the top on every rebuild.
+        self._canvas.yview_moveto(0)
 
         if not slots:
             self._empty_lbl.pack(pady=40)
-            return
-        self._empty_lbl.pack_forget()
+        else:
+            self._empty_lbl.pack_forget()
+            self._rebuild_slot_cards(slots)
 
+        # The scrollregion is normally kept in sync by the <Configure>
+        # binding on _queue_frame, but that fires on Tk's own schedule --
+        # relying on it left stale (too-tall) scrollregions in place after a
+        # rebuild, so a short queue could still be scrolled down into blank
+        # space even though yview_moveto(0) above put it back at the top.
+        # Force the geometry pass now and recompute directly so the region
+        # always matches what was actually just built.
+        self._queue_frame.update_idletasks()
+        self._canvas.configure(scrollregion=self._canvas.bbox("all"))
+        self._canvas.yview_moveto(0)
+
+    def _rebuild_slot_cards(self, slots):
         for slot in slots:
             nzo_id   = slot.get("nzo_id",     "")
             filename = slot.get("filename",    "Unknown")

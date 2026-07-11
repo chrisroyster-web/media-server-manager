@@ -102,10 +102,33 @@ class ConfigTab(tk.Frame):
         self._nav_list.bind("<Configure>", lambda e: nav_canvas.configure(
             scrollregion=nav_canvas.bbox("all")))
 
-        def _nav_mw(e):
-            nav_canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+        def _nav_on_wheel(e):
+            # A fast physical scroll delivers many wheel events in one burst,
+            # faster than Tk can settle canvas geometry between them.
+            # Calling yview_scroll() once per event let repeated rapid calls
+            # desync the embedded nav_list window's actual on-screen
+            # position from what yview()/bbox() reported. Coalescing the
+            # whole burst into a single net delta, applied once after it
+            # settles, avoids that. Same fix as ui/sidebar.py's nav scroll.
+            self._nav_wheel_delta_pending = getattr(self, "_nav_wheel_delta_pending", 0) + e.delta
+            if not getattr(self, "_nav_wheel_scroll_scheduled", False):
+                self._nav_wheel_scroll_scheduled = True
+                self.after_idle(_nav_apply_pending_wheel_scroll)
+
+        def _nav_apply_pending_wheel_scroll():
+            delta = self._nav_wheel_delta_pending
+            self._nav_wheel_delta_pending = 0
+            self._nav_wheel_scroll_scheduled = False
+            bbox = nav_canvas.bbox("all")
+            if bbox:
+                nav_canvas.configure(scrollregion=bbox)
+                if (bbox[3] - bbox[1]) <= nav_canvas.winfo_height():
+                    nav_canvas.yview_moveto(0.0)
+                    return
+            nav_canvas.yview_scroll(int(-1 * (delta / 120)), "units")
+
         for w in (nav_canvas, self._nav_list):
-            w.bind("<MouseWheel>", _nav_mw)
+            w.bind("<MouseWheel>", _nav_on_wheel)
 
         self._canvas = tk.Canvas(split, bg=t.bg, highlightthickness=0)
         sb = tk.Scrollbar(split, orient="vertical", command=self._canvas.yview)
@@ -119,14 +142,36 @@ class ConfigTab(tk.Frame):
                        lambda e: self._canvas.configure(
                            scrollregion=self._canvas.bbox("all")))
 
-        def _mw(e):
-            if e.num == 4:   self._canvas.yview_scroll(-1, "units")
-            elif e.num == 5: self._canvas.yview_scroll(1,  "units")
-            else:            self._canvas.yview_scroll(int(-1*(e.delta/120)), "units")
+        def _on_wheel(e):
+            # A fast physical scroll delivers many wheel events in one burst,
+            # faster than Tk can settle canvas geometry between them.
+            # Calling yview_scroll() once per event let repeated rapid calls
+            # desync the embedded body window's actual on-screen position
+            # from what yview()/bbox() reported. Coalescing the whole burst
+            # into a single net delta, applied once after it settles, avoids
+            # that. Same fix as ui/sidebar.py's nav scroll.
+            delta = 120 if e.num == 4 else -120 if e.num == 5 else e.delta
+            self._wheel_delta_pending = getattr(self, "_wheel_delta_pending", 0) + delta
+            if not getattr(self, "_wheel_scroll_scheduled", False):
+                self._wheel_scroll_scheduled = True
+                self.after_idle(_apply_pending_wheel_scroll)
+
+        def _apply_pending_wheel_scroll():
+            delta = self._wheel_delta_pending
+            self._wheel_delta_pending = 0
+            self._wheel_scroll_scheduled = False
+            bbox = self._canvas.bbox("all")
+            if bbox:
+                self._canvas.configure(scrollregion=bbox)
+                if (bbox[3] - bbox[1]) <= self._canvas.winfo_height():
+                    self._canvas.yview_moveto(0.0)
+                    return
+            self._canvas.yview_scroll(int(-1 * (delta / 120)), "units")
+
         for w in (self._canvas, self.body):
-            w.bind("<MouseWheel>", _mw)
-            w.bind("<Button-4>",   _mw)
-            w.bind("<Button-5>",   _mw)
+            w.bind("<MouseWheel>", _on_wheel)
+            w.bind("<Button-4>",   _on_wheel)
+            w.bind("<Button-5>",   _on_wheel)
 
         # ---- Quick Setup ----
         self._section_header("Quick Setup",

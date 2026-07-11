@@ -76,10 +76,33 @@ class AuditLogTab(tk.Frame):
         self._list_frame.bind("<Configure>", self._on_frame_resize)
         self._canvas.bind("<Configure>", self._on_canvas_resize)
 
-        def _mw(e):
-            self._canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
-        self._canvas.bind("<MouseWheel>", _mw)
-        self._list_frame.bind("<MouseWheel>", _mw)
+        def _on_wheel(e):
+            # A fast physical scroll delivers many wheel events in one burst,
+            # faster than Tk can settle canvas geometry between them.
+            # Calling yview_scroll() once per event let repeated rapid calls
+            # desync the embedded list_frame window's actual on-screen
+            # position from what yview()/bbox() reported. Coalescing the
+            # whole burst into a single net delta, applied once after it
+            # settles, avoids that. Same fix as ui/sidebar.py's nav scroll.
+            self._wheel_delta_pending = getattr(self, "_wheel_delta_pending", 0) + e.delta
+            if not getattr(self, "_wheel_scroll_scheduled", False):
+                self._wheel_scroll_scheduled = True
+                self.after_idle(_apply_pending_wheel_scroll)
+
+        def _apply_pending_wheel_scroll():
+            delta = self._wheel_delta_pending
+            self._wheel_delta_pending = 0
+            self._wheel_scroll_scheduled = False
+            bbox = self._canvas.bbox("all")
+            if bbox:
+                self._canvas.configure(scrollregion=bbox)
+                if (bbox[3] - bbox[1]) <= self._canvas.winfo_height():
+                    self._canvas.yview_moveto(0.0)
+                    return
+            self._canvas.yview_scroll(int(-1 * (delta / 120)), "units")
+
+        self._canvas.bind("<MouseWheel>", _on_wheel)
+        self._list_frame.bind("<MouseWheel>", _on_wheel)
 
         self._render()
 
@@ -121,6 +144,11 @@ class AuditLogTab(tk.Frame):
     def _render(self):
         for w in self._list_frame.winfo_children():
             w.destroy()
+        # Rebuilding can shrink the list (fewer matches after filtering, or
+        # fewer entries); the canvas keeps its old scroll fraction otherwise,
+        # which now points past the shorter content and shows as blank space
+        # above the rows. Pin back to the top on every rebuild.
+        self._canvas.yview_moveto(0)
 
         keyword = self._filter_var.get().strip().lower()
 
@@ -141,10 +169,20 @@ class AuditLogTab(tk.Frame):
                           else "No matches for current filter.",
                      bg=self.theme.bg, fg=self.theme.text_muted,
                      font=("Segoe UI", 12)).pack(pady=40)
-            return
+        else:
+            for entry in filtered:
+                self._build_row(entry)
 
-        for entry in filtered:
-            self._build_row(entry)
+        # The scrollregion is normally kept in sync by the <Configure>
+        # binding on _list_frame, but that fires on Tk's own schedule --
+        # relying on it left stale (too-tall) scrollregions in place after a
+        # rebuild, so a short list could still be scrolled down into blank
+        # space even though yview_moveto(0) above put it back at the top.
+        # Force the geometry pass now and recompute directly so the region
+        # always matches what was actually just built.
+        self._list_frame.update_idletasks()
+        self._canvas.configure(scrollregion=self._canvas.bbox("all"))
+        self._canvas.yview_moveto(0)
 
     def _build_row(self, entry):
         t      = self.theme

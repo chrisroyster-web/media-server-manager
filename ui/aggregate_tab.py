@@ -425,9 +425,32 @@ class AggregateTab(tk.Frame):
         self._card_frame.bind("<Configure>", self._on_frame_resize)
         self._canvas.bind("<Configure>", self._on_canvas_resize)
 
-        def _mw(e):
-            self._canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
-        self._canvas.bind("<MouseWheel>", _mw)
+        def _on_wheel(e):
+            # A fast physical scroll delivers many wheel events in one burst,
+            # faster than Tk can settle canvas geometry between them.
+            # Calling yview_scroll() once per event let repeated rapid calls
+            # desync the embedded card_frame window's actual on-screen
+            # position from what yview()/bbox() reported. Coalescing the
+            # whole burst into a single net delta, applied once after it
+            # settles, avoids that. Same fix as ui/sidebar.py's nav scroll.
+            self._wheel_delta_pending = getattr(self, "_wheel_delta_pending", 0) + e.delta
+            if not getattr(self, "_wheel_scroll_scheduled", False):
+                self._wheel_scroll_scheduled = True
+                self.after_idle(_apply_pending_wheel_scroll)
+
+        def _apply_pending_wheel_scroll():
+            delta = self._wheel_delta_pending
+            self._wheel_delta_pending = 0
+            self._wheel_scroll_scheduled = False
+            bbox = self._canvas.bbox("all")
+            if bbox:
+                self._canvas.configure(scrollregion=bbox)
+                if (bbox[3] - bbox[1]) <= self._canvas.winfo_height():
+                    self._canvas.yview_moveto(0.0)
+                    return
+            self._canvas.yview_scroll(int(-1 * (delta / 120)), "units")
+
+        self._canvas.bind("<MouseWheel>", _on_wheel)
 
         self._sync_cards()
 
@@ -456,7 +479,8 @@ class AggregateTab(tk.Frame):
             (p.get("name") or p.get("host", "?")) for p in profiles}
 
         # Remove stale
-        for name in existing_names - current_names:
+        removed = existing_names - current_names
+        for name in removed:
             self._cards[name].destroy()
             del self._cards[name]
 
@@ -467,6 +491,20 @@ class AggregateTab(tk.Frame):
                 card = _ServerCard(self._card_frame, self.controller, profile)
                 card.pack(fill="x", pady=6, padx=2)
                 self._cards[name] = card
+
+        if removed:
+            # Removing cards can shrink the list; the canvas keeps its old
+            # scroll fraction otherwise, which now points past the shorter
+            # content and shows as blank space above the cards. The
+            # scrollregion itself is normally kept in sync by the
+            # <Configure> binding on _card_frame, but that fires on Tk's
+            # own schedule -- relying on it left stale (too-tall)
+            # scrollregions in place after a rebuild. Force the geometry
+            # pass now and recompute directly so the region always matches
+            # what's actually left.
+            self._card_frame.update_idletasks()
+            self._canvas.configure(scrollregion=self._canvas.bbox("all"))
+            self._canvas.yview_moveto(0)
 
         if not profiles:
             tk.Label(self._card_frame,

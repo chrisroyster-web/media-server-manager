@@ -220,12 +220,30 @@ class QuickCommandsPanel(tk.Frame):
     # MOUSEWHEEL
     # ---------------------------------------------------------
     def _on_mousewheel(self, event):
-        if event.num == 4:
-            self._canvas.yview_scroll(-1, "units")
-        elif event.num == 5:
-            self._canvas.yview_scroll(1, "units")
-        else:
-            self._canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        # A fast physical scroll delivers many wheel events in one burst,
+        # faster than Tk can settle canvas geometry between them. Calling
+        # yview_scroll() once per event let repeated rapid calls desync the
+        # embedded flow window's actual on-screen position from what
+        # yview()/bbox() reported. Coalescing the whole burst into a single
+        # net delta, applied once after it settles, avoids that. Same fix
+        # as ui/sidebar.py's nav scroll.
+        delta = 120 if event.num == 4 else -120 if event.num == 5 else event.delta
+        self._wheel_delta_pending = getattr(self, "_wheel_delta_pending", 0) + delta
+        if not getattr(self, "_wheel_scroll_scheduled", False):
+            self._wheel_scroll_scheduled = True
+            self.after_idle(self._apply_pending_wheel_scroll)
+
+    def _apply_pending_wheel_scroll(self):
+        delta = self._wheel_delta_pending
+        self._wheel_delta_pending = 0
+        self._wheel_scroll_scheduled = False
+        bbox = self._canvas.bbox("all")
+        if bbox:
+            self._canvas.configure(scrollregion=bbox)
+            if (bbox[3] - bbox[1]) <= self._canvas.winfo_height():
+                self._canvas.yview_moveto(0.0)
+                return
+        self._canvas.yview_scroll(int(-1 * (delta / 120)), "units")
 
     def _bind_scroll(self, widget):
         """Recursively bind mousewheel on widget and all descendants."""

@@ -69,15 +69,38 @@ class DashboardTab(tk.Frame):
         canvas.create_window((0, 0), window=self.body, anchor="nw")
         self.body.bind("<Configure>",
                        lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        self._canvas = canvas
 
-        def _mw(e):
-            if e.num == 4:   canvas.yview_scroll(-1, "units")
-            elif e.num == 5: canvas.yview_scroll(1,  "units")
-            else:            canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+        def _on_wheel(e):
+            # A fast physical scroll delivers many wheel events in one burst,
+            # faster than Tk can settle canvas geometry between them.
+            # Calling yview_scroll() once per event let repeated rapid calls
+            # desync the embedded body window's actual on-screen position
+            # from what yview()/bbox() reported. Coalescing the whole burst
+            # into a single net delta, applied once after it settles, avoids
+            # that. Same fix as ui/sidebar.py's nav scroll.
+            delta = 120 if e.num == 4 else -120 if e.num == 5 else e.delta
+            self._wheel_delta_pending = getattr(self, "_wheel_delta_pending", 0) + delta
+            if not getattr(self, "_wheel_scroll_scheduled", False):
+                self._wheel_scroll_scheduled = True
+                self.after_idle(_apply_pending_wheel_scroll)
+
+        def _apply_pending_wheel_scroll():
+            delta = self._wheel_delta_pending
+            self._wheel_delta_pending = 0
+            self._wheel_scroll_scheduled = False
+            bbox = canvas.bbox("all")
+            if bbox:
+                canvas.configure(scrollregion=bbox)
+                if (bbox[3] - bbox[1]) <= canvas.winfo_height():
+                    canvas.yview_moveto(0.0)
+                    return
+            canvas.yview_scroll(int(-1 * (delta / 120)), "units")
+
         for w in (canvas, self.body):
-            w.bind("<MouseWheel>", _mw)
-            w.bind("<Button-4>",   _mw)
-            w.bind("<Button-5>",   _mw)
+            w.bind("<MouseWheel>", _on_wheel)
+            w.bind("<Button-4>",   _on_wheel)
+            w.bind("<Button-5>",   _on_wheel)
 
         # ---- Disconnected overlay (shown until first successful fetch) ----
         self._disconn_overlay = EmptyState(
@@ -1138,6 +1161,20 @@ class DashboardTab(tk.Frame):
             self.after(0, lambda: self.refresh_btn.config(state="normal", text="⟳ Refresh"))
             self.after(0, self._spinner.stop)
             self.after(0, self._rc.schedule)
+            # Sub-sections (storage/docker/services) are rebuilt every cycle
+            # and can shrink; the canvas keeps its old scroll fraction
+            # otherwise, which now points past the shorter content and shows
+            # as blank space above the body. The scrollregion itself is
+            # normally kept in sync by the <Configure> binding on self.body,
+            # but that fires on Tk's own schedule -- relying on it left
+            # stale (too-tall) scrollregions in place after a rebuild. Force
+            # the geometry pass now and recompute directly so the region
+            # always matches what was actually just built.
+            def _reset_scroll():
+                self.body.update_idletasks()
+                self._canvas.configure(scrollregion=self._canvas.bbox("all"))
+                self._canvas.yview_moveto(0)
+            self.after(0, _reset_scroll)
 
         # =========================================================
         # HELPERS

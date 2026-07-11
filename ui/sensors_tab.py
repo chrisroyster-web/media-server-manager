@@ -132,9 +132,33 @@ class SensorsTab(tk.Frame):
         canvas.bind("<Configure>",
                     lambda e: canvas.itemconfig(
                         self._body_win, width=e.width))
-        canvas.bind("<MouseWheel>",
-                    lambda e: canvas.yview_scroll(
-                        int(-1 * (e.delta / 120)), "units"))
+
+        def _on_wheel(e):
+            # A fast physical scroll delivers many wheel events in one burst,
+            # faster than Tk can settle canvas geometry between them.
+            # Calling yview_scroll() once per event let repeated rapid calls
+            # desync the embedded body window's actual on-screen position
+            # from what yview()/bbox() reported. Coalescing the whole burst
+            # into a single net delta, applied once after it settles, avoids
+            # that. Same fix as ui/sidebar.py's nav scroll.
+            self._wheel_delta_pending = getattr(self, "_wheel_delta_pending", 0) + e.delta
+            if not getattr(self, "_wheel_scroll_scheduled", False):
+                self._wheel_scroll_scheduled = True
+                self.after_idle(_apply_pending_wheel_scroll)
+
+        def _apply_pending_wheel_scroll():
+            delta = self._wheel_delta_pending
+            self._wheel_delta_pending = 0
+            self._wheel_scroll_scheduled = False
+            bbox = canvas.bbox("all")
+            if bbox:
+                canvas.configure(scrollregion=bbox)
+                if (bbox[3] - bbox[1]) <= canvas.winfo_height():
+                    canvas.yview_moveto(0.0)
+                    return
+            canvas.yview_scroll(int(-1 * (delta / 120)), "units")
+
+        canvas.bind("<MouseWheel>", _on_wheel)
 
         # Section frames (created lazily in _populate)
         self._cpu_frame  = None
@@ -250,6 +274,11 @@ class SensorsTab(tk.Frame):
         # Clear body
         for w in self._body.winfo_children():
             w.destroy()
+        # Rebuilding can shrink the body (fewer sensors reporting than
+        # before); the canvas keeps its old scroll fraction otherwise, which
+        # now points past the shorter content and shows as blank space above
+        # the cards. Pin back to the top on every rebuild.
+        self._scroll_canvas.yview_moveto(0)
         self._cards = {}
 
         any_data = False
@@ -340,6 +369,17 @@ class SensorsTab(tk.Frame):
                           "and/or nvidia-smi for GPU data.",
                      bg=t.bg, fg=t.text_muted, font=t.font_regular,
                      justify="center").pack(pady=40)
+
+        # The scrollregion is normally kept in sync by the <Configure>
+        # binding on _body, but that fires on Tk's own schedule -- relying
+        # on it left stale (too-tall) scrollregions in place after a
+        # rebuild, so a short body could still be scrolled down into blank
+        # space even though the reset above put it back at the top. Force
+        # the geometry pass now and recompute directly so the region always
+        # matches what was actually just built.
+        self._body.update_idletasks()
+        self._scroll_canvas.configure(scrollregion=self._scroll_canvas.bbox("all"))
+        self._scroll_canvas.yview_moveto(0)
 
         status = "{} sensor reading{}".format(
             len(self._cards), "s" if len(self._cards) != 1 else "")
