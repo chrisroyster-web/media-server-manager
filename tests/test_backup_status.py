@@ -169,10 +169,15 @@ def test_parse_rsync_log_failure_when_no_success_marker():
 # ---------------------------------------------------------------------------
 
 def test_parse_cron_backup_log_ok():
+    # Timestamps must stay within the 8-day staleness window (see
+    # _parse_cron_backup_log), so build them relative to "now" rather than
+    # a fixed date that would eventually age past that window on its own.
+    started   = (datetime.datetime.now() - datetime.timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S")
+    completed = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     text = (
-        "[2026-07-08 02:00:00] === Backup started ===\n"
-        "[2026-07-08 02:05:00] === Backup completed OK — 1.2G written to /mnt/nas ===\n"
-    )
+        "[{}] === Backup started ===\n"
+        "[{}] === Backup completed OK — 1.2G written to /mnt/nas ===\n"
+    ).format(started, completed)
     job = _parse_cron_backup_log("/var/log/full-backup.log", text)
     assert job["status"] == "ok"
     assert job["size"] == "1.2G"
