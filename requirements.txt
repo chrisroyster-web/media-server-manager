@@ -5,3 +5,4 @@ cffi
 cryptography
 bcrypt
 apprise
+pyyaml
