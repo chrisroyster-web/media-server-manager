@@ -255,6 +255,59 @@ class ConfigManager:
         self._ss("vuln_scan_baseline", baseline)
 
     # ---------------------------------------------------------
+    # MEDIA INTEGRITY SCAN SCHEDULE  (per-server)
+    # ---------------------------------------------------------
+    def get_integrity_scan_schedule(self):
+        """'disabled' | 'daily' | 'weekly'"""
+        return self._gs("integrity_scan_schedule", "disabled")
+
+    def set_integrity_scan_schedule(self, value):
+        self._ss("integrity_scan_schedule", value)
+
+    def get_integrity_scan_last_run(self):
+        return self._gs("integrity_scan_last_run", "")
+
+    def set_integrity_scan_last_run(self, iso_timestamp):
+        self._ss("integrity_scan_last_run", iso_timestamp)
+
+    def get_integrity_scan_baseline(self):
+        """[path, ...] — files known corrupt as of the last check."""
+        return self._gs("integrity_scan_baseline", [])
+
+    def set_integrity_scan_baseline(self, baseline):
+        self._ss("integrity_scan_baseline", baseline)
+
+    # ---------------------------------------------------------
+    # RECYCLARR SYNC  (per-server)
+    # ---------------------------------------------------------
+    def get_recyclarr_schedule(self):
+        """'disabled' | 'daily' | 'weekly'"""
+        return self._gs("recyclarr_schedule", "disabled")
+
+    def set_recyclarr_schedule(self, value):
+        self._ss("recyclarr_schedule", value)
+
+    def get_recyclarr_last_run(self):
+        return self._gs("recyclarr_last_run", "")
+
+    def set_recyclarr_last_run(self, iso_timestamp):
+        self._ss("recyclarr_last_run", iso_timestamp)
+
+    def get_recyclarr_selected_templates(self):
+        """[template_id, ...]"""
+        return self._gs("recyclarr_selected_templates", [])
+
+    def set_recyclarr_selected_templates(self, template_ids):
+        self._ss("recyclarr_selected_templates", template_ids)
+
+    def get_recyclarr_last_result(self):
+        """{"ok": bool, "raw": str, "error": str|None} of the last sync, if any."""
+        return self._gs("recyclarr_last_result", {})
+
+    def set_recyclarr_last_result(self, result):
+        self._ss("recyclarr_last_result", result)
+
+    # ---------------------------------------------------------
     # DAILY DIGEST  (per-server)
     # ---------------------------------------------------------
     def get_daily_digest_enabled(self):

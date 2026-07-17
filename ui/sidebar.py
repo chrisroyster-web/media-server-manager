@@ -43,9 +43,11 @@ class Sidebar(tk.Frame):
         ("\U0001f4fa", "Play History",   21,  None),
         ("\U0001f465", "Media Users",    42,  None),
         ("\U0001f5c2", "Duplicate Media", 63,  None),
+        ("\U0001fa7a", "Integrity Scan", 65,  None),
 
         ("\U0001f3ac", "Arr",            11,  "REQUESTS"),
         ("\U0001f4ac", "Bazarr",         64,  None),
+        ("♻",     "Recyclarr",   66,  None),
         ("\U0001f50d", "Prowlarr",       30,  None),
         ("\U0001f4e5", "Requests",       41,  None),
         ("\U0001f4e5", "SABnzbd",         7,  None),

@@ -5,6 +5,9 @@ import threading
 import tkinter as tk
 from tkinter import ttk
 
+from core import tk_safety
+tk_safety.install()
+
 from core.config_manager import ConfigManager
 from core.notification_manager import NotificationManager
 from core.alert_engine import AlertEngine, METRIC_META
@@ -65,6 +68,8 @@ from ui.cloudflare_tab import CloudflareTab
 from ui.audit_log_tab import AuditLogTab
 from ui.vuln_scan_tab import VulnScanTab
 from ui.media_dedup_tab import MediaDedupTab
+from ui.media_integrity_tab import MediaIntegrityTab
+from ui.recyclarr_tab import RecyclarrTab
 from core.metrics_store import MetricsStore
 from core.scheduler import TaskScheduler
 
@@ -169,7 +174,15 @@ class MediaServerManager(tk.Tk):
         self.tray = TrayManager(self)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
-        # Build layout while hidden (no flicker)
+        # Show the splash now, before the expensive tab build below --
+        # _build_layout() constructs all ~65 tabs synchronously and used to
+        # run *before* the splash ever appeared, so the user saw nothing at
+        # all for however long that took. Showing it first means there's
+        # something on screen immediately instead of a long blank wait.
+        self._show_splash()
+
+        # Build layout while hidden (no flicker on the main window --
+        # the splash covers it) but now with the splash already visible.
         self._build_layout()
         self.scheduler.on_run_done = self._on_task_done
 
@@ -177,8 +190,9 @@ class MediaServerManager(tk.Tk):
         # (buttons, labels, frames) up to the nearest scrollable ancestor.
         self.bind_all("<MouseWheel>", self._on_global_scroll)
 
-        # Show splash, then reveal the main window
-        self._show_splash()
+        # Everything the reveal step touches (log_viewer, tray, scheduler)
+        # now exists, so hold briefly then fade out and reveal.
+        self._splash_step(self._splash_toplevel, 20, HOLD_MS=300)
 
     # ---------------------------------------------------------
     # LAYOUT
@@ -292,6 +306,8 @@ class MediaServerManager(tk.Tk):
         self.vuln_scan_tab         = VulnScanTab(self.tabs, self)          # 62
         self.media_dedup_tab       = MediaDedupTab(self.tabs, self)        # 63
         self.bazarr_tab            = BazarrTab(self.tabs, self)            # 64
+        self.media_integrity_tab   = MediaIntegrityTab(self.tabs, self)    # 65
+        self.recyclarr_tab         = RecyclarrTab(self.tabs, self)         # 66
 
         for tab in [
             self.connection_panel, self.quick_commands, self.dashboard_tab,
@@ -322,6 +338,8 @@ class MediaServerManager(tk.Tk):
             self.vuln_scan_tab,
             self.media_dedup_tab,
             self.bazarr_tab,
+            self.media_integrity_tab,
+            self.recyclarr_tab,
         ]:
             self.tabs.add(tab)
 
@@ -385,14 +403,24 @@ class MediaServerManager(tk.Tk):
             sh = splash.winfo_screenheight()
             splash.geometry(f"{W}x{H}+{(sw-W)//2}+{(sh-H)//2}")
 
+            # Show it now, at full opacity, forcing a real paint via
+            # update() -- a gradual self.after()-driven fade-in wouldn't
+            # actually run until mainloop() starts pumping events, which
+            # only happens after __init__ (and the tab build after this
+            # call) returns.
+            splash.attributes("-alpha", 1.0)
+            self.update()
+
             TOTAL_MS = 400 + 2200 + 300
             def _progress(elapsed=0):
+                if not splash.winfo_exists():
+                    return
                 ratio = min(elapsed / TOTAL_MS, 1.0)
                 c.coords(bar_fill, 0, H-BAR_H, int(W * ratio), H)
                 if ratio < 1.0:
                     self.after(30, _progress, elapsed + 30)
             _progress()
-            self._splash_step(splash, 0)
+            self._splash_toplevel = splash
             return
 
         # ── Canvas fallback (no image file found) ────────────────────
@@ -470,11 +498,18 @@ class MediaServerManager(tk.Tk):
         sh = splash.winfo_screenheight()
         splash.geometry(f"{W}x{H}+{(sw-W)//2}+{(sh-H)//2}")
 
+        # Show it now, at full opacity (see the image-splash branch above
+        # for why a gradual after()-driven fade-in doesn't work here).
+        splash.attributes("-alpha", 1.0)
+        self.update()
+
         # Animate progress bar
         TOTAL_MS  = 400 + 2200 + 300
         BAR_W     = BAR_X2 - BAR_X1 - 2
 
         def _progress(elapsed=0):
+            if not splash.winfo_exists():
+                return
             ratio = min(elapsed / TOTAL_MS, 1.0)
             fill_x = BAR_X1 + 1 + int(BAR_W * ratio)
             c.coords(bar_fill, BAR_X1+1, BAR_Y1+1, fill_x, BAR_Y2-1)
@@ -484,9 +519,7 @@ class MediaServerManager(tk.Tk):
                 self.after(30, _progress, elapsed + 30)
 
         _progress()
-
-        # Fade-in → hold → fade-out → show main window
-        self._splash_step(splash, 0)
+        self._splash_toplevel = splash
 
     def _splash_step(self, splash, phase,
                      FADE_STEPS=20, FADE_MS=20, HOLD_MS=2200):
@@ -520,6 +553,8 @@ class MediaServerManager(tk.Tk):
                 self.after(5000,  self.start_sab_toast_watcher)
                 self.after(6000,  self.scheduler.start)
                 self.after(8000,  self.start_vuln_scan_watchdog)
+                self.after(9000,  self.start_integrity_scan_watchdog)
+                self.after(9500,  self.start_recyclarr_watchdog)
                 self.after(10000, self.start_daily_digest_watchdog)
                 self.after(12000, self._check_for_update_bg)
                 self._maybe_show_onboarding()
@@ -920,6 +955,8 @@ class MediaServerManager(tk.Tk):
             62: lambda: self.vuln_scan_tab.on_show(),
             63: lambda: self.media_dedup_tab.on_show(),
             64: lambda: self.bazarr_tab.on_show(),
+            65: lambda: self.media_integrity_tab.on_show(),
+            66: lambda: self.recyclarr_tab.on_show(),
         }
         fn = m.get(idx)
         if fn:
@@ -1391,6 +1428,124 @@ class MediaServerManager(tk.Tk):
                         title = "New vulnerabilities found"
                         body  = ("{} new critical/high CVE{} in: {}".format(
                             total, "s" if total != 1 else "", images))
+                        self.after(0, lambda t=title, b=body: self.show_toast(
+                            t, b, level="error"))
+                        self.notification_manager.send_alert(title, body)
+                except Exception:
+                    pass
+        threading.Thread(target=_loop, daemon=True).start()
+
+    # ---------------------------------------------------------
+    # MEDIA INTEGRITY SCAN WATCHDOG
+    # ---------------------------------------------------------
+    def start_integrity_scan_watchdog(self):
+        import threading
+        from datetime import datetime, timedelta
+        from core.media_integrity import get_scan_roots, run_scan, diff_new_corrupt
+
+        stop = threading.Event()
+        self._integrity_watchdog_stop = stop
+
+        def _is_due(cfg):
+            schedule = cfg.get_integrity_scan_schedule()
+            if schedule == "disabled":
+                return False
+            last_run = cfg.get_integrity_scan_last_run()
+            if not last_run:
+                return True
+            try:
+                last = datetime.fromisoformat(last_run)
+            except ValueError:
+                return True
+            days = 1 if schedule == "daily" else 7
+            return datetime.now() >= last + timedelta(days=days)
+
+        def _loop():
+            while not stop.wait(1800):
+                if not self.ssh.connected:
+                    continue
+                cfg = self.config_manager
+                if not _is_due(cfg):
+                    continue
+                try:
+                    srv = (cfg.get_active_server() or {}).get("settings", {})
+                    sonarr_cfg = {"host": srv.get("sonarr_host", "localhost"),
+                                  "port": srv.get("sonarr_port", "8989"),
+                                  "apikey": srv.get("sonarr_apikey", "")}
+                    radarr_cfg = {"host": srv.get("radarr_host", "localhost"),
+                                  "port": srv.get("radarr_port", "7878"),
+                                  "apikey": srv.get("radarr_apikey", "")}
+                    roots, _errors = get_scan_roots(sonarr_cfg, radarr_cfg)
+                    files = run_scan(self.ssh, roots).get("files", [])
+                    baseline = cfg.get_integrity_scan_baseline()
+                    new_baseline, newly_corrupt = diff_new_corrupt(baseline, files)
+                    cfg.set_integrity_scan_baseline(new_baseline)
+                    cfg.set_integrity_scan_last_run(datetime.now().isoformat(timespec="seconds"))
+
+                    if newly_corrupt:
+                        title = "New corrupt media files found"
+                        names = ", ".join(f["path"].rsplit("/", 1)[-1] for f in newly_corrupt[:5])
+                        more = "" if len(newly_corrupt) <= 5 else " (+{} more)".format(
+                            len(newly_corrupt) - 5)
+                        body = "{} new corrupt file{}: {}{}".format(
+                            len(newly_corrupt), "s" if len(newly_corrupt) != 1 else "", names, more)
+                        self.after(0, lambda t=title, b=body: self.show_toast(
+                            t, b, level="error"))
+                        self.notification_manager.send_alert(title, body)
+                except Exception:
+                    pass
+        threading.Thread(target=_loop, daemon=True).start()
+
+    # ---------------------------------------------------------
+    # RECYCLARR SYNC WATCHDOG
+    # ---------------------------------------------------------
+    def start_recyclarr_watchdog(self):
+        import threading
+        from datetime import datetime, timedelta
+        from core.recyclarr import sync_templates
+
+        stop = threading.Event()
+        self._recyclarr_watchdog_stop = stop
+
+        def _is_due(cfg):
+            schedule = cfg.get_recyclarr_schedule()
+            if schedule == "disabled":
+                return False
+            last_run = cfg.get_recyclarr_last_run()
+            if not last_run:
+                return True
+            try:
+                last = datetime.fromisoformat(last_run)
+            except ValueError:
+                return True
+            days = 1 if schedule == "daily" else 7
+            return datetime.now() >= last + timedelta(days=days)
+
+        def _loop():
+            while not stop.wait(1800):
+                if not self.ssh.connected:
+                    continue
+                cfg = self.config_manager
+                if not _is_due(cfg):
+                    continue
+                template_ids = cfg.get_recyclarr_selected_templates()
+                if not template_ids:
+                    continue
+                try:
+                    srv = (cfg.get_active_server() or {}).get("settings", {})
+                    sonarr_cfg = {"host": srv.get("sonarr_host", "localhost"),
+                                  "port": srv.get("sonarr_port", "8989"),
+                                  "apikey": srv.get("sonarr_apikey", "")}
+                    radarr_cfg = {"host": srv.get("radarr_host", "localhost"),
+                                  "port": srv.get("radarr_port", "7878"),
+                                  "apikey": srv.get("radarr_apikey", "")}
+                    result = sync_templates(self.ssh, template_ids, sonarr_cfg, radarr_cfg)
+                    cfg.set_recyclarr_last_run(datetime.now().isoformat(timespec="seconds"))
+                    cfg.set_recyclarr_last_result(result)
+
+                    if not result.get("ok"):
+                        title = "Recyclarr sync failed"
+                        body = result.get("error") or "Unknown error."
                         self.after(0, lambda t=title, b=body: self.show_toast(
                             t, b, level="error"))
                         self.notification_manager.send_alert(title, body)

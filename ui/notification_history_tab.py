@@ -139,7 +139,10 @@ class NotificationHistoryTab(tk.Frame):
         self._list_frame.bind("<MouseWheel>", _on_wheel)
         sb.bind("<MouseWheel>", _on_wheel)
 
-        self._render()
+        # No self._render() here — __init__ calls _load_from_db() right
+        # after _build_ui() returns, and that renders once with the real
+        # data. Rendering the still-empty list here first just threw away
+        # a full update_idletasks() flush (see _render()'s docstring below).
 
     def _on_frame_resize(self, e):
         self._canvas.configure(scrollregion=self._canvas.bbox("all"))

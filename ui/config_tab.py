@@ -1424,17 +1424,26 @@ class ConfigTab(tk.Frame):
     def _populate_from_config(self):
         cfg = self.controller.config_manager
 
-        # Services
-        for name, data in cfg.get_services().items():
-            self._add_service_row(name, data["service"], data.get("port", ""))
+        # Suppress the per-row scroll-to-bottom while bulk-loading saved rows
+        # (_scroll_bottom forces a full update_idletasks() flush, so calling
+        # it once per row here — rather than once per user-initiated "+ Add"
+        # click, its actual purpose — made startup scale badly with the
+        # number of saved services/containers/mounts).
+        self._populating = True
+        try:
+            # Services
+            for name, data in cfg.get_services().items():
+                self._add_service_row(name, data["service"], data.get("port", ""))
 
-        # Docker containers
-        for name, data in cfg.get_docker().items():
-            self._add_docker_row(name, data.get("container", ""), data.get("port", ""))
+            # Docker containers
+            for name, data in cfg.get_docker().items():
+                self._add_docker_row(name, data.get("container", ""), data.get("port", ""))
 
-        # Storage mounts
-        for mount in cfg.get_storage_mounts():
-            self._add_mount_row(mount)
+            # Storage mounts
+            for mount in cfg.get_storage_mounts():
+                self._add_mount_row(mount)
+        finally:
+            self._populating = False
 
         # Dashboard
         self.refresh_var.set(str(cfg.dashboard_refresh_interval))
@@ -1706,6 +1715,8 @@ class ConfigTab(tk.Frame):
             row_list.remove(row)
 
     def _scroll_bottom(self):
+        if getattr(self, "_populating", False):
+            return
         self.body.update_idletasks()
         self._canvas.yview_moveto(1.0)
 

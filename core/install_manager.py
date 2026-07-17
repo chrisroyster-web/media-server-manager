@@ -513,6 +513,30 @@ APP_REGISTRY = [
         ],
     },
 
+    {
+        "key":          "recyclarr",
+        "name":         "Recyclarr",
+        "category":     "Arr Suite",
+        "desc":         "Syncs TRaSH Guides quality profiles / custom formats into Sonarr & Radarr",
+        "port":         None,
+        "container":    None,
+        "image":        "recyclarr/recyclarr",
+        "health_path":  None,
+        "check_cmd":    "docker image inspect recyclarr/recyclarr >/dev/null 2>&1",
+        "version_cmd":  "docker run --rm recyclarr/recyclarr --version 2>&1 | head -1",
+        "install_cmds": [
+            "mkdir -p $HOME/docker/recyclarr/config/configs",
+            "docker pull recyclarr/recyclarr",
+        ],
+        "fix_cmds": [],
+        "reinstall_cmds": [
+            "docker pull recyclarr/recyclarr",
+        ],
+        "uninstall_cmds": [
+            "docker rmi recyclarr/recyclarr",
+        ],
+    },
+
     # ── Request Managers ─────────────────────────────────────────────────
     {
         "key": "overseerr",
@@ -818,6 +842,30 @@ APP_REGISTRY = [
         "uninstall_cmds": [
             "sudo apt-get remove -y trivy",
             "sudo rm -f /etc/apt/sources.list.d/trivy.list /usr/share/keyrings/trivy.gpg",
+        ],
+    },
+
+    {
+        "key":          "ffmpeg",
+        "name":         "ffmpeg",
+        "category":     "Monitoring",
+        "desc":         "Provides ffprobe — required by Media Integrity to scan files for corruption",
+        "port":         None,
+        "container":    None,
+        "image":        None,
+        "health_path":  None,
+        "check_cmd":    "which ffprobe",
+        "version_cmd":  "ffmpeg -version 2>&1 | head -1",
+        "install_cmds": [
+            "sudo apt-get update -qq",
+            "sudo apt-get install -y ffmpeg",
+        ],
+        "fix_cmds": [],
+        "reinstall_cmds": [
+            "sudo apt-get install -y --reinstall ffmpeg",
+        ],
+        "uninstall_cmds": [
+            "sudo apt-get remove -y ffmpeg",
         ],
     },
 
