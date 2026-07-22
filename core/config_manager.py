@@ -508,6 +508,37 @@ class ConfigManager:
     @restic_password.setter
     def restic_password(self, v): self._ss("restic_password", v)
 
+    # --- NAS backup monitor (Synology Hyper Backup, over its own SSH conn) ---
+    @property
+    def nas_backup_enabled(self): return self._gs("nas_backup_enabled", False)
+    @nas_backup_enabled.setter
+    def nas_backup_enabled(self, v): self._ss("nas_backup_enabled", v)
+
+    @property
+    def nas_backup_host(self): return self._gs("nas_backup_host", "")
+    @nas_backup_host.setter
+    def nas_backup_host(self, v): self._ss("nas_backup_host", v)
+
+    @property
+    def nas_backup_port(self): return self._gs("nas_backup_port", 22)
+    @nas_backup_port.setter
+    def nas_backup_port(self, v): self._ss("nas_backup_port", v)
+
+    @property
+    def nas_backup_username(self): return self._gs("nas_backup_username", "")
+    @nas_backup_username.setter
+    def nas_backup_username(self, v): self._ss("nas_backup_username", v)
+
+    @property
+    def nas_backup_password(self): return self._gs("nas_backup_password", "")
+    @nas_backup_password.setter
+    def nas_backup_password(self, v): self._ss("nas_backup_password", v)
+
+    @property
+    def nas_backup_key_path(self): return self._gs("nas_backup_key_path", "")
+    @nas_backup_key_path.setter
+    def nas_backup_key_path(self, v): self._ss("nas_backup_key_path", v)
+
     @property
     def sabnzbd_host(self): return self._gs("sabnzbd_host", "localhost")
     @sabnzbd_host.setter

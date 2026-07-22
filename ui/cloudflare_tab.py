@@ -224,22 +224,26 @@ class CloudflareTab(tk.Frame):
                 self.after(0, lambda err=str(e): self._fail("DNS records: {}".format(err)))
                 return
 
+            events_err = None
             try:
                 events = cf.list_security_events(token, zone)
-            except Exception:
-                events = None  # token may lack Analytics scope — not fatal
+            except Exception as e:
+                events = None
+                events_err = str(e)  # not fatal — show the real cause, not a guess
 
             tunnels = []
+            tunnels_err = None
             if account_id:
                 try:
                     tunnels = cf.list_tunnels(token, account_id)
-                except Exception:
-                    tunnels = None  # token may lack Tunnel scope — not fatal
+                except Exception as e:
+                    tunnels = None
+                    tunnels_err = str(e)  # not fatal — show the real cause, not a guess
 
             self._records = records
             self._events  = events or []
             self._tunnels = tunnels or []
-            self.after(0, lambda: self._populate(events is None, tunnels is None and bool(account_id)))
+            self.after(0, lambda ee=events_err, te=tunnels_err: self._populate(ee, te))
         finally:
             # Must always clear no matter what fails above -- refresh() no-ops
             # while this is True, so an unreset flag permanently wedges the
@@ -252,7 +256,7 @@ class CloudflareTab(tk.Frame):
         self._refresh_btn.config(state="normal")
         self._status.config(text=msg, bg=self.theme.surface_dark, fg=self.theme.status_stopped_text)
 
-    def _populate(self, events_unavailable, tunnels_unavailable):
+    def _populate(self, events_err, tunnels_err):
         t = self.theme
 
         self._dns_tree.delete(*self._dns_tree.get_children())
@@ -284,10 +288,10 @@ class CloudflareTab(tk.Frame):
         self._rc.schedule()
 
         notes = []
-        if events_unavailable:
-            notes.append("security events unavailable (token needs Analytics Read)")
-        if tunnels_unavailable:
-            notes.append("tunnels unavailable (token needs Tunnel Read)")
+        if events_err:
+            notes.append("security events unavailable ({})".format(events_err))
+        if tunnels_err:
+            notes.append("tunnels unavailable ({})".format(tunnels_err))
         if notes:
             self._status.config(text="Loaded — " + "; ".join(notes),
                                 bg=t.surface_dark, fg=t.yellow)

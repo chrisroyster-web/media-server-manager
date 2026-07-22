@@ -23,6 +23,10 @@ METRIC_META = {
     "temp":    ("CPU Temp",    "°C"),
     "rx_mbps": ("Network In",  " MB/s"),
     "tx_mbps": ("Network Out", " MB/s"),
+    "ups_on_battery":     ("UPS On Battery",  ""),
+    "ups_low_battery":    ("UPS Low Battery", ""),
+    "ups_battery_charge": ("UPS Battery",     "%"),
+    "ssl_days_to_expiry": ("SSL Cert Expiry", " days"),
 }
 
 

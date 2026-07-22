@@ -1159,6 +1159,27 @@ class DashboardTab(tk.Frame):
                 "disk": _disk_max,
                 "temp": _temp_c,
             }
+            # UPS metrics -- only include them when upsc actually returned a
+            # reading this cycle (ups dict parsed earlier from `upsc`), so a
+            # box with no UPS attached never reports false 0s/on-battery.
+            _ups_status = ups.get("ups.status", "")
+            if _ups_status:
+                _status_flags = _ups_status.split()
+                _metrics["ups_on_battery"]  = 1.0 if "OB" in _status_flags else 0.0
+                _metrics["ups_low_battery"] = 1.0 if "LB" in _status_flags else 0.0
+            try:
+                _metrics["ups_battery_charge"] = float(battery)
+            except (TypeError, ValueError):
+                pass
+            # SSL cert expiry -- computed by main.py's start_ssl_expiry_watchdog
+            # on its own multi-hour cycle (TLS handshakes are too costly to
+            # redo every dashboard refresh) and cached on the controller; the
+            # cache is always read here (rather than skipped when stale) so
+            # a duration-based expiry rule's breach clock isn't reset every
+            # dashboard cycle just because this refresh didn't recheck it.
+            _ssl_days = getattr(self.controller, "ssl_min_days_to_expiry", None)
+            if _ssl_days is not None:
+                _metrics["ssl_days_to_expiry"] = float(_ssl_days)
             self.after(0, lambda m=_metrics: self.controller.fire_metric_alerts(m))
 
             # -- Timestamp --

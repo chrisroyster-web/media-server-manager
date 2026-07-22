@@ -14,6 +14,8 @@ import shlex
 
 from ui.refresh_control import RefreshControl
 from core.backup_status import check_backup_jobs
+from core.hyperbackup_status import check_hyperbackup_status
+from core.arr_backup_status import check_arr_backup_jobs
 
 # Defined before importing RestoreDialog (which imports this back) so the
 # circular import resolves: by the time restore_dialog.py asks for
@@ -99,6 +101,64 @@ class BackupTab(tk.Frame):
         t.style_button(self._restore_launch_btn, "danger")
         self._restore_launch_btn.pack(side="left")
 
+        # NAS Hyper Backup monitor -- separate host/credentials from the
+        # media server, so its own SSH connection (opened in
+        # core/hyperbackup_status.py) needs its own settings rather than
+        # reusing self.controller.ssh.
+        cfg = self.controller.config_manager
+        nas_row = tk.Frame(ctrl_frame, bg=t.bg)
+        nas_row.pack(fill="x", pady=(4, 0))
+        tk.Label(nas_row, text="NAS Backup Monitor", bg=t.bg,
+                 fg=t.text_muted, font=t.font_small, width=18,
+                 anchor="w").pack(side="left")
+        self._nas_enabled_var = tk.BooleanVar(value=cfg.nas_backup_enabled)
+        tk.Checkbutton(nas_row, text="Enabled", variable=self._nas_enabled_var,
+                       bg=t.bg, fg=t.text, selectcolor=t.surface_dark,
+                       activebackground=t.bg, font=t.font_small,
+                       bd=0, highlightthickness=0).pack(side="left", padx=(0, 8))
+        tk.Label(nas_row, text="Host:", bg=t.bg, fg=t.text_muted,
+                 font=t.font_small).pack(side="left")
+        self._nas_host_var = tk.StringVar(value=cfg.nas_backup_host)
+        host_entry = tk.Entry(nas_row, textvariable=self._nas_host_var,
+                              width=15, font=t.font_regular)
+        t.style_entry(host_entry)
+        host_entry.pack(side="left", padx=(4, 8))
+        tk.Label(nas_row, text="User:", bg=t.bg, fg=t.text_muted,
+                 font=t.font_small).pack(side="left")
+        self._nas_user_var = tk.StringVar(value=cfg.nas_backup_username)
+        user_entry = tk.Entry(nas_row, textvariable=self._nas_user_var,
+                              width=12, font=t.font_regular)
+        t.style_entry(user_entry)
+        user_entry.pack(side="left", padx=(4, 8))
+        tk.Label(nas_row, text="Password:", bg=t.bg, fg=t.text_muted,
+                 font=t.font_small).pack(side="left")
+        self._nas_pw_var = tk.StringVar(value=cfg.nas_backup_password)
+        nas_pw_entry = tk.Entry(nas_row, textvariable=self._nas_pw_var,
+                                show="*", width=14, font=t.font_regular)
+        t.style_entry(nas_pw_entry)
+        nas_pw_entry.pack(side="left", padx=(4, 8))
+        self._nas_save_btn = tk.Button(
+            nas_row, text="Save", command=self._save_nas_backup_settings)
+        t.style_button(self._nas_save_btn)
+        self._nas_save_btn.pack(side="left")
+
+        nas_row2 = tk.Frame(ctrl_frame, bg=t.bg)
+        nas_row2.pack(fill="x", pady=(2, 0))
+        tk.Label(nas_row2, text="", bg=t.bg, width=18,
+                 anchor="w").pack(side="left")
+        tk.Label(nas_row2, text="SSH Key Path:", bg=t.bg, fg=t.text_muted,
+                 font=t.font_small).pack(side="left")
+        self._nas_key_var = tk.StringVar(value=cfg.nas_backup_key_path)
+        nas_key_entry = tk.Entry(nas_row2, textvariable=self._nas_key_var,
+                                 width=30, font=t.font_regular)
+        t.style_entry(nas_key_entry)
+        nas_key_entry.pack(side="left", padx=(4, 8))
+        tk.Label(nas_row2,
+                 text="Leave password blank to use this key "
+                      "(blank key path falls back to ~/.ssh/id_rsa).",
+                 bg=t.bg, fg=t.text_muted,
+                 font=("Segoe UI", 8)).pack(side="left")
+
         # Summary cards
         s_row = tk.Frame(self, bg=t.bg)
         s_row.pack(fill="x", padx=16, pady=(0, 8))
@@ -127,7 +187,7 @@ class BackupTab(tk.Frame):
         self._tree = ttk.Treeview(tbl_frame, columns=cols,
                                    show="headings", style="BK.Treeview")
         for col, w, lbl, anchor in [
-            ("tool",     70,  "Tool",      "w"),
+            ("tool",     95,  "Tool",      "w"),
             ("name",    160,  "Job Name",  "w"),
             ("status",   80,  "Status",    "w"),
             ("last_run",140,  "Last Run",  "w"),
@@ -275,6 +335,20 @@ class BackupTab(tk.Frame):
                 bg=self.theme.surface_dark, fg=self.theme.status_stopped_text)
             messagebox.showerror("Setup Failed", msg)
 
+    # =========================================================
+    # NAS BACKUP MONITOR SETTINGS
+    # =========================================================
+    def _save_nas_backup_settings(self):
+        cfg = self.controller.config_manager
+        cfg.nas_backup_enabled  = self._nas_enabled_var.get()
+        cfg.nas_backup_host     = self._nas_host_var.get().strip()
+        cfg.nas_backup_username = self._nas_user_var.get().strip()
+        cfg.nas_backup_password = self._nas_pw_var.get()
+        cfg.nas_backup_key_path = self._nas_key_var.get().strip()
+        self._status.config(text="NAS backup monitor settings saved.",
+                            bg=self.theme.surface_dark, fg=self.theme.status_running)
+        self.refresh()
+
     def _stat_card(self, parent, label, value, color):
         t = self.theme
         card = tk.Frame(parent, bg=t.card_bg,
@@ -305,6 +379,12 @@ class BackupTab(tk.Frame):
         try:
             ssh = self.controller.ssh
             jobs = check_backup_jobs(ssh)
+            # Separate host/credentials from the media server -- its own
+            # dedicated SSH connection, opened and closed within this call.
+            jobs += check_hyperbackup_status(self.controller.config_manager)
+            # Sonarr/Radarr's own scheduled config backups, via their REST
+            # API rather than SSH -- reuses the same host/apikey ArrTab uses.
+            jobs += check_arr_backup_jobs(self.controller.config_manager)
             self.after(0, lambda: self._populate(jobs))
             self.after(0, lambda: self._last_lbl.config(
                 text="Updated {}".format(time.strftime("%H:%M"))))

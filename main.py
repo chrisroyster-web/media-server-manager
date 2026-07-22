@@ -16,6 +16,7 @@ from core.ssh_manager import SSHManager
 from core.service_manager import ServiceManager
 from core.docker_manager import DockerManager
 from core.tray_manager import TrayManager
+from core.watchdog_registry import WatchdogRegistry
 
 from ui.sidebar import Sidebar
 from ui.connection_panel import ConnectionPanel
@@ -66,6 +67,7 @@ from ui.network_toolkit_tab import NetworkToolkitTab
 from ui.watchstate_tab import WatchstateTab
 from ui.cloudflare_tab import CloudflareTab
 from ui.audit_log_tab import AuditLogTab
+from ui.watchdog_tab import WatchdogTab
 from ui.vuln_scan_tab import VulnScanTab
 from ui.media_dedup_tab import MediaDedupTab
 from ui.media_integrity_tab import MediaIntegrityTab
@@ -166,6 +168,7 @@ class MediaServerManager(tk.Tk):
         self.service_manager = ServiceManager(self.ssh)
         self.docker_manager = DockerManager(self.ssh)
         self.scheduler = TaskScheduler(self.config_manager, self.ssh)
+        self.watchdog_registry = WatchdogRegistry()
         self._watchdog_stop    = None
         self._connected        = False   # early init so _update_title is safe
         self._current_tab_name = ""
@@ -308,6 +311,7 @@ class MediaServerManager(tk.Tk):
         self.bazarr_tab            = BazarrTab(self.tabs, self)            # 64
         self.media_integrity_tab   = MediaIntegrityTab(self.tabs, self)    # 65
         self.recyclarr_tab         = RecyclarrTab(self.tabs, self)         # 66
+        self.watchdog_tab          = WatchdogTab(self.tabs, self)          # 67
 
         for tab in [
             self.connection_panel, self.quick_commands, self.dashboard_tab,
@@ -340,6 +344,7 @@ class MediaServerManager(tk.Tk):
             self.bazarr_tab,
             self.media_integrity_tab,
             self.recyclarr_tab,
+            self.watchdog_tab,
         ]:
             self.tabs.add(tab)
 
@@ -556,7 +561,14 @@ class MediaServerManager(tk.Tk):
                 self.after(9000,  self.start_integrity_scan_watchdog)
                 self.after(9500,  self.start_recyclarr_watchdog)
                 self.after(10000, self.start_daily_digest_watchdog)
-                self.after(12000, self._check_for_update_bg)
+                self.after(10500, self.start_backup_watchdog)
+                self.after(11000, self.start_ssl_expiry_watchdog)
+                self.after(11500, self.start_disk_health_watchdog)
+                self.after(12500, self.start_docker_health_watchdog)
+                self.after(13500, self.start_mount_watchdog)
+                self.after(14500, self.start_vpn_watchdog)
+                self.after(15000, self.start_security_watchdog)
+                self.after(16000, self._check_for_update_bg)
                 self._maybe_show_onboarding()
         except tk.TclError:
             self.deiconify()
@@ -957,6 +969,7 @@ class MediaServerManager(tk.Tk):
             64: lambda: self.bazarr_tab.on_show(),
             65: lambda: self.media_integrity_tab.on_show(),
             66: lambda: self.recyclarr_tab.on_show(),
+            67: lambda: self.watchdog_tab.on_show(),
         }
         fn = m.get(idx)
         if fn:
@@ -1326,24 +1339,31 @@ class MediaServerManager(tk.Tk):
     # ---------------------------------------------------------
     def start_service_watchdog(self):
         import threading
+        NAME = "Service Watchdog"
+        self.watchdog_registry.register(NAME, 60)
         self._svc_prev_states = {}
         stop = threading.Event()
         self._svc_watchdog_stop = stop
         def _loop():
             while not stop.wait(60):
-                if not self.ssh.connected:
-                    continue
-                sm  = self.service_manager
-                cfg = self.config_manager.get_services()
-                units    = {name: data["service"] for name, data in cfg.items()}
-                statuses = sm.get_statuses(list(units.values()))
-                for name, service in units.items():
-                    status = statuses.get(service, "unknown")
-                    prev   = self._svc_prev_states.get(name)
-                    if prev == "running" and status in ("stopped", "failed"):
-                        self.after(0, lambda n=name, s=status: self.show_toast(
-                            "Service stopped", "{} is now {}".format(n, s), level="error"))
-                    self._svc_prev_states[name] = status
+                try:
+                    if not self.ssh.connected:
+                        continue
+                    sm  = self.service_manager
+                    cfg = self.config_manager.get_services()
+                    units    = {name: data["service"] for name, data in cfg.items()}
+                    statuses = sm.get_statuses(list(units.values()))
+                    for name, service in units.items():
+                        status = statuses.get(service, "unknown")
+                        prev   = self._svc_prev_states.get(name)
+                        if prev == "running" and status in ("stopped", "failed"):
+                            self.after(0, lambda n=name, s=status: self.show_toast(
+                                "Service stopped", "{} is now {}".format(n, s), level="error"))
+                        self._svc_prev_states[name] = status
+                except Exception as e:
+                    self.watchdog_registry.record_error(NAME, e)
+                else:
+                    self.watchdog_registry.record_ok(NAME)
         threading.Thread(target=_loop, daemon=True).start()
 
     # ---------------------------------------------------------
@@ -1351,18 +1371,20 @@ class MediaServerManager(tk.Tk):
     # ---------------------------------------------------------
     def start_sab_toast_watcher(self):
         import threading, urllib.request, json as _json
+        NAME = "SABnzbd Completion Watcher"
+        self.watchdog_registry.register(NAME, 30)
         self._sab_seen_ids = set()
         stop = threading.Event()
         self._sab_watcher_stop = stop
         def _loop():
             while not stop.wait(30):
-                cfg  = self.config_manager
-                host = cfg.last_host or "localhost"
-                port = getattr(cfg, "sab_port", "8080")
-                key  = getattr(cfg, "sab_apikey", "")
-                if not key:
-                    continue
                 try:
+                    cfg  = self.config_manager
+                    host = cfg.last_host or "localhost"
+                    port = getattr(cfg, "sab_port", "8080")
+                    key  = getattr(cfg, "sab_apikey", "")
+                    if not key:
+                        continue
                     url = ("http://{}:{}/sabnzbd/api?mode=history"
                            "&limit=5&output=json&apikey={}".format(host, port, key))
                     with urllib.request.urlopen(url, timeout=6) as r:
@@ -1377,8 +1399,10 @@ class MediaServerManager(tk.Tk):
                             if len(self._sab_seen_ids) > 1:
                                 self.after(0, lambda n=name: self.show_toast(
                                     "Download Complete", n, level="ok"))
-                except Exception:
-                    pass
+                except Exception as e:
+                    self.watchdog_registry.record_error(NAME, e)
+                else:
+                    self.watchdog_registry.record_ok(NAME)
         threading.Thread(target=_loop, daemon=True).start()
 
     # ---------------------------------------------------------
@@ -1389,6 +1413,8 @@ class MediaServerManager(tk.Tk):
         from datetime import datetime, timedelta
         from core.vuln_scanner import list_scan_targets, scan_image, diff_new_findings
 
+        NAME = "Vulnerability Scan"
+        self.watchdog_registry.register(NAME, 1800)
         stop = threading.Event()
         self._vuln_watchdog_stop = stop
 
@@ -1431,8 +1457,10 @@ class MediaServerManager(tk.Tk):
                         self.after(0, lambda t=title, b=body: self.show_toast(
                             t, b, level="error"))
                         self.notification_manager.send_alert(title, body)
-                except Exception:
-                    pass
+                except Exception as e:
+                    self.watchdog_registry.record_error(NAME, e)
+                else:
+                    self.watchdog_registry.record_ok(NAME)
         threading.Thread(target=_loop, daemon=True).start()
 
     # ---------------------------------------------------------
@@ -1443,6 +1471,8 @@ class MediaServerManager(tk.Tk):
         from datetime import datetime, timedelta
         from core.media_integrity import get_scan_roots, run_scan, diff_new_corrupt
 
+        NAME = "Media Integrity Scan"
+        self.watchdog_registry.register(NAME, 1800)
         stop = threading.Event()
         self._integrity_watchdog_stop = stop
 
@@ -1492,8 +1522,10 @@ class MediaServerManager(tk.Tk):
                         self.after(0, lambda t=title, b=body: self.show_toast(
                             t, b, level="error"))
                         self.notification_manager.send_alert(title, body)
-                except Exception:
-                    pass
+                except Exception as e:
+                    self.watchdog_registry.record_error(NAME, e)
+                else:
+                    self.watchdog_registry.record_ok(NAME)
         threading.Thread(target=_loop, daemon=True).start()
 
     # ---------------------------------------------------------
@@ -1504,6 +1536,8 @@ class MediaServerManager(tk.Tk):
         from datetime import datetime, timedelta
         from core.recyclarr import sync_templates
 
+        NAME = "Recyclarr Sync"
+        self.watchdog_registry.register(NAME, 1800)
         stop = threading.Event()
         self._recyclarr_watchdog_stop = stop
 
@@ -1549,8 +1583,10 @@ class MediaServerManager(tk.Tk):
                         self.after(0, lambda t=title, b=body: self.show_toast(
                             t, b, level="error"))
                         self.notification_manager.send_alert(title, body)
-                except Exception:
-                    pass
+                except Exception as e:
+                    self.watchdog_registry.record_error(NAME, e)
+                else:
+                    self.watchdog_registry.record_ok(NAME)
         threading.Thread(target=_loop, daemon=True).start()
 
     # ---------------------------------------------------------
@@ -1561,6 +1597,8 @@ class MediaServerManager(tk.Tk):
         from datetime import datetime
         from core.digest import build_digest
 
+        NAME = "Daily Digest"
+        self.watchdog_registry.register(NAME, 1800)
         stop = threading.Event()
         self._digest_watchdog_stop = stop
 
@@ -1579,13 +1617,355 @@ class MediaServerManager(tk.Tk):
                     continue
                 try:
                     server_id = (cfg.get_active_server() or {}).get("name", "default")
-                    body = build_digest(self.ssh, self.metrics_store, server_id)
+                    body = build_digest(self.ssh, self.metrics_store, server_id, cfg)
                     cfg.set_daily_digest_last_date(today_str)
                     title = "Daily Digest"
                     self.after(0, lambda t=title, b=body: self.show_toast(t, b, level="info"))
                     self.notification_manager.send_alert(title, body)
-                except Exception:
+                except Exception as e:
+                    self.watchdog_registry.record_error(NAME, e)
+                else:
+                    self.watchdog_registry.record_ok(NAME)
+        threading.Thread(target=_loop, daemon=True).start()
+
+    # ---------------------------------------------------------
+    # BACKUP FAILURE WATCHDOG
+    # ---------------------------------------------------------
+    def start_backup_watchdog(self):
+        import threading
+        from core.backup_status import check_backup_jobs
+        from core.hyperbackup_status import check_hyperbackup_status
+        from core.arr_backup_status import check_arr_backup_jobs
+
+        NAME = "Backup Failure Watchdog"
+        self.watchdog_registry.register(NAME, 1800)
+        self._backup_prev_states = {}
+        stop = threading.Event()
+        self._backup_watchdog_stop = stop
+
+        def _loop():
+            while not stop.wait(1800):
+                if not self.ssh.connected:
+                    continue
+                cfg = self.config_manager
+                try:
+                    jobs = check_backup_jobs(self.ssh)
+                    jobs += check_hyperbackup_status(cfg)
+                    jobs += check_arr_backup_jobs(cfg)
+                    for j in jobs:
+                        key    = "{}:{}".format(j["tool"], j["name"])
+                        status = j["status"]
+                        prev   = self._backup_prev_states.get(key)
+                        # Only alert on a NEW transition into "fail", same as the
+                        # service watchdog -- a backup that was already failing
+                        # before this app started is surfaced via the tab and
+                        # daily digest instead, so restarting the app doesn't
+                        # re-fire an alert for a known, pre-existing failure.
+                        if prev is not None and prev != "fail" and status == "fail":
+                            title = "Backup failing: {}".format(j["name"])
+                            body  = "{} ({}): {}".format(j["name"], j["tool"], j.get("log", ""))
+                            self.after(0, lambda t=title, b=body: self.show_toast(
+                                t, b, level="error"))
+                            self.notification_manager.send_alert(title, body)
+                        self._backup_prev_states[key] = status
+                except Exception as e:
+                    self.watchdog_registry.record_error(NAME, e)
+                else:
+                    self.watchdog_registry.record_ok(NAME)
+        threading.Thread(target=_loop, daemon=True).start()
+
+    # ---------------------------------------------------------
+    # SSL CERT EXPIRY WATCHDOG (feeds the alert engine)
+    # ---------------------------------------------------------
+    def start_ssl_expiry_watchdog(self):
+        import threading
+        from core.ssl_status import check_hosts_expiry
+
+        NAME = "SSL Cert Expiry"
+        self.watchdog_registry.register(NAME, 21600)
+        self.ssl_min_days_to_expiry = None
+        stop = threading.Event()
+        self._ssl_watchdog_stop = stop
+
+        def _loop():
+            while not stop.wait(21600):  # every 6h -- cert expiry changes slowly
+                if not self.ssh.connected:
+                    continue
+                cfg  = self.config_manager
+                host = cfg.last_host or "localhost"
+                if not host or host == "localhost":
+                    continue
+                hosts = [(host, "443")]
+                rp_host = getattr(cfg, "reverse_proxy_host", "") or ""
+                if rp_host and rp_host not in (host, "localhost"):
+                    hosts.append((rp_host, "443"))
+                try:
+                    results = check_hosts_expiry(self.ssh, hosts)
+                    days = [r["days"] for r in results if r.get("days") is not None]
+                    self.ssl_min_days_to_expiry = min(days) if days else None
+                except Exception as e:
+                    self.watchdog_registry.record_error(NAME, e)
+                else:
+                    self.watchdog_registry.record_ok(NAME)
+        threading.Thread(target=_loop, daemon=True).start()
+
+    # ---------------------------------------------------------
+    # VPN DISCONNECT WATCHDOG
+    # ---------------------------------------------------------
+    def start_vpn_watchdog(self):
+        import threading
+        from core.vpn_status import check_vpn_connected
+
+        NAME = "VPN Watchdog"
+        self.watchdog_registry.register(NAME, 120)
+        self._vpn_prev_connected = None
+        stop = threading.Event()
+        self._vpn_watchdog_stop = stop
+
+        def _loop():
+            while not stop.wait(120):  # every 2 min -- exposure while torrenting is time-sensitive
+                if not self.ssh.connected:
+                    continue
+                if not self.config_manager.vpn_enabled:
+                    continue
+                try:
+                    connected = check_vpn_connected(self.ssh)
+                    if connected is None:
+                        continue  # couldn't determine this cycle -- don't touch prev state
+                    prev = self._vpn_prev_connected
+                    if prev is True and connected is False:
+                        title = "VPN disconnected"
+                        body  = "The VPN connection has dropped."
+                        self.after(0, lambda t=title, b=body: self.show_toast(
+                            t, b, level="error"))
+                        self.notification_manager.send_alert(title, body)
+                    self._vpn_prev_connected = connected
+                except Exception as e:
+                    self.watchdog_registry.record_error(NAME, e)
+                else:
+                    self.watchdog_registry.record_ok(NAME)
+        threading.Thread(target=_loop, daemon=True).start()
+
+    # ---------------------------------------------------------
+    # SECURITY WATCHDOG (Fail2ban ban surge + UFW disabled)
+    # ---------------------------------------------------------
+    def start_security_watchdog(self):
+        import threading
+        from core.security_status import check_fail2ban_total_banned, check_ufw_active
+
+        NAME = "Security Watchdog"
+        self.watchdog_registry.register(NAME, 600)
+        BAN_SURGE_THRESHOLD = 5
+
+        self._f2b_prev_total  = None
+        self._ufw_prev_active = None
+        stop = threading.Event()
+        self._security_watchdog_stop = stop
+
+        def _loop():
+            while not stop.wait(600):  # every 10 min
+                if not self.ssh.connected:
+                    continue
+                had_error = False
+
+                try:
+                    total = check_fail2ban_total_banned(self.ssh)
+                except Exception as e:
+                    total = None
+                    had_error = True
+                    self.watchdog_registry.record_error(NAME, e)
+                if total is not None:
+                    prev = self._f2b_prev_total
+                    if prev is not None and total - prev >= BAN_SURGE_THRESHOLD:
+                        title = "Fail2ban ban surge"
+                        body  = "{} new bans since last check ({} total currently banned).".format(
+                            total - prev, total)
+                        self.after(0, lambda t=title, b=body: self.show_toast(
+                            t, b, level="error"))
+                        self.notification_manager.send_alert(title, body)
+                    self._f2b_prev_total = total
+
+                try:
+                    active = check_ufw_active(self.ssh)
+                except Exception as e:
+                    active = None
+                    had_error = True
+                    self.watchdog_registry.record_error(NAME, e)
+                if active is not None:
+                    prev = self._ufw_prev_active
+                    if prev is True and active is False:
+                        title = "UFW firewall disabled"
+                        body  = "The firewall was active and is now inactive."
+                        self.after(0, lambda t=title, b=body: self.show_toast(
+                            t, b, level="error"))
+                        self.notification_manager.send_alert(title, body)
+                    self._ufw_prev_active = active
+
+                if not had_error:
+                    self.watchdog_registry.record_ok(NAME)
+        threading.Thread(target=_loop, daemon=True).start()
+
+    # ---------------------------------------------------------
+    # STORAGE MOUNT DROP WATCHDOG
+    # ---------------------------------------------------------
+    def start_mount_watchdog(self):
+        import threading
+        from core.mount_status import check_mounts
+
+        NAME = "Storage Mount Watchdog"
+        self.watchdog_registry.register(NAME, 300)
+        self._mount_prev_states = {}
+        stop = threading.Event()
+        self._mount_watchdog_stop = stop
+
+        def _loop():
+            while not stop.wait(300):  # every 5 min -- cheap check, worth catching fast
+                if not self.ssh.connected:
+                    continue
+                mounts = self.config_manager.get_storage_mounts()
+                try:
+                    states = check_mounts(self.ssh, mounts)
+                    for path, mounted in states.items():
+                        prev = self._mount_prev_states.get(path)
+                        # Only alert True -> False: a path that was never a real
+                        # mount (or that we haven't checked yet) shouldn't fire,
+                        # only one that WAS confirmed mounted and just dropped.
+                        if prev is True and mounted is False:
+                            title = "Storage mount dropped: {}".format(path)
+                            body  = ("{} is no longer mounted -- writes to this path "
+                                    "are now silently landing on the local disk "
+                                    "underneath it.".format(path))
+                            self.after(0, lambda t=title, b=body: self.show_toast(
+                                t, b, level="error"))
+                            self.notification_manager.send_alert(title, body)
+                        self._mount_prev_states[path] = mounted
+                except Exception as e:
+                    self.watchdog_registry.record_error(NAME, e)
+                else:
+                    self.watchdog_registry.record_ok(NAME)
+        threading.Thread(target=_loop, daemon=True).start()
+
+    # ---------------------------------------------------------
+    # DOCKER CONTAINER HEALTH WATCHDOG
+    # ---------------------------------------------------------
+    def start_docker_health_watchdog(self):
+        import threading
+        NAME = "Docker Container Health"
+        self.watchdog_registry.register(NAME, 60)
+        self._docker_prev_states = {}
+        stop = threading.Event()
+        self._docker_watchdog_stop = stop
+
+        def _loop():
+            while not stop.wait(60):
+                if not self.ssh.connected:
+                    continue
+                try:
+                    names = self.docker_manager.list_containers()
+                    if not names:
+                        continue
+                    statuses = self.docker_manager.get_health_statuses(names)
+                    for name, info in statuses.items():
+                        status = info.get("status", "")
+                        health = info.get("health", "")
+                        prev   = self._docker_prev_states.get(name)
+                        if prev is not None:
+                            prev_status, prev_health = prev
+                            newly_bad_status = (
+                                status in ("restarting", "dead")
+                                and prev_status not in ("restarting", "dead")
+                            )
+                            newly_unhealthy = health == "unhealthy" and prev_health != "unhealthy"
+                            if newly_bad_status or newly_unhealthy:
+                                reason = "unhealthy" if newly_unhealthy else status
+                                self.after(0, lambda n=name, r=reason: self.show_toast(
+                                    "Container " + r, n, level="error"))
+                        self._docker_prev_states[name] = (status, health)
+                except Exception as e:
+                    self.watchdog_registry.record_error(NAME, e)
+                else:
+                    self.watchdog_registry.record_ok(NAME)
+        threading.Thread(target=_loop, daemon=True).start()
+
+    # ---------------------------------------------------------
+    # DISK / POOL HEALTH WATCHDOG (SMART + ZFS/Btrfs)
+    # ---------------------------------------------------------
+    def start_disk_health_watchdog(self):
+        import threading
+        from core.smart_status import check_smart_health
+        from core.storage_health_status import check_pool_health
+
+        NAME = "Disk / Pool Health"
+        self.watchdog_registry.register(NAME, 14400)
+        self._smart_prev_states = {}
+        self._pool_prev_states  = {}
+        _BAD_POOL_STATES = ("DEGRADED", "WARNING", "FAULTED", "UNAVAIL",
+                            "REMOVED", "CRITICAL")
+
+        def _attr_bad(row):
+            for key in ("reallocated", "pending", "uncorr"):
+                try:
+                    if int(row.get(key, "0")) > 0:
+                        return True
+                except (TypeError, ValueError):
                     pass
+            return False
+
+        stop = threading.Event()
+        self._disk_health_watchdog_stop = stop
+
+        def _loop():
+            while not stop.wait(14400):  # every 4h
+                if not self.ssh.connected:
+                    continue
+                had_error = False
+
+                try:
+                    drives = check_smart_health(self.ssh)
+                except Exception as e:
+                    drives = []
+                    had_error = True
+                    self.watchdog_registry.record_error(NAME, e)
+                for row in drives:
+                    dev    = row["device"]
+                    health = row["health"]
+                    bad    = _attr_bad(row)
+                    prev   = self._smart_prev_states.get(dev)
+                    if prev is not None:
+                        prev_health, prev_bad = prev
+                        newly_failed = prev_health != "FAILED" and health == "FAILED"
+                        newly_bad    = (not prev_bad) and bad
+                        if newly_failed or newly_bad:
+                            title = "Disk health warning: {}".format(dev)
+                            body  = "{} ({}): health={}, reallocated={}, pending={}, uncorr={}".format(
+                                dev, row.get("model", "?"), health,
+                                row.get("reallocated", "--"), row.get("pending", "--"),
+                                row.get("uncorr", "--"))
+                            self.after(0, lambda t=title, b=body: self.show_toast(
+                                t, b, level="error"))
+                            self.notification_manager.send_alert(title, body)
+                    self._smart_prev_states[dev] = (health, bad)
+
+                try:
+                    pools = check_pool_health(self.ssh)
+                except Exception as e:
+                    pools = []
+                    had_error = True
+                    self.watchdog_registry.record_error(NAME, e)
+                for p in pools:
+                    name  = p["name"]
+                    state = p["state"]
+                    prev  = self._pool_prev_states.get(name)
+                    if prev is not None and prev not in _BAD_POOL_STATES and state in _BAD_POOL_STATES:
+                        title = "Storage pool degraded: {}".format(name)
+                        body  = "{} ({}) is now {}".format(name, p.get("fs", "?"), state)
+                        self.after(0, lambda t=title, b=body: self.show_toast(
+                            t, b, level="error"))
+                        self.notification_manager.send_alert(title, body)
+                    self._pool_prev_states[name] = state
+
+                if not had_error:
+                    self.watchdog_registry.record_ok(NAME)
         threading.Thread(target=_loop, daemon=True).start()
 
     def _open_search(self, event=None):

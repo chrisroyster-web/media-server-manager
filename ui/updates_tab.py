@@ -63,12 +63,13 @@ class UpdatesTab(tk.Frame):
         apt_frame = tk.Frame(self, bg=t.bg)
         apt_frame.pack(fill="both", expand=True, padx=16, pady=(0, 8))
         self._apt_tree = self._make_tree(apt_frame,
-            cols=("package", "current", "available", "arch"),
+            cols=("package", "current", "available", "arch", "status"),
             headings=[
-                ("package",   "Package",          260, "w"),
-                ("current",   "Installed",         160, "w"),
-                ("available", "Available",         160, "w"),
-                ("arch",      "Arch",               80, "center"),
+                ("package",   "Package",          220, "w"),
+                ("current",   "Installed",         140, "w"),
+                ("available", "Available",         140, "w"),
+                ("arch",      "Arch",               70, "center"),
+                ("status",    "Status",            140, "center"),
             ])
 
         # --- Docker section ---
@@ -137,6 +138,7 @@ class UpdatesTab(tk.Frame):
         tree.tag_configure("update",   foreground=t.yellow)
         tree.tag_configure("current",  foreground=t.status_running)
         tree.tag_configure("unknown",  foreground=t.text_muted)
+        tree.tag_configure("held",     foreground=t.text_muted)
 
         vsb = tk.Scrollbar(parent, orient="vertical", command=tree.yview)
         tree.configure(yscrollcommand=vsb.set)
@@ -183,6 +185,15 @@ class UpdatesTab(tk.Frame):
                     apt_packages.append((pkg, old_ver, avail, arch))
                 except Exception:
                     continue
+
+            # apt-mark hold stops apt-get upgrade from touching a package, but
+            # `apt list --upgradable` lists held packages exactly like any
+            # other -- it doesn't cross-reference dpkg selections. Fetch the
+            # hold list separately so held packages can be flagged instead of
+            # looking like a normal pending update that the upgrade button
+            # will silently skip.
+            held_out, _, _ = ssh.run("apt-mark showhold 2>/dev/null")
+            held_pkgs = set(held_out.strip().splitlines())
 
             # 2. Docker image check — compare the image ID the container is
             # actually running against the freshly-pulled tag's image ID.
@@ -236,22 +247,25 @@ class UpdatesTab(tk.Frame):
                         status, tag = "Up to date", "current"
                 docker_results.append((name, image, status, tag, container))
 
-            self.after(0, lambda a=apt_packages, d=docker_results: self._populate(a, d))
+            self.after(0, lambda a=apt_packages, d=docker_results, h=held_pkgs: self._populate(a, d, h))
         finally:
             self._fetching = False
 
     # =========================================================
     # POPULATE
     # =========================================================
-    def _populate(self, apt_packages, docker_results):
+    def _populate(self, apt_packages, docker_results, held_pkgs=None):
         t = self.theme
+        held_pkgs = held_pkgs or set()
 
         # APT tree
         self._apt_tree.delete(*self._apt_tree.get_children())
         for idx, (pkg, cur, avail, arch) in enumerate(apt_packages):
-            tag = ("even" if idx % 2 == 0 else "odd", "update")
+            is_held = pkg in held_pkgs
+            status  = "Held" if is_held else "Update available"
+            tag = ("even" if idx % 2 == 0 else "odd", "held" if is_held else "update")
             self._apt_tree.insert("", "end",
-                                   values=(pkg, cur, avail, arch), tags=tag)
+                                   values=(pkg, cur, avail, arch, status), tags=tag)
 
         # Docker tree
         self._docker_tree.delete(*self._docker_tree.get_children())

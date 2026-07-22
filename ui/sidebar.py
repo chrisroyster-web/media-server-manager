@@ -88,6 +88,7 @@ class Sidebar(tk.Frame):
         ("\U0001f504", "Updates",        12,  None),
         ("\U0001f514", "Notifications",  19,  None),
         ("\U0001f4dc", "Audit Log",      61,  None),
+        ("\U0001f9ed", "Watchdogs",      67,  None),
 
         ("⚙",         "Config",          8,  "SETTINGS"),
     ]

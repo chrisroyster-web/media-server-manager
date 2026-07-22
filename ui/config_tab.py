@@ -1033,6 +1033,10 @@ class ConfigTab(tk.Frame):
         ("temp",    "CPU Temp",    "°C"),
         ("rx_mbps", "Network In",  " MB/s"),
         ("tx_mbps", "Network Out", " MB/s"),
+        ("ups_on_battery",     "UPS On Battery",  ""),
+        ("ups_low_battery",    "UPS Low Battery", ""),
+        ("ups_battery_charge", "UPS Battery",     "%"),
+        ("ssl_days_to_expiry", "SSL Cert Expiry", " days"),
     ]
     _OPERATORS   = [">=", ">", "<=", "<"]
     _OP_LABELS   = {">=": "≥", ">": ">", "<=": "≤", "<": "<"}
@@ -1171,7 +1175,8 @@ class ConfigTab(tk.Frame):
 
         # Metric
         _lbl("Metric:", 1)
-        metric_labels = ["{} ({})".format(lbl, u.strip()) for _, lbl, u in self._METRICS]
+        metric_labels = ["{} ({})".format(lbl, u.strip()) if u.strip() else lbl
+                          for _, lbl, u in self._METRICS]
         metric_keys   = [k for k, _, _ in self._METRICS]
         metric_idx    = metric_keys.index(rule.get("metric", "cpu")) if rule.get("metric", "cpu") in metric_keys else 0
         metric_var    = tk.StringVar(value=metric_labels[metric_idx])

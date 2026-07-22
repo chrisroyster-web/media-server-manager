@@ -110,6 +110,35 @@ class DockerManager:
         # (container doesn't exist), matching get_status()'s code!=0 case.
         return {name: found.get(name, "not_installed") for name in container_names}
 
+    def get_health_statuses(self, container_names):
+        """
+        Batched raw status + healthcheck lookup for the disk-health-style
+        background watchdog (main.py's start_docker_health_watchdog), which
+        needs to tell "restarting"/"dead" apart and see Docker's own
+        healthcheck verdict -- detail get_statuses() collapses away since it
+        only reports the app's coarser running/stopped/scheduled/paused
+        buckets. Returns {name: {"status": <raw .State.Status>,
+        "health": <.State.Health.Status, "" if no healthcheck>}}.
+        """
+        if not self.ssh.connected or not container_names:
+            return {}
+
+        quoted = " ".join(shlex.quote(n) for n in container_names)
+        fmt = "{{.Name}}|{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}"
+        out, _, _ = self.ssh.run(f"docker inspect -f '{fmt}' {quoted} 2>/dev/null")
+
+        found = {}
+        for line in out.splitlines():
+            parts = line.split("|", 2)
+            if len(parts) < 2:
+                continue
+            name = parts[0].lstrip("/")
+            found[name] = {
+                "status": parts[1],
+                "health": parts[2] if len(parts) > 2 else "",
+            }
+        return found
+
     # ---------------------------------------------------------
     # START
     # ---------------------------------------------------------
