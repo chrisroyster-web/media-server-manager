@@ -31,6 +31,10 @@ class VulnScanTab(tk.Frame):
         self.theme      = controller.theme
         self._row_info  = {}   # tree iid -> {"image", "containers", "result"}
         self._scanning  = False
+        # None until a scan-all completes in this session (or no baseline existed
+        # yet to diff against) -- see _finish_scan_all. Distinct from 0, which
+        # means "compared against baseline, genuinely nothing new".
+        self._new_count = None
         self._build_ui()
 
     # =========================================================
@@ -146,20 +150,50 @@ class VulnScanTab(tk.Frame):
         t = self.theme
         for w in self._summary_frame.winfo_children():
             w.destroy()
-        totals = self._totals()
+        totals   = self._totals()
+        fixable  = self._fixable_totals()
         colors = {
             "critical": t.status_stopped_text, "high": t.yellow,
             "medium": t.blue_bright, "low": t.text_muted,
         }
+
+        # Headline card: new critical/high findings since the last completed
+        # scan (the same baseline diff_new_findings() uses for notifications).
+        # This is the actionable number -- the raw totals below are mostly a
+        # static pile of already-known, often permanently-unfixed CVEs that
+        # re-alarm on every look without anything new to act on.
+        new_card = tk.Frame(self._summary_frame, bg=t.card_bg,
+                            highlightbackground=t.card_border, highlightthickness=1)
+        new_card.pack(side="left", padx=(0, 16), pady=4, ipadx=16, ipady=8)
+        tk.Label(new_card, text="New Since Last Scan", bg=t.card_bg,
+                 fg=t.text_muted, font=t.font_small).pack()
+        if self._new_count is None:
+            new_text, new_color = "—", t.text_muted
+        else:
+            new_text = str(self._new_count)
+            new_color = t.status_stopped_text if self._new_count else t.status_running
+        tk.Label(new_card, text=new_text, bg=t.card_bg, fg=new_color,
+                 font=("Segoe UI", 18, "bold")).pack()
+
         for sev in _SEVERITY_ORDER:
             card = tk.Frame(self._summary_frame, bg=t.card_bg,
                             highlightbackground=t.card_border, highlightthickness=1)
             card.pack(side="left", padx=(0, 8), pady=4, ipadx=16, ipady=8)
             tk.Label(card, text=sev.title(), bg=t.card_bg,
                      fg=t.text_muted, font=t.font_small).pack()
-            tk.Label(card, text=str(totals[sev]), bg=t.card_bg,
-                     fg=colors[sev] if totals[sev] else t.status_running,
+            if sev in ("critical", "high"):
+                fx, tot = fixable[sev]
+                # Color by whether any of them are actually fixable, not by
+                # raw presence -- a pile of no-fix-available OS package CVEs
+                # isn't something you can act on today.
+                color = colors[sev] if fx else (t.status_running if tot == 0 else t.text_muted)
+            else:
+                color = colors[sev] if totals[sev] else t.status_running
+            tk.Label(card, text=str(totals[sev]), bg=t.card_bg, fg=color,
                      font=("Segoe UI", 18, "bold")).pack()
+            if sev in ("critical", "high") and fixable[sev][1]:
+                tk.Label(card, text="{} fixable".format(fixable[sev][0]),
+                         bg=t.card_bg, fg=t.text_muted, font=t.font_small).pack()
 
     def _totals(self):
         totals = {sev: 0 for sev in _SEVERITY_ORDER}
@@ -170,6 +204,24 @@ class VulnScanTab(tk.Frame):
             for sev in _SEVERITY_ORDER:
                 totals[sev] += result.get(sev, 0)
         return totals
+
+    def _fixable_totals(self):
+        """{sev: (fixable_count, total_count)} using per-CVE fix-version data,
+        so a pile of "fixed": "" CVEs (nothing to do) can be told apart from
+        ones a rebuild would actually resolve."""
+        counts = {sev: [0, 0] for sev in _SEVERITY_ORDER}
+        for info in self._row_info.values():
+            result = info.get("result")
+            if not result or "error" in result:
+                continue
+            for cve in result.get("cves", []):
+                sev = cve.get("severity", "").lower()
+                if sev not in counts:
+                    continue
+                counts[sev][1] += 1
+                if cve.get("fixed"):
+                    counts[sev][0] += 1
+        return {sev: tuple(v) for sev, v in counts.items()}
 
     def _on_schedule_change(self, *_args):
         key = _SCHEDULE_KEYS.get(self._auto_var.get(), "disabled")
@@ -265,10 +317,6 @@ class VulnScanTab(tk.Frame):
         self._scan_btn.config(state="normal", text="⟳ Scan All")
         self._last_lbl.config(text="Last scan: " + time.strftime("%H:%M:%S"))
         totals = self._totals()
-        self._set_status(
-            "Scan complete — {} critical, {} high, {} medium, {} low.".format(
-                totals["critical"], totals["high"], totals["medium"], totals["low"]),
-            "error" if totals["critical"] or totals["high"] else "ok")
 
         # Share the same baseline the background watchdog uses (main.py's
         # start_vuln_scan_watchdog) so a manual scan and a scheduled one
@@ -276,15 +324,41 @@ class VulnScanTab(tk.Frame):
         cfg = self.controller.config_manager
         results = {info["image"]: info["result"] for info in self._row_info.values()
                    if info.get("result") is not None}
-        new_baseline, new_findings = diff_new_findings(cfg.get_vuln_scan_baseline(), results)
+        old_baseline = cfg.get_vuln_scan_baseline()
+        new_baseline, new_findings = diff_new_findings(old_baseline, results)
         cfg.set_vuln_scan_baseline(new_baseline)
         cfg.set_vuln_scan_last_run(datetime.now().isoformat(timespec="seconds"))
+
+        # No prior baseline means every image is being seen for the first
+        # time -- diff_new_findings() correctly reports 0 "new" in that case,
+        # but that's "nothing to compare against yet", not "confirmed clean",
+        # so keep the headline card at "—" rather than a falsely reassuring 0.
+        self._new_count = None if not old_baseline else sum(
+            len(cves) for cves in new_findings.values())
+        self._draw_summary_cards()
+
+        if not old_baseline:
+            self._set_status(
+                "Scan complete — baseline established ({} critical, {} high total). "
+                "Future scans will flag only new findings.".format(
+                    totals["critical"], totals["high"]), "info")
+        elif self._new_count:
+            self._set_status(
+                "Scan complete — {} new critical/high finding{} "
+                "({} critical / {} high total).".format(
+                    self._new_count, "s" if self._new_count != 1 else "",
+                    totals["critical"], totals["high"]), "error")
+        else:
+            self._set_status(
+                "Scan complete — no new critical/high findings "
+                "({} critical, {} high total, all previously seen).".format(
+                    totals["critical"], totals["high"]), "ok")
+
         if new_findings:
-            total = sum(len(cves) for cves in new_findings.values())
-            images = ", ".join(sorted(new_findings.keys()))
             title = "New vulnerabilities found"
             body  = "{} new critical/high CVE{} in: {}".format(
-                total, "s" if total != 1 else "", images)
+                self._new_count, "s" if self._new_count != 1 else "",
+                ", ".join(sorted(new_findings.keys())))
             self.controller.notification_manager.send_alert(title, body)
 
     # =========================================================
