@@ -200,3 +200,19 @@ def list_tunnels(token, account_id):
         }
         for t in tunnels
     ]
+
+
+# ---------------------------------------------------------------------------
+# Cloudflare Access
+# ---------------------------------------------------------------------------
+
+def list_access_apps(token, account_id):
+    """
+    Returns the account's Cloudflare Access applications as a list of
+    {domain, name} dicts. `domain` may be host-only ("app.example.com")
+    or path-scoped ("app.example.com/admin"). Requires a token with
+    Account > Access: Apps and Policies > Read permission.
+    """
+    apps = _request(token, "GET",
+        "/accounts/{}/access/apps".format(account_id)) or []
+    return [{"domain": a.get("domain", ""), "name": a.get("name", "?")} for a in apps]

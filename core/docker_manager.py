@@ -144,7 +144,7 @@ class DockerManager:
     # ---------------------------------------------------------
     def start(self, container_name):
         if not self.ssh.connected:
-            return "Not connected"
+            return "", "Not connected", 1
 
         return self.ssh.run_sudo(f"docker start {shlex.quote(container_name)}")
 
@@ -153,7 +153,7 @@ class DockerManager:
     # ---------------------------------------------------------
     def stop(self, container_name):
         if not self.ssh.connected:
-            return "Not connected"
+            return "", "Not connected", 1
 
         return self.ssh.run_sudo(f"docker stop {shlex.quote(container_name)}")
 
@@ -162,7 +162,7 @@ class DockerManager:
     # ---------------------------------------------------------
     def restart(self, container_name):
         if not self.ssh.connected:
-            return "Not connected"
+            return "", "Not connected", 1
 
         return self.ssh.run_sudo(f"docker restart {shlex.quote(container_name)}")
 

@@ -125,7 +125,17 @@ def test_start_stop_restart_use_sudo_and_quote_the_name():
 
 def test_start_when_not_connected():
     dm = DockerManager(_FakeSSH(connected=False))
-    assert dm.start("sonarr") == "Not connected"
+    assert dm.start("sonarr") == ("", "Not connected", 1)
+
+
+def test_stop_when_not_connected():
+    dm = DockerManager(_FakeSSH(connected=False))
+    assert dm.stop("sonarr") == ("", "Not connected", 1)
+
+
+def test_restart_when_not_connected():
+    dm = DockerManager(_FakeSSH(connected=False))
+    assert dm.restart("sonarr") == ("", "Not connected", 1)
 
 
 def test_logs_uses_plain_run():

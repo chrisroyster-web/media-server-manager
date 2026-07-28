@@ -15,6 +15,7 @@ import time
 from datetime import datetime
 
 from core.vuln_scanner import list_scan_targets, scan_image, diff_new_findings
+from core.bundled_tool import classify_pkg
 
 
 _SEVERITY_ORDER = ("critical", "high", "medium", "low")
@@ -152,6 +153,7 @@ class VulnScanTab(tk.Frame):
             w.destroy()
         totals   = self._totals()
         fixable  = self._fixable_totals()
+        bundled  = self._bundled_totals()
         colors = {
             "critical": t.status_stopped_text, "high": t.yellow,
             "medium": t.blue_bright, "low": t.text_muted,
@@ -194,6 +196,9 @@ class VulnScanTab(tk.Frame):
             if sev in ("critical", "high") and fixable[sev][1]:
                 tk.Label(card, text="{} fixable".format(fixable[sev][0]),
                          bg=t.card_bg, fg=t.text_muted, font=t.font_small).pack()
+            if sev in ("critical", "high") and bundled[sev][0]:
+                tk.Label(card, text="{} bundled tooling".format(bundled[sev][0]),
+                         bg=t.card_bg, fg=t.text_muted, font=t.font_small).pack()
 
     def _totals(self):
         totals = {sev: 0 for sev in _SEVERITY_ORDER}
@@ -220,6 +225,26 @@ class VulnScanTab(tk.Frame):
                     continue
                 counts[sev][1] += 1
                 if cve.get("fixed"):
+                    counts[sev][0] += 1
+        return {sev: tuple(v) for sev, v in counts.items()}
+
+    def _bundled_totals(self):
+        """{sev: (bundled_count, total_count)} using core/bundled_tool.py's
+        verified-bundled-package map -- purely informational context on how
+        much of the raw count is known bundled-tool noise (e.g. an embedded
+        browser for an unused feature). Bundled != safe, so this doesn't
+        affect the fixable-based alarm color logic above."""
+        counts = {sev: [0, 0] for sev in _SEVERITY_ORDER}
+        for info in self._row_info.values():
+            result = info.get("result")
+            if not result or "error" in result:
+                continue
+            for cve in result.get("cves", []):
+                sev = cve.get("severity", "").lower()
+                if sev not in counts:
+                    continue
+                counts[sev][1] += 1
+                if classify_pkg(cve.get("pkg", ""))["bundled"]:
                     counts[sev][0] += 1
         return {sev: tuple(v) for sev, v in counts.items()}
 

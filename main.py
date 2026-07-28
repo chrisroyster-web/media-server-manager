@@ -1998,16 +1998,7 @@ class MediaServerManager(tk.Tk):
                 level="error"))
             return
         self.remediation_tracker.record_attempt(target)
-        result = self.docker_manager.restart(name)
-        # docker_manager.restart() returns a bare string ("Not connected") on
-        # its disconnected path but a 3-tuple otherwise -- this call site only
-        # runs while self.ssh.connected is already True (checked at the top
-        # of this watchdog's loop), but unpack defensively anyway rather than
-        # assume the tuple shape always holds.
-        if isinstance(result, tuple):
-            out, err, code = result
-        else:
-            out, err, code = "", str(result), 1
+        out, err, code = self.docker_manager.restart(name)
         ok = (code == 0)
         self.audit_log("docker.auto_restart", name,
                         detail="Triggered by watchdog, reason={}".format(reason),

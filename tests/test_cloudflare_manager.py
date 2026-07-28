@@ -178,6 +178,24 @@ def test_list_tunnels_counts_connections():
 
 
 # ---------------------------------------------------------------------------
+# Access apps
+# ---------------------------------------------------------------------------
+
+def test_list_access_apps_normalizes_fields():
+    raw = [{"domain": "jellyseerr.example.com", "name": "Jellyseerr"}]
+    with patch("urllib.request.urlopen", return_value=_ok_response(raw)):
+        apps = cf.list_access_apps("tok", "acct123")
+    assert apps == [{"domain": "jellyseerr.example.com", "name": "Jellyseerr"}]
+
+
+def test_list_access_apps_defaults_missing_fields():
+    raw = [{}]
+    with patch("urllib.request.urlopen", return_value=_ok_response(raw)):
+        apps = cf.list_access_apps("tok", "acct123")
+    assert apps == [{"domain": "", "name": "?"}]
+
+
+# ---------------------------------------------------------------------------
 # Security events (GraphQL)
 # ---------------------------------------------------------------------------
 

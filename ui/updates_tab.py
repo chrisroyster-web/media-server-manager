@@ -397,11 +397,11 @@ class UpdatesTab(tk.Frame):
         config_file = labels.get("com.docker.compose.project.config_files", "")
 
         if project and service:
-            self._apply_via_compose(ssh, project, service, config_file, display_name)
+            self._apply_via_compose(ssh, container, info, project, service, config_file, display_name)
         else:
             self._prompt_recreate(ssh, container, info, display_name, image)
 
-    def _apply_via_compose(self, ssh, project, service, config_file, display_name):
+    def _apply_via_compose(self, ssh, container, info, project, service, config_file, display_name):
         # -p (project name) alone isn't reliably enough for `pull`/`up` on every
         # Compose version -- those need to read the actual compose file, and not
         # every version can recover its location from container labels ("No
@@ -410,15 +410,58 @@ class UpdatesTab(tk.Frame):
         # com.docker.compose.project.config_files label, so use that directly.
         ff = " ".join("-f {}".format(shlex.quote(f.strip()))
                        for f in config_file.split(",") if f.strip())
+
+        # Stop first (same as the standalone recreate path) so the backup
+        # step tars a quiesced mount rather than one being actively written
+        # to. `docker compose up -d` recreates/starts based on image hash
+        # and container existence, not current running state, so a
+        # pre-stopped container is handled correctly -- this is the same
+        # state `docker stop <svc> && docker compose up -d` would leave a
+        # human in.
+        self._log("Stopping {}…\n".format(display_name))
+        _, stop_err, stop_code = ssh.run("docker stop {}".format(shlex.quote(container)))
+        if stop_code != 0:
+            self.after(0, lambda: self._finish_apply(
+                False, "Stop failed (exit {}) — update aborted, container "
+                       "untouched: {}".format(stop_code, stop_err)))
+            return
+
+        backup_note = ""
+        if self.controller.config_manager.get_recreate_backup_enabled():
+            self._log("Backing up bind-mounted data…\n")
+            cfg = self.controller.config_manager
+            result = backup_container_mounts(
+                ssh, container, info,
+                backup_root=cfg.get_recreate_backup_dir(),
+                keep=cfg.get_recreate_backup_keep())
+            self.controller.audit_log(
+                "docker.recreate_backup", container,
+                detail="{} backed up, {} skipped, {} failed -> {}".format(
+                    len(result["backed_up"]), len(result["skipped"]),
+                    len(result["failed"]), result["dir"]),
+                result="ok" if result["ok"] else "fail")
+            self._log(result["output"] + "\n", "ok" if result["ok"] else "err")
+            if not result["ok"]:
+                self.after(0, lambda: self._finish_apply(
+                    False, "Backup failed before update — {} is stopped but "
+                           "compose has NOT been run, nothing else was "
+                           "touched. Fix the backup problem (disk space / "
+                           "permissions on {}) and retry."
+                           .format(display_name, result["dir"])))
+                return
+            if result["backed_up"]:
+                backup_note = " Pre-update backup saved to {}.".format(result["dir"])
+
         cmd = "docker compose {ff} -p {p} pull {s} && docker compose {ff} -p {p} up -d {s}".format(
             ff=ff, p=shlex.quote(project), s=shlex.quote(service))
-        self._log("$ {}\n".format(cmd))
+        self._log("$ {}\n".format(cmd), "warn")
         out, err, code = ssh.run(cmd)
         self._log((out or "") + (err or "") + "\n", "ok" if code == 0 else "err")
         self.after(0, lambda: self._finish_apply(
             code == 0,
-            "{} updated and recreated via compose.".format(display_name) if code == 0
-            else "compose pull/up failed (exit {}) — see output above.".format(code)))
+            "{} updated and recreated via compose.{}".format(display_name, backup_note)
+            if code == 0 else
+            "compose pull/up failed (exit {}) — see output above.{}".format(code, backup_note)))
 
     # ---- Standalone (non-compose) container: best-effort recreate ----
     def _prompt_recreate(self, ssh, container, info, display_name, image):

@@ -1,8 +1,12 @@
 # ui/cloudflare_tab.py
 """
 Cloudflare tab — DNS records (with dynamic-IP sync), recent WAF/security
-events, cache purge, and Cloudflare Tunnel status. All via the Cloudflare
-API v4 (core/cloudflare_manager.py), not SSH.
+events, cache purge, Cloudflare Tunnel status, and a tunnel exposure audit.
+DNS/events/tunnels are all via the Cloudflare API v4 (core/cloudflare_manager.py),
+not SSH. The exposure audit is the one exception -- it reads cloudflared's
+own config.yml over SSH (to get the tunnel's actual ingress hostnames) and
+cross-references it against the Access API, so it's the only part of this
+tab gated on an active SSH connection.
 """
 
 import threading
@@ -12,6 +16,7 @@ from tkinter import ttk, messagebox, simpledialog
 
 from ui.refresh_control import RefreshControl
 from core import cloudflare_manager as cf
+from core.tunnel_exposure import parse_ingress_hostnames, compute_exposure
 
 
 class CloudflareTab(tk.Frame):
@@ -24,6 +29,7 @@ class CloudflareTab(tk.Frame):
         self._records   = []
         self._events    = []
         self._tunnels   = []
+        self._exposure  = []
         self._fetching  = False
         self._build_ui()
 
@@ -57,7 +63,7 @@ class CloudflareTab(tk.Frame):
         paned.pack(fill="both", expand=True, padx=16, pady=(0, 10))
 
         self._style = ttk.Style()
-        for name in ("CFDns", "CFEvt", "CFTun"):
+        for name in ("CFDns", "CFEvt", "CFTun", "CFExp"):
             sid = "{}.Treeview".format(name)
             self._style.configure(sid,
                 background=t.card_bg, foreground=t.text,
@@ -180,6 +186,40 @@ class CloudflareTab(tk.Frame):
         tusb.pack(side="right", fill="y")
         self._tun_tree.pack(fill="both", expand=True)
 
+        # ── TUNNEL EXPOSURE ──────────────────────────────────────────────
+        # The only SSH-dependent part of this tab -- reads cloudflared's own
+        # config.yml for the tunnel's real ingress hostnames and cross-checks
+        # them against Access apps, so a hostname that's tunneled but has no
+        # Access policy in front of it (reachable by anyone who knows the
+        # URL) doesn't require a manual audit to notice.
+        exp_fr = tk.Frame(paned, bg=t.bg)
+        paned.add(exp_fr, minsize=100, stretch="always")
+
+        exp_hdr = tk.Frame(exp_fr, bg=t.bg)
+        exp_hdr.pack(fill="x", pady=(6, 4))
+        tk.Label(exp_hdr, text="TUNNEL EXPOSURE", bg=t.bg, fg=t.text_muted,
+                 font=("Segoe UI", 8, "bold")).pack(side="left")
+
+        exp_cols = ("hostname", "access")
+        exp_tree_fr = tk.Frame(exp_fr, bg=t.bg)
+        exp_tree_fr.pack(fill="both", expand=True)
+        self._exp_tree = ttk.Treeview(exp_tree_fr, columns=exp_cols,
+                                       show="headings", style="CFExp.Treeview",
+                                       selectmode="browse", height=4)
+        for col, hdr_txt, w in [
+            ("hostname", "Tunneled Hostname", 280),
+            ("access",   "Access",            140),
+        ]:
+            self._exp_tree.heading(col, text=hdr_txt, anchor="w")
+            self._exp_tree.column(col, width=w, minwidth=40, anchor="w",
+                                  stretch=(col == "hostname"))
+        self._exp_tree.tag_configure("protected", foreground=t.status_running)
+        self._exp_tree.tag_configure("exposed",   foreground=t.status_stopped_text)
+        exsb = ttk.Scrollbar(exp_tree_fr, orient="vertical", command=self._exp_tree.yview)
+        self._exp_tree.configure(yscrollcommand=exsb.set)
+        exsb.pack(side="right", fill="y")
+        self._exp_tree.pack(fill="both", expand=True)
+
     # -----------------------------------------------------------------------
     # LIFECYCLE
     # -----------------------------------------------------------------------
@@ -240,10 +280,30 @@ class CloudflareTab(tk.Frame):
                     tunnels = None
                     tunnels_err = str(e)  # not fatal — show the real cause, not a guess
 
-            self._records = records
-            self._events  = events or []
-            self._tunnels = tunnels or []
-            self.after(0, lambda ee=events_err, te=tunnels_err: self._populate(ee, te))
+            exposure = []
+            exposure_err = None
+            if account_id:
+                if not self.controller.ssh.connected:
+                    exposure_err = "not connected to server (needed to read cloudflared config)"
+                else:
+                    try:
+                        config_text, cat_err, code = self.controller.ssh.run(
+                            "cat /etc/cloudflared/config.yml")
+                        if code != 0 or not config_text.strip():
+                            raise RuntimeError(cat_err or "could not read config.yml")
+                        hostnames = parse_ingress_hostnames(config_text)
+                        apps = cf.list_access_apps(token, account_id)
+                        exposure = compute_exposure(hostnames, [a["domain"] for a in apps])
+                    except Exception as e:
+                        exposure = None
+                        exposure_err = str(e)  # not fatal — show the real cause, not a guess
+
+            self._records  = records
+            self._events   = events or []
+            self._tunnels  = tunnels or []
+            self._exposure = exposure or []
+            self.after(0, lambda ee=events_err, te=tunnels_err, xe=exposure_err:
+                       self._populate(ee, te, xe))
         finally:
             # Must always clear no matter what fails above -- refresh() no-ops
             # while this is True, so an unreset flag permanently wedges the
@@ -256,7 +316,7 @@ class CloudflareTab(tk.Frame):
         self._refresh_btn.config(state="normal")
         self._status.config(text=msg, bg=self.theme.surface_dark, fg=self.theme.status_stopped_text)
 
-    def _populate(self, events_err, tunnels_err):
+    def _populate(self, events_err, tunnels_err, exposure_err):
         t = self.theme
 
         self._dns_tree.delete(*self._dns_tree.get_children())
@@ -280,6 +340,12 @@ class CloudflareTab(tk.Frame):
             self._tun_tree.insert("", "end", values=(
                 tun["name"], tun["status"], tun["connections"]), tags=(tag,))
 
+        self._exp_tree.delete(*self._exp_tree.get_children())
+        for x in self._exposure:
+            tag = "protected" if x["protected"] else "exposed"
+            self._exp_tree.insert("", "end", values=(
+                x["hostname"], "Protected" if x["protected"] else "UNPROTECTED"), tags=(tag,))
+
         self._fetching = False
         self._refresh_btn.config(state="normal")
         self._sync_btn.config(state="normal" if self._records else "disabled")
@@ -292,6 +358,12 @@ class CloudflareTab(tk.Frame):
             notes.append("security events unavailable ({})".format(events_err))
         if tunnels_err:
             notes.append("tunnels unavailable ({})".format(tunnels_err))
+        if exposure_err:
+            notes.append("tunnel exposure unavailable ({})".format(exposure_err))
+        unprotected = sum(1 for x in self._exposure if not x["protected"])
+        if unprotected:
+            notes.append("{} tunneled host{} with no Access policy".format(
+                unprotected, "s" if unprotected != 1 else ""))
         if notes:
             self._status.config(text="Loaded — " + "; ".join(notes),
                                 bg=t.surface_dark, fg=t.yellow)
