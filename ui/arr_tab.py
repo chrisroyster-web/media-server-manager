@@ -5,11 +5,11 @@ Pulls data directly from their REST APIs (no SSH needed).
 """
 
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox
 import threading
 import time
 
-from core.arr_client import api_get as _api_get, api_post as _api_post
+from core.arr_client import api_get as _api_get, api_post as _api_post, api_delete as _api_delete
 
 
 def _fmt_size(mb):
@@ -37,6 +37,7 @@ class ArrTab(tk.Frame):
         self.controller   = controller
         self.theme        = controller.theme
         self._missing_ids = {}   # tree iid -> (app, item_id) for Search Now
+        self._queue_ids   = {}   # tree iid -> (app, item_id) for Remove/Blocklist
         self._cal_days    = tk.IntVar(value=30)
         self._build_ui()
 
@@ -60,7 +61,12 @@ class ArrTab(tk.Frame):
 
         # Stats row
         self._stats_frame = tk.Frame(self, bg=t.bg)
-        self._stats_frame.pack(fill="x", padx=16, pady=(0, 8))
+        self._stats_frame.pack(fill="x", padx=16, pady=(0, 4))
+
+        self._health_lbl = tk.Label(self, text="", bg=t.bg, fg=t.text_muted,
+                                    font=t.font_small, anchor="w", justify="left",
+                                    wraplength=1000)
+        self._health_lbl.pack(fill="x", padx=16, pady=(0, 8))
 
         # Notebook: Queue / Missing / Upcoming
         nb_style = ttk.Style()
@@ -77,10 +83,12 @@ class ArrTab(tk.Frame):
         self._queue_frame   = tk.Frame(self._nb, bg=t.bg)
         self._missing_frame = tk.Frame(self._nb, bg=t.bg)
         self._upcoming_frame= tk.Frame(self._nb, bg=t.bg)
+        self._history_frame = tk.Frame(self._nb, bg=t.bg)
 
         self._nb.add(self._queue_frame,    text="  Queue  ")
         self._nb.add(self._missing_frame,  text="  Missing  ")
         self._nb.add(self._upcoming_frame, text="  Upcoming  ")
+        self._nb.add(self._history_frame,  text="  History  ")
 
         # Count labels shown above each tree (updated in _populate)
         self._queue_count_lbl    = tk.Label(self._queue_frame,    text="",
@@ -92,10 +100,15 @@ class ArrTab(tk.Frame):
         self._upcoming_count_lbl = tk.Label(self._upcoming_frame, text="",
             bg=t.bg, fg=t.text_muted, font=t.font_small, anchor="w")
         self._upcoming_count_lbl.pack(fill="x", padx=8, pady=(4, 0))
+        self._history_count_lbl  = tk.Label(self._history_frame,  text="",
+            bg=t.bg, fg=t.text_muted, font=t.font_small, anchor="w")
+        self._history_count_lbl.pack(fill="x", padx=8, pady=(4, 0))
 
         self._build_queue_tree()
         self._build_missing_tree()
         self._build_upcoming_tree()
+        self._build_history_tree()
+        self._build_queue_toolbar()
         self._build_missing_toolbar()
         self._build_upcoming_toolbar()
 
@@ -163,6 +176,93 @@ class ArrTab(tk.Frame):
             ("quality",   "Quality",   100, "w"),
         ]
         self._missing_tree = self._make_tree(self._missing_frame, cols, hdgs)
+
+    def _build_queue_toolbar(self):
+        """Remove / Remove & Blocklist buttons above the queue treeview."""
+        t = self.theme
+        bar = tk.Frame(self._queue_frame, bg=t.bg)
+        bar.pack(fill="x", pady=(4, 0), before=self._queue_tree)
+
+        self._queue_remove_btn = tk.Button(
+            bar, text="Remove Selected",
+            command=lambda: self._remove_selected_queue(blocklist=False),
+            bg=t.surface_light, fg=t.text, bd=0, relief="flat",
+            font=t.font_small, padx=10, pady=3, cursor="hand2", state="disabled",
+        )
+        self._queue_remove_btn.pack(side="left")
+
+        self._queue_blocklist_btn = tk.Button(
+            bar, text="Remove & Blocklist Selected",
+            command=lambda: self._remove_selected_queue(blocklist=True),
+            bg=t.surface_light, fg=t.status_stopped_text, bd=0, relief="flat",
+            font=t.font_small, padx=10, pady=3, cursor="hand2", state="disabled",
+        )
+        self._queue_blocklist_btn.pack(side="left", padx=(6, 0))
+
+        self._queue_action_status = tk.Label(bar, text="", bg=t.bg,
+                                             fg=t.text_muted, font=t.font_small)
+        self._queue_action_status.pack(side="right", padx=8)
+
+        self._queue_tree.bind("<<TreeviewSelect>>", self._on_queue_select)
+
+    def _on_queue_select(self, _event=None):
+        state = "normal" if self._queue_tree.selection() else "disabled"
+        self._queue_remove_btn.config(state=state)
+        self._queue_blocklist_btn.config(state=state)
+
+    def _remove_selected_queue(self, blocklist: bool):
+        """Remove the selected queue item(s), optionally blocklisting the
+        release so Sonarr/Radarr won't auto-grab it again."""
+        selected = self._queue_tree.selection()
+        if not selected:
+            return
+
+        if blocklist:
+            msg = ("Remove the selected item(s) from the queue AND blocklist "
+                   "the release? Sonarr/Radarr will not automatically grab "
+                   "this exact release again.")
+        else:
+            msg = "Remove the selected item(s) from the queue?"
+        if not messagebox.askyesno("Remove from Queue", msg, parent=self):
+            return
+
+        srv = getattr(self, "_active_srv", {})
+        ok = err = 0
+
+        def worker():
+            nonlocal ok, err
+            for iid in selected:
+                if iid not in self._queue_ids:
+                    continue
+                app, item_id = self._queue_ids[iid]
+                if item_id is None:
+                    continue
+                host   = (srv.get("sonarr_host", "localhost") if app == "sonarr"
+                          else srv.get("radarr_host", "localhost"))
+                port   = (srv.get("sonarr_port", "8989") if app == "sonarr"
+                          else srv.get("radarr_port", "7878"))
+                apikey = (srv.get("sonarr_apikey", "") if app == "sonarr"
+                          else srv.get("radarr_apikey", ""))
+                path = "queue/{}?removeFromClient=true&blocklist={}".format(
+                    item_id, "true" if blocklist else "false")
+                try:
+                    _api_delete(host, port, apikey, path)
+                    ok += 1
+                except Exception:
+                    err += 1
+
+            def _done():
+                msg = "Removed {} item(s)".format(ok)
+                if err:
+                    msg += " ({} failed)".format(err)
+                color = self.theme.status_running if not err else self.theme.yellow
+                self._queue_action_status.config(text=msg, fg=color)
+                self.after(4000, lambda: self._queue_action_status.config(text=""))
+                self.after(800, self._refresh)
+            self.after(0, _done)
+
+        threading.Thread(target=worker, daemon=True).start()
+        self._queue_action_status.config(text="Removing…", fg=self.theme.text_muted)
 
     def _build_missing_toolbar(self):
         """Search Now button + hint above the missing treeview."""
@@ -265,6 +365,26 @@ class ArrTab(tk.Frame):
         ]
         self._upcoming_tree = self._make_tree(self._upcoming_frame, cols, hdgs)
 
+    _HISTORY_EVENT_LABELS = {
+        "grabbed":                "Grabbed",
+        "downloadFolderImported": "Imported",
+        "downloadFailed":         "Failed",
+        "episodeFileDeleted":     "Deleted",
+        "movieFileDeleted":       "Deleted",
+        "episodeFileRenamed":     "Renamed",
+        "movieFileRenamed":       "Renamed",
+    }
+
+    def _build_history_tree(self):
+        cols = ("app", "event", "title", "date")
+        hdgs = [
+            ("app",   "App",   60,  "center"),
+            ("event", "Event", 90,  "w"),
+            ("title", "Title", 380, "w"),
+            ("date",  "Date",  150, "w"),
+        ]
+        self._history_tree = self._make_tree(self._history_frame, cols, hdgs)
+
     # =========================================================
     # REFRESH
     # =========================================================
@@ -295,6 +415,9 @@ class ArrTab(tk.Frame):
                     results[app]["queue"]    = _api_get(host, port, apikey, "queue?pageSize=50")
                     results[app]["missing"]  = _api_get(host, port, apikey,
                         "wanted/missing?pageSize=30&sortKey=airDateUtc&sortDir=desc")
+                    results[app]["health"]   = _api_get(host, port, apikey, "health")
+                    results[app]["history"]  = _api_get(host, port, apikey,
+                        "history?pageSize=50&sortKey=date&sortDir=desc")
                     today = time.strftime("%Y-%m-%d")
                     days  = self._cal_days.get()
                     end   = time.strftime("%Y-%m-%d", time.localtime(time.time() + days * 86400))
@@ -316,6 +439,46 @@ class ArrTab(tk.Frame):
         finally:
             self._fetching = False
 
+    def _stat_card(self, parent, label, value, color):
+        t = self.theme
+        card = tk.Frame(parent, bg=t.card_bg,
+                        highlightbackground=t.card_border, highlightthickness=1)
+        card.pack(side="left", padx=(0, 8), pady=4, ipadx=16, ipady=8)
+        tk.Label(card, text=label, bg=t.card_bg, fg=t.text_muted,
+                 font=t.font_small).pack(anchor="w")
+        tk.Label(card, text=value, bg=t.card_bg, fg=color,
+                 font=("Segoe UI Semibold", 16)).pack(anchor="w")
+
+    def _draw_health_cards(self, results):
+        for w in self._stats_frame.winfo_children():
+            w.destroy()
+        t = self.theme
+        messages = []
+        for app in ("sonarr", "radarr"):
+            issues = results.get(app, {}).get("health")
+            if issues is None:
+                self._stat_card(self._stats_frame, app.capitalize(), "--", t.text_muted)
+                continue
+            errors   = [i for i in issues if (i.get("type") or "").lower() == "error"]
+            warnings = [i for i in issues if (i.get("type") or "").lower() == "warning"]
+            if errors:
+                self._stat_card(self._stats_frame, app.capitalize(),
+                                "{} issue{}".format(len(issues), "s" if len(issues) != 1 else ""),
+                                t.status_stopped_text)
+            elif warnings:
+                self._stat_card(self._stats_frame, app.capitalize(),
+                                "{} issue{}".format(len(issues), "s" if len(issues) != 1 else ""),
+                                t.yellow)
+            else:
+                self._stat_card(self._stats_frame, app.capitalize(), "OK", t.status_running)
+            for i in errors + warnings:
+                messages.append("{}: {}".format(app.capitalize(), i.get("message", "?")))
+
+        if messages:
+            self._health_lbl.config(text=" | ".join(messages), fg=t.yellow)
+        else:
+            self._health_lbl.config(text="")
+
     # =========================================================
     # POPULATE
     # =========================================================
@@ -323,10 +486,14 @@ class ArrTab(tk.Frame):
         self._queue_tree.delete(*self._queue_tree.get_children())
         self._missing_tree.delete(*self._missing_tree.get_children())
         self._upcoming_tree.delete(*self._upcoming_tree.get_children())
+        self._history_tree.delete(*self._history_tree.get_children())
+        self._on_queue_select()   # tree rebuild clears selection -- sync button state
+        self._draw_health_cards(results)
 
-        q_count = m_count = u_count = 0
+        q_count = m_count = u_count = h_count = 0
         row_idx = 0
         self._missing_ids.clear()
+        self._queue_ids.clear()
 
         for app in ("sonarr", "radarr"):
             data      = results.get(app, {})
@@ -367,10 +534,11 @@ class ArrTab(tk.Frame):
                 tag = ("even" if row_idx % 2 == 0 else "odd", app_tag)
                 if status_tag:
                     tag = tag + (status_tag,)
-                self._queue_tree.insert("", "end",
+                iid = self._queue_tree.insert("", "end",
                     values=(app.capitalize(), title, status,
                             pct, _fmt_size(size_mb), protocol, client),
                     tags=tag)
+                self._queue_ids[iid] = (app, item.get("id"))
                 row_idx += 1
                 q_count += 1
 
@@ -446,11 +614,31 @@ class ArrTab(tk.Frame):
                 row_idx += 1
                 u_count += 1
 
+            # --- History ---
+            row_idx = 0
+            history_data = data.get("history", {})
+            for item in history_data.get("records", []):
+                event_type = item.get("eventType", "")
+                event_lbl  = self._HISTORY_EVENT_LABELS.get(event_type, event_type or "?")
+                title      = item.get("sourceTitle", "?")
+                date       = (item.get("date") or "--")
+                if date != "--":
+                    date = date[:19].replace("T", " ")
+                tag = ("even" if row_idx % 2 == 0 else "odd", app_tag)
+                if event_type == "downloadFailed":
+                    tag = tag + ("error",)
+                self._history_tree.insert("", "end",
+                    values=(app.capitalize(), event_lbl, title, date), tags=tag)
+                row_idx += 1
+                h_count += 1
+
         # Update counts + badge
         self._queue_count_lbl.config(
             text="{} in queue".format(q_count) if q_count else "Queue empty")
         self._missing_count_lbl.config(
             text="{} missing".format(m_count) if m_count else "Nothing missing")
+        self._history_count_lbl.config(
+            text="{} recent event(s)".format(h_count) if h_count else "No recent history")
         self._upcoming_count_lbl.config(
             text="{} upcoming".format(u_count) if u_count else "Nothing upcoming")
 

@@ -29,3 +29,13 @@ def api_post(host, port, apikey, path, body=None):
     )
     with urllib.request.urlopen(req, timeout=8) as resp:
         return json.loads(resp.read().decode())
+
+
+def api_delete(host, port, apikey, path):
+    """DELETE /api/v3/<path>. Returns the HTTP status code -- Sonarr/Radarr's
+    queue-delete endpoint returns an empty body, not JSON."""
+    host = host.removeprefix("https://").removeprefix("http://").strip("/").strip()
+    url = "http://{}:{}/api/v3/{}".format(host, port, path)
+    req = urllib.request.Request(url, method="DELETE", headers={"X-Api-Key": apikey})
+    with urllib.request.urlopen(req, timeout=8) as resp:
+        return resp.status
