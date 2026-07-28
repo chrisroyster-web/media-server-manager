@@ -9,6 +9,7 @@ import time
 from ui.refresh_control import RefreshControl
 from ui.empty_state import EmptyState
 from ui.loading_spinner import LoadingSpinner
+from core.forecasting import days_to_full
 
 
 class DashboardTab(tk.Frame):
@@ -132,6 +133,7 @@ class DashboardTab(tk.Frame):
         self.card_cpu  = self._stat_card(r2, "CPU",    "--", self.theme.orange)
         self.card_ram  = self._stat_card(r2, "RAM",    "--", self.theme.purple)
         self.card_disk = self._stat_card(r2, "Disk /", "--", self.theme.cyan)
+        self.card_disk_forecast = self._stat_card(r2, "Disk Full In", "--", self.theme.cyan)
 
         # ---- History Chart ----
         self._section("System History  (CPU & RAM — last 30 readings)")
@@ -814,6 +816,7 @@ class DashboardTab(tk.Frame):
             self._net_prev = (rx_total, tx_total, now)
 
             # -- Persist snapshot to SQLite --
+            _disk_forecast_days = None
             try:
                 cfg = self.controller.config_manager
                 server_id = (cfg.get_active_server() or {}).get("name", "default")
@@ -825,8 +828,18 @@ class DashboardTab(tk.Frame):
                     rx_bps=float(rx_bps),
                     tx_bps=float(tx_bps),
                 )
+                _disk_forecast_days = days_to_full(self.controller.metrics_store, server_id)
             except Exception:
                 pass
+            if _disk_forecast_days is None:
+                _forecast_text, _forecast_color = "--", self.theme.text_muted
+            else:
+                _forecast_text = "{:.0f}d".format(_disk_forecast_days)
+                _forecast_color = (self.theme.status_stopped_text if _disk_forecast_days <= 7
+                                    else self.theme.yellow if _disk_forecast_days <= 30
+                                    else self.theme.cyan)
+            self.after(0, lambda t=_forecast_text, c=_forecast_color:
+                       self.card_disk_forecast.config(text=t, fg=c))
             self.after(0, lambda t=rx_text: self.card_net_rx.config(text=t))
             self.after(0, lambda t=tx_text: self.card_net_tx.config(text=t))
 
@@ -1180,6 +1193,8 @@ class DashboardTab(tk.Frame):
             _ssl_days = getattr(self.controller, "ssl_min_days_to_expiry", None)
             if _ssl_days is not None:
                 _metrics["ssl_days_to_expiry"] = float(_ssl_days)
+            if _disk_forecast_days is not None:
+                _metrics["disk_days_to_full"] = float(_disk_forecast_days)
             self.after(0, lambda m=_metrics: self.controller.fire_metric_alerts(m))
 
             # -- Timestamp --

@@ -186,6 +186,38 @@ class ConfigManager:
             self.config[key] = value
         self.save()
 
+    def list_secrets(self) -> list:
+        """
+        Enumerate every currently-configured secret (global config + every
+        server's own settings), read-only -- no decryption beyond whatever
+        is already plaintext in self.config, no mutation. Reuses the same
+        is_sensitive_key() heuristic _walk_secrets() applies for DPAPI
+        encryption, so this stays in sync with that automatically.
+
+        Returns [{"scope": "Global"|<server name>, "key": key,
+        "path": dotted path, "configured": bool}, ...].
+        """
+        results = []
+
+        def walk(obj, scope, path):
+            if isinstance(obj, dict):
+                for k, v in obj.items():
+                    new_path = "{}.{}".format(path, k) if path else k
+                    if isinstance(v, str) and secure_storage.is_sensitive_key(k):
+                        results.append({"scope": scope, "key": k,
+                                        "path": new_path, "configured": bool(v)})
+                    else:
+                        walk(v, scope, new_path)
+            elif isinstance(obj, list):
+                for item in obj:
+                    walk(item, scope, path)
+
+        walk({k: v for k, v in self.config.items() if k != "servers"}, "Global", "")
+        for server in self.config.get("servers", []):
+            walk(server.get("settings", {}),
+                 server.get("name", "(unnamed server)"), "settings")
+        return results
+
     def update_server_settings(self, updates: dict):
         """Bulk-write multiple keys to the active server's settings in one save."""
         servers = self.config.get("servers", [])
@@ -255,6 +287,31 @@ class ConfigManager:
         self._ss("vuln_scan_baseline", baseline)
 
     # ---------------------------------------------------------
+    # RESTIC BACKUP VERIFY SCHEDULE  (per-server)
+    # ---------------------------------------------------------
+    def get_restic_verify_schedule(self):
+        """'disabled' | 'weekly' -- restic check is slow/IO-heavy, so
+        there's no 'daily' option in the UI (though the raw value isn't
+        validated, so editing config.json directly can still set one)."""
+        return self._gs("restic_verify_schedule", "disabled")
+
+    def set_restic_verify_schedule(self, value):
+        self._ss("restic_verify_schedule", value)
+
+    def get_restic_verify_last_run(self):
+        return self._gs("restic_verify_last_run", "")
+
+    def set_restic_verify_last_run(self, iso_timestamp):
+        self._ss("restic_verify_last_run", iso_timestamp)
+
+    def get_restic_verify_last_result(self):
+        """{"ok": bool, "output": str} of the last check, if any."""
+        return self._gs("restic_verify_last_result", {})
+
+    def set_restic_verify_last_result(self, result):
+        self._ss("restic_verify_last_result", result)
+
+    # ---------------------------------------------------------
     # MEDIA INTEGRITY SCAN SCHEDULE  (per-server)
     # ---------------------------------------------------------
     def get_integrity_scan_schedule(self):
@@ -276,6 +333,42 @@ class ConfigManager:
 
     def set_integrity_scan_baseline(self, baseline):
         self._ss("integrity_scan_baseline", baseline)
+
+    # ---------------------------------------------------------
+    # WATCHDOG AUTO-REMEDIATION  (per-server)
+    # ---------------------------------------------------------
+    def get_service_watchdog_auto_restart(self):
+        return self._gs("service_watchdog_auto_restart", False)
+
+    def set_service_watchdog_auto_restart(self, value: bool):
+        self._ss("service_watchdog_auto_restart", value)
+
+    def get_docker_watchdog_auto_restart(self):
+        return self._gs("docker_watchdog_auto_restart", False)
+
+    def set_docker_watchdog_auto_restart(self, value: bool):
+        self._ss("docker_watchdog_auto_restart", value)
+
+    # ---------------------------------------------------------
+    # PRE-RECREATE CONTAINER BACKUP  (per-server)
+    # ---------------------------------------------------------
+    def get_recreate_backup_enabled(self):
+        return self._gs("recreate_backup_enabled", True)   # default ON -- safety net
+
+    def set_recreate_backup_enabled(self, value: bool):
+        self._ss("recreate_backup_enabled", value)
+
+    def get_recreate_backup_dir(self):
+        return self._gs("recreate_backup_dir", "/opt/media-backups/recreate")
+
+    def set_recreate_backup_dir(self, value):
+        self._ss("recreate_backup_dir", value)
+
+    def get_recreate_backup_keep(self):
+        return self._gs("recreate_backup_keep", 3)
+
+    def set_recreate_backup_keep(self, value):
+        self._ss("recreate_backup_keep", int(value))
 
     # ---------------------------------------------------------
     # RECYCLARR SYNC  (per-server)

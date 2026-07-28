@@ -11,18 +11,17 @@ import threading
 import time
 import os
 import shlex
+from datetime import datetime, timedelta
 
 from ui.refresh_control import RefreshControl
-from core.backup_status import check_backup_jobs
+from core.backup_status import check_backup_jobs, run_restic_check, RESTIC_REPO
 from core.hyperbackup_status import check_hyperbackup_status
 from core.arr_backup_status import check_arr_backup_jobs
 
-# Defined before importing RestoreDialog (which imports this back) so the
-# circular import resolves: by the time restore_dialog.py asks for
-# RESTIC_REPO, this module already has it bound.
-RESTIC_REPO = "/mnt/nas/wsbackup/fullsystem-restic"
-
 from ui.restore_dialog import RestoreDialog
+
+_VERIFY_SCHEDULE_LABELS = {"disabled": "Disabled", "weekly": "Weekly"}
+_VERIFY_SCHEDULE_KEYS   = {v: k for k, v in _VERIFY_SCHEDULE_LABELS.items()}
 
 
 class BackupTab(tk.Frame):
@@ -89,6 +88,29 @@ class BackupTab(tk.Frame):
             command=self._save_and_init_restic)
         t.style_button(self._restic_init_btn)
         self._restic_init_btn.pack(side="left")
+
+        verify_row = tk.Frame(ctrl_frame, bg=t.bg)
+        verify_row.pack(fill="x", pady=(4, 0))
+        tk.Label(verify_row, text="Restic Verify", bg=t.bg,
+                 fg=t.text_muted, font=t.font_small, width=18,
+                 anchor="w").pack(side="left")
+        self._verify_btn = tk.Button(verify_row, text="🔍 Verify Now",
+                                     command=self._run_restic_verify)
+        t.style_button(self._verify_btn)
+        self._verify_btn.pack(side="left", padx=(0, 8))
+
+        self._verify_auto_var = tk.StringVar(
+            value=_VERIFY_SCHEDULE_LABELS.get(
+                self.controller.config_manager.get_restic_verify_schedule(), "Disabled"))
+        ttk.Combobox(verify_row, textvariable=self._verify_auto_var,
+                     values=list(_VERIFY_SCHEDULE_LABELS.values()),
+                     state="readonly", width=9, font=t.font_small
+                     ).pack(side="left", padx=(0, 8))
+        self._verify_auto_var.trace_add("write", self._on_verify_schedule_change)
+
+        self._verify_last_lbl = tk.Label(verify_row, text=self._verify_last_run_text(),
+                                          bg=t.bg, fg=t.text_muted, font=t.font_small)
+        self._verify_last_lbl.pack(side="left", padx=(8, 0))
 
         restore_row = tk.Frame(ctrl_frame, bg=t.bg)
         restore_row.pack(fill="x", pady=(4, 0))
@@ -334,6 +356,73 @@ class BackupTab(tk.Frame):
                 text="Restic setup failed: {}".format(msg[:120]),
                 bg=self.theme.surface_dark, fg=self.theme.status_stopped_text)
             messagebox.showerror("Setup Failed", msg)
+
+    # =========================================================
+    # RESTIC VERIFY  (restic check -- confirms the repo is actually
+    # restorable, not just that a backup job ran recently)
+    # =========================================================
+    def _verify_last_run_text(self):
+        cfg = self.controller.config_manager
+        last_run = cfg.get_restic_verify_last_run()
+        if not last_run:
+            return "Never verified"
+        result = cfg.get_restic_verify_last_result() or {}
+        status = "OK" if result.get("ok") else "FAILED"
+        return "Last verify: {} ({})".format(last_run[:16].replace("T", " "), status)
+
+    def _on_verify_schedule_change(self, *_args):
+        key = _VERIFY_SCHEDULE_KEYS.get(self._verify_auto_var.get(), "disabled")
+        self.controller.config_manager.set_restic_verify_schedule(key)
+
+    def _run_restic_verify(self):
+        if not self.controller.ssh.connected:
+            messagebox.showerror("Not Connected", "Connect to a server first.")
+            return
+        if not messagebox.askyesno(
+                "Verify Restic Repo",
+                "This runs `restic check` against the backup repo to confirm "
+                "it's actually restorable, not just that a backup job ran. "
+                "It can take anywhere from seconds to several minutes "
+                "depending on repo size. Continue?"):
+            return
+
+        self._verify_btn.config(state="disabled", text="Verifying…")
+        self._status.config(text="Verifying restic repo…",
+                            bg=self.theme.blue, fg="#ffffff")
+
+        def worker():
+            result = run_restic_check(self.controller.ssh, RESTIC_REPO)
+            self.after(0, lambda: self._on_restic_verify_done(result, manual=True))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_restic_verify_done(self, result, manual):
+        self._verify_btn.config(state="normal", text="🔍 Verify Now")
+        cfg = self.controller.config_manager
+        cfg.set_restic_verify_last_result(result)
+        cfg.set_restic_verify_last_run(datetime.now().isoformat(timespec="seconds"))
+        self._verify_last_lbl.config(text=self._verify_last_run_text())
+
+        self.controller.audit_log(
+            "restic.verify", RESTIC_REPO,
+            detail="manual" if manual else "scheduled", result="ok" if result["ok"] else "fail")
+
+        self._detail.config(state="normal")
+        self._detail.delete("1.0", "end")
+        self._detail.insert("end", result["output"])
+        self._detail.config(state="disabled")
+
+        if result["ok"]:
+            self._status.config(text="Restic repo verified OK.",
+                                bg=self.theme.surface_dark, fg=self.theme.status_running)
+            if manual:
+                messagebox.showinfo("Verify Complete", "No errors found in the repo.")
+        else:
+            self._status.config(text="Restic verify FAILED -- see detail panel.",
+                                bg=self.theme.surface_dark, fg=self.theme.status_stopped_text)
+            if manual:
+                messagebox.showerror("Verify Failed",
+                                     result["output"][:500] or "Unknown error.")
 
     # =========================================================
     # NAS BACKUP MONITOR SETTINGS

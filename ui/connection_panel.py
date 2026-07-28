@@ -127,6 +127,7 @@ class ConnectionPanel(tk.Frame):
         self.controller._stop_reconnect_watchdog()
         self.controller.ssh.disconnect()
         self.controller.alert_engine.reset()
+        self.controller.remediation_tracker.reset()
         self._log("Disconnected from {0}".format(host), "info")
         self.controller.update_status(False)
 

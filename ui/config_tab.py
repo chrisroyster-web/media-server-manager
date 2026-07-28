@@ -1037,6 +1037,7 @@ class ConfigTab(tk.Frame):
         ("ups_low_battery",    "UPS Low Battery", ""),
         ("ups_battery_charge", "UPS Battery",     "%"),
         ("ssl_days_to_expiry", "SSL Cert Expiry", " days"),
+        ("disk_days_to_full",  "Disk: Days to Full", " days"),
     ]
     _OPERATORS   = [">=", ">", "<=", "<"]
     _OP_LABELS   = {">=": "≥", ">": ">", "<=": "≤", "<": "<"}

@@ -17,6 +17,7 @@ from core.service_manager import ServiceManager
 from core.docker_manager import DockerManager
 from core.tray_manager import TrayManager
 from core.watchdog_registry import WatchdogRegistry
+from core.remediation_tracker import RemediationTracker
 
 from ui.sidebar import Sidebar
 from ui.connection_panel import ConnectionPanel
@@ -68,6 +69,7 @@ from ui.watchstate_tab import WatchstateTab
 from ui.cloudflare_tab import CloudflareTab
 from ui.audit_log_tab import AuditLogTab
 from ui.watchdog_tab import WatchdogTab
+from ui.secrets_audit_tab import SecretsAuditTab
 from ui.vuln_scan_tab import VulnScanTab
 from ui.media_dedup_tab import MediaDedupTab
 from ui.media_integrity_tab import MediaIntegrityTab
@@ -169,6 +171,7 @@ class MediaServerManager(tk.Tk):
         self.docker_manager = DockerManager(self.ssh)
         self.scheduler = TaskScheduler(self.config_manager, self.ssh)
         self.watchdog_registry = WatchdogRegistry()
+        self.remediation_tracker = RemediationTracker()
         self._watchdog_stop    = None
         self._connected        = False   # early init so _update_title is safe
         self._current_tab_name = ""
@@ -312,6 +315,7 @@ class MediaServerManager(tk.Tk):
         self.media_integrity_tab   = MediaIntegrityTab(self.tabs, self)    # 65
         self.recyclarr_tab         = RecyclarrTab(self.tabs, self)         # 66
         self.watchdog_tab          = WatchdogTab(self.tabs, self)          # 67
+        self.secrets_audit_tab     = SecretsAuditTab(self.tabs, self)      # 68
 
         for tab in [
             self.connection_panel, self.quick_commands, self.dashboard_tab,
@@ -345,6 +349,7 @@ class MediaServerManager(tk.Tk):
             self.media_integrity_tab,
             self.recyclarr_tab,
             self.watchdog_tab,
+            self.secrets_audit_tab,
         ]:
             self.tabs.add(tab)
 
@@ -568,6 +573,7 @@ class MediaServerManager(tk.Tk):
                 self.after(13500, self.start_mount_watchdog)
                 self.after(14500, self.start_vpn_watchdog)
                 self.after(15000, self.start_security_watchdog)
+                self.after(15500, self.start_restic_verify_watchdog)
                 self.after(16000, self._check_for_update_bg)
                 self._maybe_show_onboarding()
         except tk.TclError:
@@ -970,6 +976,7 @@ class MediaServerManager(tk.Tk):
             65: lambda: self.media_integrity_tab.on_show(),
             66: lambda: self.recyclarr_tab.on_show(),
             67: lambda: self.watchdog_tab.on_show(),
+            68: lambda: self.secrets_audit_tab.on_show(),
         }
         fn = m.get(idx)
         if fn:
@@ -1131,6 +1138,7 @@ class MediaServerManager(tk.Tk):
         def _do():
             self.after(0, lambda: self.update_status(False))
             self.alert_engine.reset()
+            self.remediation_tracker.reset()
             try:
                 if self.ssh.connected:
                     self.ssh.disconnect()
@@ -1359,12 +1367,43 @@ class MediaServerManager(tk.Tk):
                         if prev == "running" and status in ("stopped", "failed"):
                             self.after(0, lambda n=name, s=status: self.show_toast(
                                 "Service stopped", "{} is now {}".format(n, s), level="error"))
+                            if self.config_manager.get_service_watchdog_auto_restart():
+                                self._attempt_service_remediation(name, service, status)
                         self._svc_prev_states[name] = status
                 except Exception as e:
                     self.watchdog_registry.record_error(NAME, e)
                 else:
                     self.watchdog_registry.record_ok(NAME)
         threading.Thread(target=_loop, daemon=True).start()
+
+    def _attempt_service_remediation(self, name, unit, status):
+        """Auto-restart a service that just transitioned running->stopped/
+        failed, rate-limited via self.remediation_tracker so genuine
+        flapping (not a steady down state -- see start_service_watchdog's
+        edge-trigger) can't restart-loop forever."""
+        target = "service:{}".format(unit)
+        if not self.remediation_tracker.should_attempt(target):
+            info = self.remediation_tracker.last_info(target)
+            self.audit_log(
+                "service.auto_restart", unit,
+                detail="Skipped -- rate limit reached ({} attempts in window)".format(
+                    info["attempts_in_window"] if info else "?"),
+                result="fail")
+            self.after(0, lambda: self.show_toast(
+                "Auto-restart suppressed",
+                "{} is crash-looping -- giving up until it's fixed manually.".format(name),
+                level="error"))
+            return
+        self.remediation_tracker.record_attempt(target)
+        out, err, code = self.service_manager.restart(unit)
+        ok = (code == 0)
+        self.audit_log("service.auto_restart", unit,
+                        detail="Triggered by watchdog after status={}".format(status),
+                        result="ok" if ok else "fail")
+        self.after(0, lambda: self.show_toast(
+            "Auto-restart {}".format("succeeded" if ok else "failed"),
+            "{}: {}".format(name, "Restarted." if ok else (err or "").strip()[:200]),
+            level="info" if ok else "error"))
 
     # ---------------------------------------------------------
     # SABNZBD COMPLETION TOAST
@@ -1454,6 +1493,57 @@ class MediaServerManager(tk.Tk):
                         title = "New vulnerabilities found"
                         body  = ("{} new critical/high CVE{} in: {}".format(
                             total, "s" if total != 1 else "", images))
+                        self.after(0, lambda t=title, b=body: self.show_toast(
+                            t, b, level="error"))
+                        self.notification_manager.send_alert(title, body)
+                except Exception as e:
+                    self.watchdog_registry.record_error(NAME, e)
+                else:
+                    self.watchdog_registry.record_ok(NAME)
+        threading.Thread(target=_loop, daemon=True).start()
+
+    # ---------------------------------------------------------
+    # RESTIC BACKUP VERIFY WATCHDOG
+    # ---------------------------------------------------------
+    def start_restic_verify_watchdog(self):
+        import threading
+        from datetime import datetime, timedelta
+        from core.backup_status import run_restic_check, RESTIC_REPO
+
+        NAME = "Restic Backup Verify"
+        self.watchdog_registry.register(NAME, 1800)
+        stop = threading.Event()
+        self._restic_verify_watchdog_stop = stop
+
+        def _is_due(cfg):
+            schedule = cfg.get_restic_verify_schedule()
+            if schedule == "disabled":
+                return False
+            last_run = cfg.get_restic_verify_last_run()
+            if not last_run:
+                return True
+            try:
+                last = datetime.fromisoformat(last_run)
+            except ValueError:
+                return True
+            return datetime.now() >= last + timedelta(days=7)
+
+        def _loop():
+            while not stop.wait(1800):
+                if not self.ssh.connected:
+                    continue
+                cfg = self.config_manager
+                if not _is_due(cfg):
+                    continue
+                try:
+                    result = run_restic_check(self.ssh, RESTIC_REPO)
+                    cfg.set_restic_verify_last_result(result)
+                    cfg.set_restic_verify_last_run(datetime.now().isoformat(timespec="seconds"))
+                    self.audit_log("restic.verify", RESTIC_REPO, detail="scheduled check",
+                                    result="ok" if result["ok"] else "fail")
+                    if not result["ok"]:
+                        title = "Restic integrity check failed"
+                        body  = result["output"][:800]
                         self.after(0, lambda t=title, b=body: self.show_toast(
                             t, b, level="error"))
                         self.notification_manager.send_alert(title, body)
@@ -1880,12 +1970,52 @@ class MediaServerManager(tk.Tk):
                                 reason = "unhealthy" if newly_unhealthy else status
                                 self.after(0, lambda n=name, r=reason: self.show_toast(
                                     "Container " + r, n, level="error"))
+                                if self.config_manager.get_docker_watchdog_auto_restart():
+                                    self._attempt_docker_remediation(name, reason)
                         self._docker_prev_states[name] = (status, health)
                 except Exception as e:
                     self.watchdog_registry.record_error(NAME, e)
                 else:
                     self.watchdog_registry.record_ok(NAME)
         threading.Thread(target=_loop, daemon=True).start()
+
+    def _attempt_docker_remediation(self, name, reason):
+        """Auto-restart a container that just went unhealthy/dead/restarting,
+        rate-limited via self.remediation_tracker (see
+        _attempt_service_remediation for the flapping-vs-steady-down
+        reasoning -- identical here)."""
+        target = "docker:{}".format(name)
+        if not self.remediation_tracker.should_attempt(target):
+            info = self.remediation_tracker.last_info(target)
+            self.audit_log(
+                "docker.auto_restart", name,
+                detail="Skipped -- rate limit reached ({} attempts in window)".format(
+                    info["attempts_in_window"] if info else "?"),
+                result="fail")
+            self.after(0, lambda: self.show_toast(
+                "Auto-restart suppressed",
+                "{} is crash-looping -- giving up until it's fixed manually.".format(name),
+                level="error"))
+            return
+        self.remediation_tracker.record_attempt(target)
+        result = self.docker_manager.restart(name)
+        # docker_manager.restart() returns a bare string ("Not connected") on
+        # its disconnected path but a 3-tuple otherwise -- this call site only
+        # runs while self.ssh.connected is already True (checked at the top
+        # of this watchdog's loop), but unpack defensively anyway rather than
+        # assume the tuple shape always holds.
+        if isinstance(result, tuple):
+            out, err, code = result
+        else:
+            out, err, code = "", str(result), 1
+        ok = (code == 0)
+        self.audit_log("docker.auto_restart", name,
+                        detail="Triggered by watchdog, reason={}".format(reason),
+                        result="ok" if ok else "fail")
+        self.after(0, lambda: self.show_toast(
+            "Auto-restart {}".format("succeeded" if ok else "failed"),
+            "{}: {}".format(name, "Restarted." if ok else (err or "").strip()[:200]),
+            level="info" if ok else "error"))
 
     # ---------------------------------------------------------
     # DISK / POOL HEALTH WATCHDOG (SMART + ZFS/Btrfs)

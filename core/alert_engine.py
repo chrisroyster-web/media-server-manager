@@ -27,6 +27,7 @@ METRIC_META = {
     "ups_low_battery":    ("UPS Low Battery", ""),
     "ups_battery_charge": ("UPS Battery",     "%"),
     "ssl_days_to_expiry": ("SSL Cert Expiry", " days"),
+    "disk_days_to_full":  ("Disk: Days to Full", " days"),
 }
 
 

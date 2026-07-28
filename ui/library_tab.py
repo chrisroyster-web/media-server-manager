@@ -71,9 +71,9 @@ def _jf_get(host, port, apikey, path):
 
 
 def _plex_get(host, port, token, path):
-    sep = "&" if "?" in path else "?"
-    url = "http://{}:{}{}{}X-Plex-Token={}".format(host, port, path, sep, token)
-    req = urllib.request.Request(url, headers={"Accept": "application/json"})
+    url = "http://{}:{}{}".format(host, port, path)
+    req = urllib.request.Request(url, headers={
+        "X-Plex-Token": token, "Accept": "application/json"})
     with urllib.request.urlopen(req, timeout=12) as r:
         return json.loads(r.read())
 

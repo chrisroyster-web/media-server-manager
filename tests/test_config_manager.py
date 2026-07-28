@@ -148,3 +148,32 @@ def test_minimize_to_tray_on_close_defaults_true_and_round_trips(cfg):
 
     on_disk = json.loads(open(cfg.CONFIG_PATH).read())
     assert on_disk["minimize_to_tray_on_close"] is False
+
+
+def test_list_secrets_finds_global_and_per_server_secrets(cfg):
+    cfg.set("ntfy_token", "global-secret")
+    cfg.upsert_server("myhost")
+    cfg.update_server_settings({"sonarr_apikey": "server-secret"})
+
+    secrets = cfg.list_secrets()
+    by_key = {s["key"]: s for s in secrets}
+
+    assert by_key["ntfy_token"]["scope"] == "Global"
+    assert by_key["ntfy_token"]["configured"] is True
+    assert by_key["sonarr_apikey"]["scope"] == "myhost"
+    assert by_key["sonarr_apikey"]["configured"] is True
+
+
+def test_list_secrets_marks_empty_values_as_not_configured(cfg):
+    cfg.upsert_server("myhost")
+    cfg.update_server_settings({"sonarr_apikey": ""})
+
+    secrets = cfg.list_secrets()
+    entry = next(s for s in secrets if s["key"] == "sonarr_apikey")
+    assert entry["configured"] is False
+
+
+def test_list_secrets_ignores_non_secret_keys(cfg):
+    cfg.set("theme_mode", "light")
+    secrets = cfg.list_secrets()
+    assert all(s["key"] != "theme_mode" for s in secrets)

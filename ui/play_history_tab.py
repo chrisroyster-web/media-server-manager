@@ -250,11 +250,9 @@ class PlayHistoryTab(tk.Frame):
     # ── Plex ──────────────────────────────────────────────────
     def _fetch_plex(self, cfg):
         base = "http://{}:{}".format(cfg.plex_host, cfg.plex_port)
-        url  = ("{}/status/sessions/history/all"
-                "?sort=viewedAt:desc"
-                "&X-Plex-Token={}").format(base, cfg.plex_token)
+        url  = "{}/status/sessions/history/all?sort=viewedAt:desc".format(base)
 
-        data, err = self._http(url)
+        data, err = self._http(url, headers={"X-Plex-Token": cfg.plex_token})
         if err or not data:
             raise RuntimeError(err or "no response")
 

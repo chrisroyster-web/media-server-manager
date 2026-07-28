@@ -1,14 +1,18 @@
 import json
 import datetime
 
-from core.backup_status import check_backup_jobs, _parse_rsync_log, _parse_cron_backup_log
+from core.backup_status import (
+    check_backup_jobs, _parse_rsync_log, _parse_cron_backup_log, run_restic_check,
+)
 
 
 class _FakeSSH:
     def __init__(self):
         self._responses = []  # list of (out, err, code), consumed in order
+        self.commands = []    # every command passed to run(), in order
 
     def run(self, cmd):
+        self.commands.append(cmd)
         if self._responses:
             return self._responses.pop(0)
         return ("", "", 0)
@@ -211,3 +215,43 @@ def test_parse_cron_backup_log_stale_ok_downgrades_to_warn():
     ).format(ts=old_ts)
     job = _parse_cron_backup_log("/var/log/full-backup.log", text)
     assert job["status"] == "warn"
+
+
+# ---------------------------------------------------------------------------
+# run_restic_check
+# ---------------------------------------------------------------------------
+
+def test_run_restic_check_ok_on_zero_exit():
+    ssh = _FakeSSH()
+    ssh._responses = [("no errors were found", "", 0)]
+    result = run_restic_check(ssh, "/mnt/nas/wsbackup/fullsystem-restic")
+    assert result["ok"] is True
+    assert result["code"] == 0
+    assert "no errors" in result["output"]
+
+
+def test_run_restic_check_fails_on_nonzero_exit():
+    ssh = _FakeSSH()
+    ssh._responses = [("", "error: repository contains errors", 1)]
+    result = run_restic_check(ssh, "/mnt/nas/wsbackup/fullsystem-restic")
+    assert result["ok"] is False
+    assert result["code"] == 1
+    assert "repository contains errors" in result["output"]
+
+
+def test_run_restic_check_uses_same_env_prefix_as_check_backup_jobs():
+    ssh = _FakeSSH()
+    ssh._responses = [("", "", 0)]
+    run_restic_check(ssh, "/mnt/nas/wsbackup/fullsystem-restic")
+    cmd = ssh.commands[0]
+    assert "RESTIC_REPOSITORY=/mnt/nas/wsbackup/fullsystem-restic" in cmd
+    assert "RESTIC_PASSWORD_FILE=~/.restic-password" in cmd
+    assert "restic check" in cmd
+    assert "--read-data" not in cmd
+
+
+def test_run_restic_check_read_data_flag_appends_to_command():
+    ssh = _FakeSSH()
+    ssh._responses = [("", "", 0)]
+    run_restic_check(ssh, "/mnt/nas/wsbackup/fullsystem-restic", read_data=True)
+    assert "--read-data" in ssh.commands[0]

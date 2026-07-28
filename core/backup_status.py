@@ -10,6 +10,12 @@ import json
 import shlex
 import datetime
 
+# Path used by all restic backup/verify actions on the server -- lives here
+# (rather than in ui/backup_tab.py, which used to define it purely to dodge
+# a circular import with ui/restore_dialog.py) since this is the module
+# that already owns the restic env-prefix convention.
+RESTIC_REPO = "/mnt/nas/wsbackup/fullsystem-restic"
+
 
 def check_backup_jobs(ssh) -> list:
     """
@@ -140,6 +146,25 @@ def check_backup_jobs(ssh) -> list:
             pass
 
     return jobs
+
+
+def run_restic_check(ssh, repo: str, read_data: bool = False) -> dict:
+    """
+    Runs `restic check` against `repo`, using the same
+    RESTIC_REPOSITORY/RESTIC_PASSWORD_FILE env-prefix pattern
+    check_backup_jobs() already uses -- unprivileged, via plain ssh.run()
+    (the NAS share is mounted 0777, see ui/backup_tab.py's restic-init
+    flow). This validates repo structure/index consistency, not that
+    every data blob is readable -- pass read_data=True for a full
+    data-read pass (much slower/IO-heavier; not exposed in the UI).
+
+    Returns {"ok": bool, "output": str, "code": int}. Never raises.
+    """
+    env = "RESTIC_REPOSITORY={} RESTIC_PASSWORD_FILE=~/.restic-password".format(
+        shlex.quote(repo))
+    flag = " --read-data" if read_data else ""
+    out, err, code = ssh.run("{} restic check{} 2>&1".format(env, flag))
+    return {"ok": code == 0, "output": (out or "") + (err or ""), "code": code}
 
 
 def _parse_rsync_log(path, text):

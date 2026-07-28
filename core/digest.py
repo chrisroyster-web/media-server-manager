@@ -11,6 +11,7 @@ import time
 from core.backup_status import check_backup_jobs
 from core.hyperbackup_status import check_hyperbackup_status
 from core.arr_backup_status import check_arr_backup_jobs
+from core.forecasting import days_to_full
 
 _DAY_SECONDS = 86400
 
@@ -71,6 +72,10 @@ def _metrics_section(metrics_store, server_id: str) -> str:
                 text += " ({}{:.0f}{} vs. yesterday)".format(
                     "+" if delta > 0 else "", delta, unit)
         parts.append(text)
+
+    forecast = days_to_full(metrics_store, server_id)
+    if forecast is not None:
+        parts.append("Disk full in ~{:.0f}d at current growth".format(forecast))
 
     return "Metrics: " + ", ".join(parts) if parts else "Metrics: no data collected yet."
 

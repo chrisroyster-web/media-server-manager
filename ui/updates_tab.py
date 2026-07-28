@@ -12,6 +12,8 @@ import time
 import shlex
 import json
 
+from core.container_backup import backup_container_mounts
+
 
 class UpdatesTab(tk.Frame):
 
@@ -81,6 +83,16 @@ class UpdatesTab(tk.Frame):
                                      command=self._apply_update, state="disabled")
         t.style_button(self._apply_btn)
         self._apply_btn.pack(side="right")
+
+        self._backup_before_recreate_var = tk.BooleanVar(
+            value=self.controller.config_manager.get_recreate_backup_enabled())
+        tk.Checkbutton(
+            docker_hdr, text="Back up bind-mounted data before recreate (recommended)",
+            variable=self._backup_before_recreate_var,
+            command=self._on_backup_before_recreate_toggle,
+            bg=t.bg, fg=t.text, selectcolor=t.surface_dark,
+            activebackground=t.bg, font=t.font_small, bd=0,
+            highlightthickness=0).pack(side="right", padx=(0, 16))
 
         docker_frame = tk.Frame(self, bg=t.bg)
         docker_frame.pack(fill="x", padx=16, pady=(0, 4))
@@ -422,30 +434,83 @@ class UpdatesTab(tk.Frame):
                 "Command that will run:\n\n{}\n\nContinue?"
             ).format(display_name, cmd)
             if messagebox.askyesno("Apply Update — {}".format(display_name), msg, parent=self):
-                self._log("$ {}\n".format(cmd), "warn")
-                threading.Thread(target=self._run_recreate, args=(ssh, cmd, display_name),
+                threading.Thread(target=self._run_recreate_with_backup,
+                                  args=(ssh, container, info, image, display_name),
                                   daemon=True).start()
             else:
                 self._finish_apply(None, "Cancelled.")
         self.after(0, _ask)
 
-    def _run_recreate(self, ssh, cmd, display_name):
+    def _on_backup_before_recreate_toggle(self):
+        self.controller.config_manager.set_recreate_backup_enabled(
+            self._backup_before_recreate_var.get())
+
+    def _run_recreate_with_backup(self, ssh, container, info, image, display_name):
+        """Staged, unlike the old one-shot `stop && rm && run`: stop first
+        (abort cleanly if that fails -- container untouched), then back up
+        bind mounts if enabled (abort BEFORE rm if the backup itself fails
+        -- the container is left stopped-but-not-removed, which is
+        recoverable), then rm && run. This is strictly safer than the old
+        single shell command, which could already leave zero containers
+        running if the connection dropped mid-sequence."""
+        self._log("Stopping {}…\n".format(display_name))
+        _, stop_err, stop_code = ssh.run_sudo("docker stop {}".format(shlex.quote(container)))
+        if stop_code != 0:
+            self.after(0, lambda: self._finish_apply(
+                False, "Stop failed (exit {}) — recreate aborted, container "
+                       "untouched: {}".format(stop_code, stop_err)))
+            return
+
+        backup_note = ""
+        if self.controller.config_manager.get_recreate_backup_enabled():
+            self._log("Backing up bind-mounted data…\n")
+            cfg = self.controller.config_manager
+            result = backup_container_mounts(
+                ssh, container, info,
+                backup_root=cfg.get_recreate_backup_dir(),
+                keep=cfg.get_recreate_backup_keep())
+            self.controller.audit_log(
+                "docker.recreate_backup", container,
+                detail="{} backed up, {} skipped, {} failed -> {}".format(
+                    len(result["backed_up"]), len(result["skipped"]),
+                    len(result["failed"]), result["dir"]),
+                result="ok" if result["ok"] else "fail")
+            self._log(result["output"] + "\n", "ok" if result["ok"] else "err")
+            if not result["ok"]:
+                self.after(0, lambda: self._finish_apply(
+                    False, "Backup failed before recreate — {} is stopped but "
+                           "NOT removed, no data was touched. Fix the backup "
+                           "problem (disk space / permissions on {}) and retry."
+                           .format(display_name, result["dir"])))
+                return
+            if result["backed_up"]:
+                backup_note = " Pre-recreate backup saved to {}.".format(result["dir"])
+
+        run_cmd = self._build_run_cmd(container, info, image)
+        cmd = "docker rm {} && {}".format(shlex.quote(container), run_cmd)
+        self._log("$ {}\n".format(cmd), "warn")
         out, err, code = ssh.run_sudo(cmd)
         self._log((out or "") + (err or "") + "\n", "ok" if code == 0 else "err")
         self.after(0, lambda: self._finish_apply(
             code == 0,
-            "{} recreated on the new image.".format(display_name) if code == 0
-            else "Recreate failed (exit {}) — the old container may already be "
-                 "stopped/removed. Check the output above.".format(code)))
+            "{} recreated on the new image.{}".format(display_name, backup_note)
+            if code == 0 else
+            "Recreate failed (exit {}) — the old container may already be "
+            "stopped/removed. Check the output above.{}".format(code, backup_note)))
 
     def _build_recreate_cmd(self, container, info, image):
+        """Preview text for the confirmation dialog only -- actual execution
+        happens in stages via _run_recreate_with_backup()."""
+        run_cmd = self._build_run_cmd(container, info, image)
+        c = shlex.quote(container)
+        return "docker stop {c} && docker rm {c} && {run}".format(c=c, run=run_cmd)
+
+    def _build_run_cmd(self, container, info, image):
         cfg      = info.get("Config") or {}
         host_cfg = info.get("HostConfig") or {}
         name     = (info.get("Name") or "/" + container).lstrip("/")
 
-        parts = ["docker", "stop", shlex.quote(container),
-                  "&&", "docker", "rm", shlex.quote(container),
-                  "&&", "docker", "run", "-d", "--name", shlex.quote(name)]
+        parts = ["docker", "run", "-d", "--name", shlex.quote(name)]
 
         policy = (host_cfg.get("RestartPolicy") or {}).get("Name") or ""
         if policy and policy != "no":

@@ -53,6 +53,23 @@ class WatchdogTab(tk.Frame):
         self._card_error  = self._stat_card(s_row, "Error",    "--", t.status_stopped)
         self._card_never  = self._stat_card(s_row, "Never Run","--", t.text_muted)
 
+        # Auto-remediation toggles
+        remediation_row = tk.Frame(self, bg=t.bg)
+        remediation_row.pack(fill="x", padx=16, pady=(0, 8))
+        cfg = self.controller.config_manager
+        self._svc_auto_var = tk.BooleanVar(value=cfg.get_service_watchdog_auto_restart())
+        tk.Checkbutton(remediation_row, text="Auto-restart stopped/failed services",
+                       variable=self._svc_auto_var, command=self._on_svc_auto_toggle,
+                       bg=t.bg, fg=t.text, selectcolor=t.surface_dark,
+                       activebackground=t.bg, font=t.font_small, bd=0,
+                       highlightthickness=0).pack(side="left", padx=(0, 16))
+        self._docker_auto_var = tk.BooleanVar(value=cfg.get_docker_watchdog_auto_restart())
+        tk.Checkbutton(remediation_row, text="Auto-restart unhealthy/dead containers",
+                       variable=self._docker_auto_var, command=self._on_docker_auto_toggle,
+                       bg=t.bg, fg=t.text, selectcolor=t.surface_dark,
+                       activebackground=t.bg, font=t.font_small, bd=0,
+                       highlightthickness=0).pack(side="left")
+
         # Table
         tbl_frame = tk.Frame(self, bg=t.bg)
         tbl_frame.pack(fill="both", expand=True, padx=16, pady=(0, 8))
@@ -95,6 +112,36 @@ class WatchdogTab(tk.Frame):
         vsb.pack(side="right", fill="y")
         self._tree.pack(fill="both", expand=True)
 
+        # Recent Auto-Remediation
+        tk.Label(self, text="Recent Auto-Remediation", bg=t.bg, fg=t.text_muted,
+                 font=t.font_small).pack(anchor="w", padx=16, pady=(4, 0))
+        rem_frame = tk.Frame(self, bg=t.bg)
+        rem_frame.pack(fill="x", padx=16, pady=(0, 8))
+
+        style.configure("Remediation.Treeview",
+                        background=t.card_bg, foreground=t.text,
+                        fieldbackground=t.card_bg, borderwidth=0,
+                        rowheight=26, font=t.font_mono)
+        style.configure("Remediation.Treeview.Heading",
+                        background=t.surface_dark, foreground=t.text_muted,
+                        font=t.font_small, relief="flat", borderwidth=0)
+
+        rem_cols = ("target", "last_attempt", "attempts_in_window", "backing_off")
+        self._rem_tree = ttk.Treeview(rem_frame, columns=rem_cols,
+                                       show="headings", style="Remediation.Treeview",
+                                       height=4)
+        for col, w, lbl, anchor in [
+            ("target",              220, "Target",              "w"),
+            ("last_attempt",        150, "Last Attempt",        "w"),
+            ("attempts_in_window",  120, "Attempts (30 min)",   "center"),
+            ("backing_off",         100, "Backing Off",         "center"),
+        ]:
+            self._rem_tree.heading(col, text=lbl, anchor=anchor)
+            self._rem_tree.column(col, width=w, minwidth=50,
+                                  anchor=anchor, stretch=(col == "target"))
+        self._rem_tree.tag_configure("backing_off", foreground=t.status_stopped_text)
+        self._rem_tree.pack(fill="x")
+
         # Status bar
         self._status = tk.Label(self, text="", bg=t.surface_dark, fg=t.text_muted,
                                 font=t.font_small, anchor="w")
@@ -120,10 +167,42 @@ class WatchdogTab(tk.Frame):
     def refresh(self):
         snapshot = self.controller.watchdog_registry.snapshot()
         self._populate(snapshot)
+        self._populate_remediation(self.controller.remediation_tracker.snapshot())
         self._last_lbl.config(text="Updated {}".format(time.strftime("%H:%M:%S")))
 
     def on_show(self):
         self.refresh()
+
+    def _on_svc_auto_toggle(self):
+        enabled = self._svc_auto_var.get()
+        self.controller.config_manager.set_service_watchdog_auto_restart(enabled)
+        self.controller.audit_log("watchdog.auto_restart_toggle", "service",
+                                  detail="enabled={}".format(enabled))
+
+    def _on_docker_auto_toggle(self):
+        enabled = self._docker_auto_var.get()
+        self.controller.config_manager.set_docker_watchdog_auto_restart(enabled)
+        self.controller.audit_log("watchdog.auto_restart_toggle", "docker",
+                                  detail="enabled={}".format(enabled))
+
+    def _populate_remediation(self, snapshot):
+        """snapshot() returns raw per-target state ({"attempts": [ts, ...],
+        "backoff_until": ts}) rather than the friendlier last_info() shape,
+        since it needs to stay a plain copy of internal state (see
+        RemediationTracker.snapshot()'s own docstring/tests) -- derive the
+        display fields here instead."""
+        self._rem_tree.delete(*self._rem_tree.get_children())
+        now = time.time()
+        for target, entry in sorted(snapshot.items()):
+            attempts = entry.get("attempts") or []
+            last_attempt_text = self._fmt_ago(attempts[-1]) if attempts else "--"
+            backing_off = now < entry.get("backoff_until", 0)
+            self._rem_tree.insert("", "end", values=(
+                target,
+                last_attempt_text,
+                len(attempts),
+                "yes" if backing_off else "no",
+            ), tags=("backing_off",) if backing_off else ())
 
     def _classify(self, name, entry):
         interval_s = entry.get("interval_s") or 0
