@@ -78,6 +78,7 @@ class SecretsAuditTab(tk.Frame):
         self._tree.tag_configure("url",     foreground=t.status_stopped_text)
         self._tree.tag_configure("header",  foreground=t.status_running)
         self._tree.tag_configure("unknown", foreground=t.text_muted)
+        self._tree.tag_configure("n/a",     foreground=t.text_dim)
 
         vsb = tk.Scrollbar(tbl_frame, orient="vertical", command=self._tree.yview)
         self._tree.configure(yscrollcommand=vsb.set)
