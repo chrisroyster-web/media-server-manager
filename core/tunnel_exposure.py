@@ -39,3 +39,17 @@ def compute_exposure(tunneled_hostnames: list, access_domains: list) -> list:
     protected_hosts = {d.split("/", 1)[0] for d in access_domains}
     return [{"hostname": h, "protected": h in protected_hosts}
             for h in tunneled_hostnames]
+
+
+def diff_new_unprotected(baseline: list, current_unprotected: list) -> tuple:
+    """baseline: [hostname, ...] already known-unprotected as of the last
+    check. current_unprotected: [hostname, ...] unprotected right now.
+    Returns (new_baseline, newly_unprotected) -- newly_unprotected only
+    contains hostnames not already in baseline, so an intentionally-public
+    hostname (e.g. a status page) doesn't re-alert forever. new_baseline
+    reflects current state (not accumulated), so a hostname that gets
+    re-exposed after being fixed alerts again -- same semantics as
+    core/vuln_scanner.py's diff_new_findings()."""
+    new_baseline = list(current_unprotected)
+    newly = [h for h in current_unprotected if h not in baseline]
+    return new_baseline, newly

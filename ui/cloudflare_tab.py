@@ -18,6 +18,9 @@ from ui.refresh_control import RefreshControl
 from core import cloudflare_manager as cf
 from core.tunnel_exposure import parse_ingress_hostnames, compute_exposure
 
+_EXPOSURE_SCHEDULE_LABELS = {"disabled": "Disabled", "daily": "Daily", "weekly": "Weekly"}
+_EXPOSURE_SCHEDULE_KEYS   = {v: k for k, v in _EXPOSURE_SCHEDULE_LABELS.items()}
+
 
 class CloudflareTab(tk.Frame):
 
@@ -200,6 +203,23 @@ class CloudflareTab(tk.Frame):
         tk.Label(exp_hdr, text="TUNNEL EXPOSURE", bg=t.bg, fg=t.text_muted,
                  font=("Segoe UI", 8, "bold")).pack(side="left")
 
+        cfg = self.controller.config_manager
+        last_run = cfg.get_tunnel_exposure_last_run()
+        last_text = "Last checked: {}".format(last_run[:16].replace("T", " ")) \
+            if last_run else "Never checked"
+        tk.Label(exp_hdr, text=last_text, bg=t.bg, fg=t.text_dim,
+                 font=t.font_small).pack(side="right", padx=(0, 8))
+
+        self._exposure_auto_var = tk.StringVar(
+            value=_EXPOSURE_SCHEDULE_LABELS.get(cfg.get_tunnel_exposure_schedule(), "Disabled"))
+        ttk.Combobox(exp_hdr, textvariable=self._exposure_auto_var,
+                     values=list(_EXPOSURE_SCHEDULE_LABELS.values()),
+                     state="readonly", width=9, font=t.font_small
+                     ).pack(side="right", padx=(4, 0))
+        tk.Label(exp_hdr, text="Auto-check:", bg=t.bg, fg=t.text_muted,
+                 font=t.font_small).pack(side="right")
+        self._exposure_auto_var.trace_add("write", self._on_exposure_schedule_change)
+
         exp_cols = ("hostname", "access")
         exp_tree_fr = tk.Frame(exp_fr, bg=t.bg)
         exp_tree_fr.pack(fill="both", expand=True)
@@ -229,6 +249,10 @@ class CloudflareTab(tk.Frame):
     def _on_dns_select(self, _event=None):
         state = "normal" if self._dns_tree.selection() else "disabled"
         self._edit_btn.config(state=state)
+
+    def _on_exposure_schedule_change(self, *_args):
+        key = _EXPOSURE_SCHEDULE_KEYS.get(self._exposure_auto_var.get(), "disabled")
+        self.controller.config_manager.set_tunnel_exposure_schedule(key)
 
     # -----------------------------------------------------------------------
     # REFRESH

@@ -312,6 +312,30 @@ class ConfigManager:
         self._ss("restic_verify_last_result", result)
 
     # ---------------------------------------------------------
+    # CLOUDFLARE TUNNEL EXPOSURE AUDIT SCHEDULE  (per-server)
+    # ---------------------------------------------------------
+    def get_tunnel_exposure_schedule(self):
+        """'disabled' | 'daily' | 'weekly'"""
+        return self._gs("tunnel_exposure_schedule", "disabled")
+
+    def set_tunnel_exposure_schedule(self, value):
+        self._ss("tunnel_exposure_schedule", value)
+
+    def get_tunnel_exposure_last_run(self):
+        return self._gs("tunnel_exposure_last_run", "")
+
+    def set_tunnel_exposure_last_run(self, iso_timestamp):
+        self._ss("tunnel_exposure_last_run", iso_timestamp)
+
+    def get_tunnel_exposure_baseline(self):
+        """[hostname, ...] -- tunneled hostnames already known unprotected
+        as of the last check."""
+        return self._gs("tunnel_exposure_baseline", [])
+
+    def set_tunnel_exposure_baseline(self, baseline):
+        self._ss("tunnel_exposure_baseline", baseline)
+
+    # ---------------------------------------------------------
     # MEDIA INTEGRITY SCAN SCHEDULE  (per-server)
     # ---------------------------------------------------------
     def get_integrity_scan_schedule(self):

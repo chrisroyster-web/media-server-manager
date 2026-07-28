@@ -574,6 +574,7 @@ class MediaServerManager(tk.Tk):
                 self.after(14500, self.start_vpn_watchdog)
                 self.after(15000, self.start_security_watchdog)
                 self.after(15500, self.start_restic_verify_watchdog)
+                self.after(16000, self.start_tunnel_exposure_watchdog)
                 self.after(16000, self._check_for_update_bg)
                 self._maybe_show_onboarding()
         except tk.TclError:
@@ -1544,6 +1545,89 @@ class MediaServerManager(tk.Tk):
                     if not result["ok"]:
                         title = "Restic integrity check failed"
                         body  = result["output"][:800]
+                        self.after(0, lambda t=title, b=body: self.show_toast(
+                            t, b, level="error"))
+                        self.notification_manager.send_alert(title, body)
+                except Exception as e:
+                    self.watchdog_registry.record_error(NAME, e)
+                else:
+                    self.watchdog_registry.record_ok(NAME)
+        threading.Thread(target=_loop, daemon=True).start()
+
+    # ---------------------------------------------------------
+    # CLOUDFLARE TUNNEL EXPOSURE WATCHDOG
+    # ---------------------------------------------------------
+    def start_tunnel_exposure_watchdog(self):
+        import threading
+        from datetime import datetime, timedelta
+        from core import cloudflare_manager as cf
+        from core.tunnel_exposure import (
+            parse_ingress_hostnames, compute_exposure, diff_new_unprotected)
+
+        NAME = "Cloudflare Tunnel Exposure"
+        self.watchdog_registry.register(NAME, 1800)
+        stop = threading.Event()
+        self._tunnel_exposure_watchdog_stop = stop
+
+        def _is_due(cfg):
+            schedule = cfg.get_tunnel_exposure_schedule()
+            if schedule == "disabled":
+                return False
+            last_run = cfg.get_tunnel_exposure_last_run()
+            if not last_run:
+                return True
+            try:
+                last = datetime.fromisoformat(last_run)
+            except ValueError:
+                return True
+            days = 1 if schedule == "daily" else 7
+            return datetime.now() >= last + timedelta(days=days)
+
+        def _loop():
+            while not stop.wait(1800):
+                if not self.ssh.connected:
+                    continue
+                cfg = self.config_manager
+                if not _is_due(cfg):
+                    continue
+                token = cfg.cloudflare_api_token
+                account_id = cfg.cloudflare_account_id
+                if not token or not account_id:
+                    continue
+                try:
+                    # First-ever run must establish the baseline silently
+                    # rather than alerting on every currently-unprotected
+                    # host you already know about and left public on
+                    # purpose (e.g. a status page) -- mirrors the "don't
+                    # alert on first sighting" property
+                    # core/vuln_scanner.py's diff_new_findings() gets for
+                    # free from its per-image first-seen check.
+                    had_run_before = bool(cfg.get_tunnel_exposure_last_run())
+
+                    config_text, cat_err, code = self.ssh.run(
+                        "cat /etc/cloudflared/config.yml")
+                    if code != 0 or not config_text.strip():
+                        raise RuntimeError(cat_err or "could not read config.yml")
+                    hostnames = parse_ingress_hostnames(config_text)
+                    apps = cf.list_access_apps(token, account_id)
+                    exposure = compute_exposure(hostnames, [a["domain"] for a in apps])
+                    unprotected = [x["hostname"] for x in exposure if not x["protected"]]
+
+                    new_baseline, newly_unprotected = diff_new_unprotected(
+                        cfg.get_tunnel_exposure_baseline(), unprotected)
+                    cfg.set_tunnel_exposure_baseline(new_baseline)
+                    cfg.set_tunnel_exposure_last_run(
+                        datetime.now().isoformat(timespec="seconds"))
+                    self.audit_log(
+                        "cloudflare.tunnel_exposure_check", "tunnel",
+                        detail="{} unprotected of {} tunneled".format(
+                            len(unprotected), len(hostnames)),
+                        result="ok" if not newly_unprotected else "fail")
+
+                    if had_run_before and newly_unprotected:
+                        title = "Tunneled host(s) with no Access policy"
+                        body  = "{} newly unprotected: {}".format(
+                            len(newly_unprotected), ", ".join(sorted(newly_unprotected)))
                         self.after(0, lambda t=title, b=body: self.show_toast(
                             t, b, level="error"))
                         self.notification_manager.send_alert(title, body)
