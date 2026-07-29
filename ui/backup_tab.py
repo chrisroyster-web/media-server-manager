@@ -112,6 +112,13 @@ class BackupTab(tk.Frame):
                                           bg=t.bg, fg=t.text_muted, font=t.font_small)
         self._verify_last_lbl.pack(side="left", padx=(8, 0))
 
+        self._verify_deep_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(verify_row, text="Deep verify (read all data, slow)",
+                       variable=self._verify_deep_var,
+                       bg=t.bg, fg=t.text, selectcolor=t.surface_dark,
+                       activebackground=t.bg, font=t.font_small, bd=0,
+                       highlightthickness=0).pack(side="left", padx=(16, 0))
+
         restore_row = tk.Frame(ctrl_frame, bg=t.bg)
         restore_row.pack(fill="x", pady=(4, 0))
         tk.Label(restore_row, text="Bare-Metal Restore", bg=t.bg,
@@ -378,12 +385,23 @@ class BackupTab(tk.Frame):
         if not self.controller.ssh.connected:
             messagebox.showerror("Not Connected", "Connect to a server first.")
             return
-        if not messagebox.askyesno(
-                "Verify Restic Repo",
-                "This runs `restic check` against the backup repo to confirm "
-                "it's actually restorable, not just that a backup job ran. "
-                "It can take anywhere from seconds to several minutes "
-                "depending on repo size. Continue?"):
+        if not self.controller.restic_verify_lock.acquire(blocking=False):
+            messagebox.showinfo(
+                "Verify In Progress",
+                "A restic verify is already running (scheduled or manual) -- "
+                "try again once it finishes.")
+            return
+
+        deep = self._verify_deep_var.get()
+        msg = ("This runs `restic check` against the backup repo to confirm "
+               "it's actually restorable, not just that a backup job ran. ")
+        if deep:
+            msg += ("This is a DEEP verify -- it reads every data block in "
+                     "the repo and can take a long time for a large "
+                     "repository. ")
+        msg += "Continue?"
+        if not messagebox.askyesno("Verify Restic Repo", msg, parent=self):
+            self.controller.restic_verify_lock.release()
             return
 
         self._verify_btn.config(state="disabled", text="Verifying…")
@@ -391,7 +409,10 @@ class BackupTab(tk.Frame):
                             bg=self.theme.blue, fg="#ffffff")
 
         def worker():
-            result = run_restic_check(self.controller.ssh, RESTIC_REPO)
+            try:
+                result = run_restic_check(self.controller.ssh, RESTIC_REPO, read_data=deep)
+            finally:
+                self.controller.restic_verify_lock.release()
             self.after(0, lambda: self._on_restic_verify_done(result, manual=True))
 
         threading.Thread(target=worker, daemon=True).start()

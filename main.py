@@ -172,6 +172,11 @@ class MediaServerManager(tk.Tk):
         self.scheduler = TaskScheduler(self.config_manager, self.ssh)
         self.watchdog_registry = WatchdogRegistry()
         self.remediation_tracker = RemediationTracker()
+        # Best-effort mutual exclusion between the manual "Verify Now" button
+        # and the scheduled watchdog -- not a data-safety mechanism (restic
+        # itself handles concurrent-read safety), just avoids both running at
+        # once and double-logging/double-notifying about the same check.
+        self.restic_verify_lock = threading.Lock()
         self._watchdog_stop    = None
         self._connected        = False   # early init so _update_title is safe
         self._current_tab_name = ""
@@ -1536,6 +1541,11 @@ class MediaServerManager(tk.Tk):
                 cfg = self.config_manager
                 if not _is_due(cfg):
                     continue
+                # A manual "Verify Now" is already running -- skip this cycle
+                # silently rather than running two checks against the same
+                # repo at once; it'll be due again next poll if still needed.
+                if not self.restic_verify_lock.acquire(blocking=False):
+                    continue
                 try:
                     result = run_restic_check(self.ssh, RESTIC_REPO)
                     cfg.set_restic_verify_last_result(result)
@@ -1552,6 +1562,8 @@ class MediaServerManager(tk.Tk):
                     self.watchdog_registry.record_error(NAME, e)
                 else:
                     self.watchdog_registry.record_ok(NAME)
+                finally:
+                    self.restic_verify_lock.release()
         threading.Thread(target=_loop, daemon=True).start()
 
     # ---------------------------------------------------------
