@@ -1,6 +1,6 @@
 import time
 
-from core.forecasting import days_to_full
+from core.forecasting import days_to_full, disk_trend
 
 
 class _FakeMetricsStore:
@@ -63,3 +63,36 @@ def test_lookback_window_excludes_older_points():
     store = _FakeMetricsStore(flat + growing)
     result = days_to_full(store, "srv", lookback_days=9)
     assert result is not None
+
+
+def test_disk_trend_returns_none_with_too_few_points():
+    store = _FakeMetricsStore(_rows_over_days([50, 52, 54]))
+    assert disk_trend(store, "srv", min_points=5) is None
+
+
+def test_disk_trend_returns_points_and_fit_for_clean_series():
+    store = _FakeMetricsStore(_rows_over_days([50 + i for i in range(10)]))
+    trend = disk_trend(store, "srv")
+    assert trend is not None
+    assert len(trend["points"]) == 10
+    assert abs(trend["slope"] - 1.0) < 0.01
+    assert abs(trend["intercept"] - 50.0) < 0.01
+    assert trend["points"][-1][1] == 59
+
+
+def test_disk_trend_does_not_return_none_for_declining_trend():
+    # Unlike days_to_full(), disk_trend() still has real historical points
+    # to chart even when the trend is declining -- only days_to_full()
+    # treats a non-positive slope as "nothing to forecast".
+    store = _FakeMetricsStore(_rows_over_days([70, 68, 66, 64, 62, 60]))
+    trend = disk_trend(store, "srv")
+    assert trend is not None
+    assert trend["slope"] < 0
+    assert days_to_full(store, "srv") is None
+
+
+def test_disk_trend_does_not_return_none_for_flat_trend():
+    store = _FakeMetricsStore(_rows_over_days([60] * 10))
+    trend = disk_trend(store, "srv")
+    assert trend is not None
+    assert abs(trend["slope"]) < 0.01

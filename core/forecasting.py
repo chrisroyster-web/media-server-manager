@@ -26,17 +26,23 @@ def _linreg_slope_intercept(xs, ys):
     return slope, mean_y - slope * mean_x
 
 
-def days_to_full(metrics_store, server_id: str, lookback_days: int = 14,
-                  min_points: int = 5):
+def disk_trend(metrics_store, server_id: str, lookback_days: int = 14,
+                min_points: int = 5):
     """
     Fits a line to root-filesystem disk-% history over the last
     `lookback_days` (capped by metrics_store's own 30-day retention, see
-    prune_old()) and projects forward to 100%.
+    prune_old()). Returns the historical points and fit parameters (for
+    charting) rather than just the scalar forecast -- see days_to_full()
+    for that.
 
-    Returns days-from-now as a float, or None if there's not enough
-    history (fewer than `min_points` samples), the trend is flat or
-    shrinking (nothing to forecast), or the fit is degenerate. Returns
-    0.0 if disk usage is already at or above 100%.
+    Returns {"points": [(ts, disk), ...], "slope": float,
+    "intercept": float, "t0": int} where disk = slope*(ts-t0)/86400 +
+    intercept, or None if there's fewer than `min_points` samples or the
+    fit is degenerate.
+
+    Does NOT gate on slope <= 0 -- a flat/declining trend still has valid
+    historical points to plot, it just has nothing to project forward.
+    Callers decide what that means for their use case.
     """
     since_ts = int(time.time()) - lookback_days * 86400
     rows = [r for r in metrics_store.query_metrics(server_id, limit=100000, since_ts=since_ts)
@@ -52,12 +58,28 @@ def days_to_full(metrics_store, server_id: str, lookback_days: int = 14,
     if fit is None:
         return None
     slope, intercept = fit
-    if slope <= 0:
-        return None   # flat or shrinking -- nothing to forecast
+    return {"points": [(r["ts"], r["disk"]) for r in rows],
+            "slope": slope, "intercept": intercept, "t0": t0}
 
-    current = ys[-1]
+
+def days_to_full(metrics_store, server_id: str, lookback_days: int = 14,
+                  min_points: int = 5):
+    """
+    Projects disk_trend()'s fit forward to 100% full.
+
+    Returns days-from-now as a float, or None if there's not enough
+    history (fewer than `min_points` samples), the trend is flat or
+    shrinking (nothing to forecast), or the fit is degenerate. Returns
+    0.0 if disk usage is already at or above 100%.
+    """
+    trend = disk_trend(metrics_store, server_id, lookback_days, min_points)
+    if trend is None or trend["slope"] <= 0:
+        return None   # not enough history, or flat/shrinking -- nothing to forecast
+
+    current = trend["points"][-1][1]
     if current >= 100:
         return 0.0
 
-    days_from_t0 = (100 - intercept) / slope
-    return max(0.0, days_from_t0 - xs[-1])
+    last_x = (trend["points"][-1][0] - trend["t0"]) / 86400.0
+    days_from_t0 = (100 - trend["intercept"]) / trend["slope"]
+    return max(0.0, days_from_t0 - last_x)

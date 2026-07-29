@@ -9,7 +9,7 @@ import time
 from ui.refresh_control import RefreshControl
 from ui.empty_state import EmptyState
 from ui.loading_spinner import LoadingSpinner
-from core.forecasting import days_to_full
+from core.forecasting import days_to_full, disk_trend
 
 
 class DashboardTab(tk.Frame):
@@ -27,6 +27,7 @@ class DashboardTab(tk.Frame):
         self._net_prev    = None   # (rx_bytes, tx_bytes, timestamp)
         self._history     = collections.deque(maxlen=30)  # {cpu, ram} dicts
         self._net_history = collections.deque(maxlen=30)  # {rx_bps, tx_bps} dicts
+        self._disk_trend_cache = None   # core.forecasting.disk_trend() result, refreshed per fetch
         self._build_ui()
         self._seed_history_from_db()
 
@@ -157,6 +158,17 @@ class DashboardTab(tk.Frame):
                                     height=130, highlightthickness=0)
         self.net_canvas.pack(fill="x", padx=0, pady=0)
         self.net_canvas.bind("<Configure>", lambda e: self._redraw_net_chart())
+
+        # ---- Disk History & Forecast Chart ----
+        self._section("Disk History & Forecast  (last 14 days)")
+        disk_wrap = tk.Frame(self.body, bg=self.theme.surface_dark,
+                             highlightbackground=self.theme.card_border,
+                             highlightthickness=1)
+        disk_wrap.pack(fill="x", padx=16, pady=(0, 8))
+        self.disk_canvas = tk.Canvas(disk_wrap, bg=self.theme.surface_dark,
+                                     height=160, highlightthickness=0)
+        self.disk_canvas.pack(fill="x", padx=0, pady=0)
+        self.disk_canvas.bind("<Configure>", lambda e: self._redraw_disk_chart())
 
         # ---- Network I/O ----
         self._section("Network I/O")
@@ -664,6 +676,94 @@ class DashboardTab(tk.Frame):
                           anchor="nw", fill=t.text_secondary,
                           font=("Segoe UI", 10, "bold"))
 
+    def _redraw_disk_chart(self):
+        c = self.disk_canvas
+        w = c.winfo_width()
+        h = c.winfo_height()
+        if w < 20 or h < 20:
+            return
+
+        c.delete("all")
+        t = self.theme
+
+        PAD_L = 44
+        PAD_R = 14
+        PAD_T = 12
+        PAD_B = 22
+
+        plot_w = w - PAD_L - PAD_R
+        plot_h = h - PAD_T - PAD_B
+
+        # ---- Grid lines and Y labels (fixed 0-100%, same as CPU/RAM chart) ----
+        for pct in (0, 25, 50, 75, 100):
+            y = PAD_T + plot_h * (1.0 - pct / 100.0)
+            c.create_line(PAD_L, y, w - PAD_R, y,
+                          fill=t.card_border, dash=(3, 5))
+            c.create_text(PAD_L - 6, y, text="{:3d}%".format(pct),
+                          anchor="e", fill=t.text_muted,
+                          font=("Consolas", 10))
+
+        trend = self._disk_trend_cache
+        if not trend or len(trend["points"]) < 2:
+            c.create_text(w // 2, h // 2,
+                          text="Collecting data — need at least 5 days of history",
+                          fill=t.text_secondary, font=t.font_small)
+            return
+
+        points = trend["points"]
+        slope, intercept, t0 = trend["slope"], trend["intercept"], trend["t0"]
+        t_min = points[0][0]
+        t_now = points[-1][0]
+
+        # Project forward to the 100%-full crossing, capped at 30 days past
+        # "now" so a barely-growing disk doesn't stretch the chart's x-axis
+        # out to some absurd future date.
+        t_max = t_now
+        crossing_ts = None
+        if slope > 0:
+            days_from_t0 = (100 - intercept) / slope
+            crossing_ts = t0 + days_from_t0 * 86400
+            t_max = min(crossing_ts, t_now + 30 * 86400)
+        if t_max <= t_min:
+            t_max = t_min + 86400   # degenerate span guard
+
+        def _x(ts):
+            frac = (ts - t_min) / float(t_max - t_min)
+            return PAD_L + max(0.0, min(1.0, frac)) * plot_w
+
+        def _y(pct):
+            return PAD_T + plot_h * (1.0 - max(0.0, min(100.0, pct)) / 100.0)
+
+        # ---- X-axis date ticks ----
+        num_ticks = 5
+        for i in range(num_ticks + 1):
+            ts = t_min + (t_max - t_min) * (i / num_ticks)
+            x = _x(ts)
+            c.create_line(x, h - PAD_B, x, h - PAD_B + 4, fill=t.card_border)
+            c.create_text(x, h - PAD_B + 6, text=time.strftime("%m/%d", time.localtime(ts)),
+                          anchor="n", fill=t.text_secondary, font=("Consolas", 10))
+
+        # ---- Solid line: actual history ----
+        actual_pts = [coord for ts, disk in points for coord in (_x(ts), _y(disk))]
+        if len(points) >= 2:
+            c.create_line(*actual_pts, fill=t.cyan, width=2,
+                          smooth=True, joinstyle="round")
+        lx, ly = _x(t_now), _y(points[-1][1])
+        c.create_oval(lx - 3, ly - 3, lx + 3, ly + 3,
+                      fill=t.cyan, outline=t.surface_dark, width=1)
+
+        # ---- Dashed line: projected trend, only if actually growing ----
+        if slope > 0 and crossing_ts is not None:
+            proj_disk_at_tmax = slope * ((t_max - t0) / 86400.0) + intercept
+            px, py = _x(t_max), _y(proj_disk_at_tmax)
+            c.create_line(lx, ly, px, py, fill=t.cyan, width=2, dash=(4, 3))
+
+        # ---- Latest value overlay ----
+        c.create_text(PAD_L + 6, PAD_T + 4,
+                      text="Disk {:.0f}%".format(points[-1][1]),
+                      anchor="nw", fill=t.text_secondary,
+                      font=("Segoe UI", 10, "bold"))
+
     # =========================================================
     # REBUILD (called after config change)
     # =========================================================
@@ -829,8 +929,11 @@ class DashboardTab(tk.Frame):
                     tx_bps=float(tx_bps),
                 )
                 _disk_forecast_days = days_to_full(self.controller.metrics_store, server_id)
+                self._disk_trend_cache = disk_trend(self.controller.metrics_store, server_id,
+                                                     lookback_days=14)
             except Exception:
                 pass
+            self.after(0, self._redraw_disk_chart)
             if _disk_forecast_days is None:
                 _forecast_text, _forecast_color = "--", self.theme.text_muted
             else:
