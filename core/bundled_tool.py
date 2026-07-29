@@ -15,6 +15,15 @@ BUNDLED_TOOL_MAP = [
     {"match": "chromium", "tool": "Chromium",
      "note": "Bundled with uptime-kuma for its optional 'real browser "
              "monitor' type -- not used by this deployment."},
+    {"match": "vim-", "tool": "Vim",
+     "note": "Bundled in netdata's base image (vim-common/vim-tiny) -- "
+             "the monitoring daemon has no use for a text editor."},
+    {"match": "perl", "tool": "Perl",
+     "note": "Bundled in postgres's base image as a transitive Debian "
+             "dependency -- this deployment's tracearr postgres instance "
+             "has no PL/Perl extension loaded (confirmed against its "
+             "docker-compose.yml: plain POSTGRES_USER/PASSWORD/DB env "
+             "vars only). Re-audit this entry if PL/Perl is ever added."},
 ]
 
 _NOT_BUNDLED = {"tool": "", "note": "", "bundled": False}
