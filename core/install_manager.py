@@ -537,6 +537,37 @@ APP_REGISTRY = [
         ],
     },
 
+    {
+        "key":          "cleanuparr",
+        "name":         "Cleanuparr",
+        "category":     "Arr Suite",
+        "desc":         "Cleans up stalled/failed downloads and blocked releases across Sonarr & Radarr",
+        "port":         11011,
+        "container":    "cleanuparr",
+        "image":        "ghcr.io/cleanuparr/cleanuparr",
+        "health_path":  "/health",
+        "install_cmds": [
+            "mkdir -p /opt/media/cleanuparr/appdata",
+            "docker pull ghcr.io/cleanuparr/cleanuparr:latest",
+            (f"docker run -d --name cleanuparr -p 11011:11011 "
+             "-v /opt/media/cleanuparr/appdata:/config "
+             "-v /opt/media/downloads:/opt/media/downloads "
+             f"{_puid()} -e TZ=America/Chicago -e PORT=11011 "
+             f"{_RSU} ghcr.io/cleanuparr/cleanuparr:latest"),
+        ],
+        "fix_cmds": ["docker restart cleanuparr"],
+        "reinstall_cmds": [
+            "docker stop cleanuparr 2>/dev/null || true",
+            "docker rm   cleanuparr 2>/dev/null || true",
+            "docker pull ghcr.io/cleanuparr/cleanuparr:latest",
+            (f"docker run -d --name cleanuparr -p 11011:11011 "
+             "-v /opt/media/cleanuparr/appdata:/config "
+             "-v /opt/media/downloads:/opt/media/downloads "
+             f"{_puid()} -e TZ=America/Chicago -e PORT=11011 "
+             f"{_RSU} ghcr.io/cleanuparr/cleanuparr:latest"),
+        ],
+    },
+
     # ── Request Managers ─────────────────────────────────────────────────
     {
         "key": "overseerr",

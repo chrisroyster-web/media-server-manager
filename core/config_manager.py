@@ -62,6 +62,7 @@ class ConfigManager:
         "Glances":     {"container": "glances",     "port": 61208},
         "Netdata":     {"container": "netdata",     "port": 19999},
         "Jellyseerr":  {"container": "jellyseerr",  "port": 5056},
+        "Cleanuparr":  {"container": "cleanuparr",  "port": 11011},
     }
 
     DEFAULT_STORAGE_MOUNTS = ["/", "/opt/media/downloads", "/mnt/nas/wsbackup"]
