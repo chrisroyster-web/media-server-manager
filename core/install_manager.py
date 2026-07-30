@@ -650,11 +650,16 @@ APP_REGISTRY = [
         "install_cmds": [
             "docker pull netdata/netdata",
             (f"docker run -d --name netdata --network host --pid host "
+             "-v netdataconfig:/etc/netdata "
+             "-v netdatalib:/var/lib/netdata "
+             "-v netdatacache:/var/cache/netdata "
+             "-v /etc/passwd:/host/etc/passwd:ro "
+             "-v /etc/group:/host/etc/group:ro "
              "-v /proc:/host/proc:ro "
              "-v /sys:/host/sys:ro "
              "-v /etc/os-release:/host/etc/os-release:ro "
              "-v /var/run/docker.sock:/var/run/docker.sock:ro "
-             "--cap-add SYS_PTRACE --security-opt apparmor=unconfined "
+             "--cap-add SYS_PTRACE --cap-add SYS_ADMIN --security-opt apparmor=unconfined "
              f"{_RSU} netdata/netdata"),
         ],
         "fix_cmds": ["docker restart netdata"],
@@ -663,11 +668,16 @@ APP_REGISTRY = [
             "docker rm   netdata 2>/dev/null || true",
             "docker pull netdata/netdata",
             (f"docker run -d --name netdata --network host --pid host "
+             "-v netdataconfig:/etc/netdata "
+             "-v netdatalib:/var/lib/netdata "
+             "-v netdatacache:/var/cache/netdata "
+             "-v /etc/passwd:/host/etc/passwd:ro "
+             "-v /etc/group:/host/etc/group:ro "
              "-v /proc:/host/proc:ro "
              "-v /sys:/host/sys:ro "
              "-v /etc/os-release:/host/etc/os-release:ro "
              "-v /var/run/docker.sock:/var/run/docker.sock:ro "
-             "--cap-add SYS_PTRACE --security-opt apparmor=unconfined "
+             "--cap-add SYS_PTRACE --cap-add SYS_ADMIN --security-opt apparmor=unconfined "
              f"{_RSU} netdata/netdata"),
         ],
     },
