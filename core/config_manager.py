@@ -287,6 +287,23 @@ class ConfigManager:
         self._ss("vuln_scan_baseline", baseline)
 
     # ---------------------------------------------------------
+    # STUCK ARR QUEUE WATCHDOG  (per-server)
+    # ---------------------------------------------------------
+    def get_stuck_queue_watchdog_enabled(self):
+        return self._gs("stuck_queue_watchdog_enabled", True)
+
+    def set_stuck_queue_watchdog_enabled(self, value):
+        self._ss("stuck_queue_watchdog_enabled", value)
+
+    def get_stuck_queue_stale_hours(self):
+        """Hours a Sonarr/Radarr queue item must stay import-blocked/pending
+        before the watchdog acts on it."""
+        return int(self._gs("stuck_queue_stale_hours", 6))
+
+    def set_stuck_queue_stale_hours(self, value):
+        self._ss("stuck_queue_stale_hours", int(value))
+
+    # ---------------------------------------------------------
     # RESTIC BACKUP VERIFY SCHEDULE  (per-server)
     # ---------------------------------------------------------
     def get_restic_verify_schedule(self):
