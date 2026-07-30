@@ -199,19 +199,6 @@ class ArrTab(tk.Frame):
         )
         self._queue_blocklist_btn.pack(side="left", padx=(6, 0))
 
-        cfg = self.controller.config_manager
-        self._stuck_watchdog_var = tk.BooleanVar(
-            value=cfg.get_stuck_queue_watchdog_enabled())
-        tk.Checkbutton(
-            bar, text="Auto-clean stuck imports",
-            variable=self._stuck_watchdog_var,
-            command=lambda: cfg.set_stuck_queue_watchdog_enabled(
-                self._stuck_watchdog_var.get()),
-            bg=t.bg, fg=t.text, selectcolor=t.surface_dark,
-            activebackground=t.bg, font=t.font_small, bd=0,
-            highlightthickness=0,
-        ).pack(side="left", padx=(16, 0))
-
         self._queue_action_status = tk.Label(bar, text="", bg=t.bg,
                                              fg=t.text_muted, font=t.font_small)
         self._queue_action_status.pack(side="right", padx=8)

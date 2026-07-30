@@ -580,7 +580,6 @@ class MediaServerManager(tk.Tk):
                 self.after(15000, self.start_security_watchdog)
                 self.after(15500, self.start_restic_verify_watchdog)
                 self.after(16000, self.start_tunnel_exposure_watchdog)
-                self.after(17000, self.start_stuck_arr_queue_watchdog)
                 self.after(16000, self._check_for_update_bg)
                 self._maybe_show_onboarding()
         except tk.TclError:
@@ -1643,130 +1642,6 @@ class MediaServerManager(tk.Tk):
                             len(newly_unprotected), ", ".join(sorted(newly_unprotected)))
                         self.after(0, lambda t=title, b=body: self.show_toast(
                             t, b, level="error"))
-                        self.notification_manager.send_alert(title, body)
-                except Exception as e:
-                    self.watchdog_registry.record_error(NAME, e)
-                else:
-                    self.watchdog_registry.record_ok(NAME)
-        threading.Thread(target=_loop, daemon=True).start()
-
-    # ---------------------------------------------------------
-    # STUCK SONARR/RADARR QUEUE WATCHDOG
-    #
-    # Sonarr/Radarr sometimes leave a queue item stuck retrying an import
-    # forever -- either Radarr correctly refuses it as a non-upgrade
-    # (importBlocked) or the download folder is gone/unusable and nothing
-    # is eligible for import (importPending). Both spam the app's log
-    # every poll cycle without end-user action. The only safe automatic
-    # move is to clear an item when the movie/episode it targets already
-    # has a file -- i.e. nothing is actually at risk -- and leave anything
-    # still-needed for a human to look at instead of guessing.
-    # ---------------------------------------------------------
-    def start_stuck_arr_queue_watchdog(self):
-        import threading
-        from datetime import datetime, timedelta
-        from core.arr_client import api_get, api_delete
-
-        NAME = "Stuck Arr Queue Items"
-        self.watchdog_registry.register(NAME, 1800)
-        stop = threading.Event()
-        self._stuck_arr_queue_watchdog_stop = stop
-        first_seen = {}   # (app, item_id) -> datetime first observed stuck
-        notified   = set()  # (app, item_id) already flagged for review
-
-        STUCK_STATES = ("importBlocked", "importPending")
-
-        def _check_app(cfg, srv, app, cleared, needs_review, seen_now):
-            if app == "sonarr":
-                host, port, apikey = (srv.get("sonarr_host", "localhost"),
-                                       srv.get("sonarr_port", "8989"),
-                                       srv.get("sonarr_apikey", ""))
-            else:
-                host, port, apikey = (srv.get("radarr_host", "localhost"),
-                                       srv.get("radarr_port", "7878"),
-                                       srv.get("radarr_apikey", ""))
-            if not apikey:
-                return
-
-            queue = api_get(host, port, apikey, "queue?pageSize=100")
-            stale_after = timedelta(hours=cfg.get_stuck_queue_stale_hours())
-
-            for item in queue.get("records", []):
-                if item.get("status") != "completed":
-                    continue
-                state = item.get("trackedDownloadState")
-                if state not in STUCK_STATES:
-                    continue
-
-                item_id = item.get("id")
-                key = (app, item_id)
-                seen_now.add(key)
-                started = first_seen.setdefault(key, datetime.now())
-                if datetime.now() - started < stale_after:
-                    continue  # give the app more time before acting
-
-                title = item.get("title") or "(unknown release)"
-
-                # Only auto-clear when the target already has a file --
-                # the one condition that makes deleting the queue entry
-                # provably harmless.
-                has_file = False
-                try:
-                    if app == "radarr" and item.get("movieId"):
-                        detail = api_get(host, port, apikey,
-                                          "movie/{}".format(item["movieId"]))
-                        has_file = bool(detail.get("hasFile"))
-                    elif app == "sonarr" and item.get("episodeId"):
-                        detail = api_get(host, port, apikey,
-                                          "episode/{}".format(item["episodeId"]))
-                        has_file = bool(detail.get("hasFile"))
-                except Exception:
-                    pass  # treat as "can't confirm safe" -> falls through to review
-
-                if has_file:
-                    blocklist = state == "importPending"
-                    path = "queue/{}?removeFromClient=true&blocklist={}".format(
-                        item_id, "true" if blocklist else "false")
-                    api_delete(host, port, apikey, path)
-                    cleared.append("{} ({})".format(title, app))
-                    first_seen.pop(key, None)
-                    notified.discard(key)
-                elif key not in notified:
-                    notified.add(key)
-                    needs_review.append("{} ({}, {})".format(title, app, state))
-
-        def _loop():
-            while not stop.wait(1800):
-                if not self.config_manager.get_stuck_queue_watchdog_enabled():
-                    continue
-                cfg = self.config_manager
-                srv = (cfg.get_active_server() or {}).get("settings", {})
-                cleared, needs_review = [], []
-                seen_now = set()
-                try:
-                    for app in ("sonarr", "radarr"):
-                        _check_app(cfg, srv, app, cleared, needs_review, seen_now)
-
-                    # Forget items that dropped out of the queue on their
-                    # own (resolved, manually cleared, etc.) so a future
-                    # recurrence starts its staleness timer fresh.
-                    for key in [k for k in first_seen if k not in seen_now]:
-                        first_seen.pop(key, None)
-                        notified.discard(key)
-
-                    if cleared:
-                        title = "Cleared {} stuck import{}".format(
-                            len(cleared), "s" if len(cleared) != 1 else "")
-                        body = "; ".join(cleared)
-                        self.after(0, lambda t=title, b=body: self.show_toast(
-                            t, b, level="ok"))
-                        self.notification_manager.send_alert(title, body)
-                    if needs_review:
-                        title = "{} queue item{} need review".format(
-                            len(needs_review), "s" if len(needs_review) != 1 else "")
-                        body = "; ".join(needs_review)
-                        self.after(0, lambda t=title, b=body: self.show_toast(
-                            t, b, level="warn"))
                         self.notification_manager.send_alert(title, body)
                 except Exception as e:
                     self.watchdog_registry.record_error(NAME, e)
