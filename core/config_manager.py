@@ -43,7 +43,13 @@ class ConfigManager:
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "config.json"))
 
     DEFAULT_SERVICES = {
-        "Emby":     {"service": "emby-server",  "port": 8096},
+        # remote_port: Emby's separate HTTPS listener (see system.xml's
+        # HttpsPortNumber) that remote/WAN clients actually need — it can
+        # silently fail to bind (e.g. the network wasn't up yet when the
+        # service started) while the plain "port" above stays open and
+        # `systemctl is-active` keeps reporting the unit as running. The
+        # Services tab checks both so a LAN-only outage like that shows up.
+        "Emby":     {"service": "emby-server",  "port": 8096, "remote_port": 8920},
         "Jellyfin": {"service": "jellyfin",      "port": 8096},
         "Sonarr":   {"service": "sonarr",        "port": 8989},
         "Radarr":   {"service": "radarr",        "port": 7878},

@@ -37,6 +37,80 @@ def _puid(uid=1000, gid=1000):
     return f"-e PUID={uid} -e PGID={gid}"
 
 
+# Tracearr needs TimescaleDB, which has no official image pinned to
+# postgres:15 — build it locally from the upstream apt repo instead of
+# trusting a third-party image. Each heredoc ends in "true" because
+# _run_cmds appends " 2>&1" to every command string; without a trailing
+# no-op, that suffix would land on the same line as the closing "EOF"
+# and stop bash from recognizing the heredoc terminator.
+_TRACEARR_DOCKERFILE_CMD = (
+    "[ -f /opt/media/tracearr/postgres-timescale/Dockerfile ] || "
+    "cat > /opt/media/tracearr/postgres-timescale/Dockerfile <<'EOF'\n"
+    "FROM postgres:15\n"
+    "\n"
+    "RUN apt-get update -qq \\\n"
+    "    && apt-get install -y -qq --no-install-recommends curl gnupg ca-certificates \\\n"
+    "    && curl -fsSL https://packagecloud.io/timescale/timescaledb/gpgkey | gpg --dearmor -o /usr/share/keyrings/timescaledb.gpg \\\n"
+    "    && echo \"deb [signed-by=/usr/share/keyrings/timescaledb.gpg] https://packagecloud.io/timescale/timescaledb/debian/ trixie main\" > /etc/apt/sources.list.d/timescaledb.list \\\n"
+    "    && apt-get update -qq \\\n"
+    "    && apt-get install -y -qq timescaledb-2-postgresql-15 \\\n"
+    "    && apt-get purge -y -qq curl gnupg \\\n"
+    "    && apt-get autoremove -y -qq \\\n"
+    "    && rm -rf /var/lib/apt/lists/*\n"
+    "EOF\n"
+    "true"
+)
+
+# Secrets live in a generated .env (docker compose auto-loads one next to
+# the compose file) instead of being hardcoded, mirroring the homarr entry.
+_TRACEARR_ENV_CMD = (
+    "[ -f /opt/media/tracearr/.env ] || { "
+    'echo "POSTGRES_PASSWORD=$(openssl rand -hex 16)" > /opt/media/tracearr/.env; '
+    'echo "JWT_SECRET=$(openssl rand -hex 32)" >> /opt/media/tracearr/.env; }'
+)
+
+_TRACEARR_COMPOSE_CMD = (
+    "[ -f /opt/media/tracearr/docker-compose.yml ] || "
+    "cat > /opt/media/tracearr/docker-compose.yml <<'EOF'\n"
+    "version: '3'\n"
+    "services:\n"
+    "  postgres:\n"
+    "    image: tracearr-postgres-timescale:pg15\n"
+    "    container_name: tracearr-db\n"
+    "    command: postgres -c shared_preload_libraries=timescaledb -c max_locks_per_transaction=2048\n"
+    "    environment:\n"
+    "      POSTGRES_USER: tracearr\n"
+    "      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}\n"
+    "      POSTGRES_DB: tracearr\n"
+    "    volumes:\n"
+    "      - /opt/media/tracearr/pgdata:/var/lib/postgresql/data\n"
+    "    restart: unless-stopped\n"
+    "\n"
+    "  redis:\n"
+    "    image: redis:7\n"
+    "    container_name: tracearr-redis\n"
+    "    restart: unless-stopped\n"
+    "\n"
+    "  tracearr:\n"
+    "    image: ghcr.io/connorgallopo/tracearr:latest\n"
+    "    container_name: tracearr\n"
+    "    ports:\n"
+    "      - \"3000:3000\"\n"
+    "    environment:\n"
+    "      DATABASE_URL: postgresql://tracearr:${POSTGRES_PASSWORD}@postgres:5432/tracearr\n"
+    "      JWT_SECRET: ${JWT_SECRET}\n"
+    "      REDIS_URL: redis://redis:6379\n"
+    "    volumes:\n"
+    "      - /opt/media/tracearr/data:/app/data\n"
+    "    depends_on:\n"
+    "      - postgres\n"
+    "      - redis\n"
+    "    restart: unless-stopped\n"
+    "EOF\n"
+    "true"
+)
+
+
 # ---------------------------------------------------------------------------
 # Registry  — ordered by category / install dependency
 # ---------------------------------------------------------------------------
@@ -762,6 +836,39 @@ APP_REGISTRY = [
             (f"docker run -d --name wud -p 3002:3000 "
              "-v /var/run/docker.sock:/var/run/docker.sock "
              f"-v $HOME/docker/wud/store:/store {_RSU} fmartinou/whats-up-docker:latest"),
+        ],
+    },
+
+    {
+        "key":          "tracearr",
+        "name":         "Tracearr",
+        "category":     "Monitoring",
+        "desc":         "Traces and visualizes request flow across Overseerr/Jellyseerr, Sonarr, Radarr, and Prowlarr",
+        "port":         3000,
+        "container":    "tracearr",
+        "image":        "ghcr.io/connorgallopo/tracearr:latest",
+        "health_path":  "/",
+        "install_cmds": [
+            "mkdir -p /opt/media/tracearr/postgres-timescale "
+            "/opt/media/tracearr/pgdata /opt/media/tracearr/data",
+            _TRACEARR_DOCKERFILE_CMD,
+            _TRACEARR_ENV_CMD,
+            _TRACEARR_COMPOSE_CMD,
+            "docker build -t tracearr-postgres-timescale:pg15 "
+            "/opt/media/tracearr/postgres-timescale",
+            "cd /opt/media/tracearr && docker compose up -d",
+        ],
+        # Only the named container is touched, per this module's design —
+        # postgres/redis are left running untouched.
+        "fix_cmds": ["docker restart tracearr"],
+        "reinstall_cmds": [
+            "docker build -t tracearr-postgres-timescale:pg15 "
+            "/opt/media/tracearr/postgres-timescale",
+            "docker pull ghcr.io/connorgallopo/tracearr:latest",
+            "cd /opt/media/tracearr && docker compose up -d --force-recreate tracearr",
+        ],
+        "uninstall_cmds": [
+            "cd /opt/media/tracearr && docker compose down",
         ],
     },
 

@@ -21,7 +21,7 @@ class ServicesTab(CardConsoleTab):
 
     # Class-level fallback (kept for backward compat; overridden per-instance from config)
     SYSTEMD_SERVICES = {
-        "Emby":     {"service": "emby-server",  "port": 8096},
+        "Emby":     {"service": "emby-server",  "port": 8096, "remote_port": 8920},
         "Sonarr":   {"service": "sonarr",        "port": 8989},
         "Radarr":   {"service": "radarr",        "port": 7878},
         "Prowlarr": {"service": "prowlarr",      "port": 9797},
@@ -104,7 +104,8 @@ class ServicesTab(CardConsoleTab):
             btn.pack(side="left", padx=4)
 
         return {"frame": frame, "dot": dot, "status_lbl": status_lbl,
-                "url_lbl": url_lbl, "service": data["service"], "port": port}
+                "url_lbl": url_lbl, "service": data["service"], "port": port,
+                "remote_port": data.get("remote_port")}
 
     # ---------------------------------------------------------
     # ACTIONS
@@ -167,18 +168,32 @@ class ServicesTab(CardConsoleTab):
             sm = self.controller.service_manager
             names = {name: card["service"] for name, card in self.cards.items()}
             statuses = sm.get_statuses(list(names.values()))
+            # Only worth the extra round trip when some card actually has a
+            # second port to watch (e.g. Emby's remote HTTPS listener).
+            needs_port_check = any(card["remote_port"] for card in self.cards.values())
+            listening = sm.get_listening_ports() if needs_port_check else set()
             for name, service in names.items():
                 status = statuses.get(service, "unknown")
-                self.after(0, lambda n=name, s=status: self._update_card(n, s))
+                remote_port = self.cards[name]["remote_port"]
+                # The unit can be "active" while a port it's supposed to
+                # bind never came up (see the Emby boot-race incident) —
+                # surface that instead of reporting a clean "running".
+                if status == "running" and remote_port and remote_port not in listening:
+                    status = "degraded"
+                self.after(0, lambda n=name, s=status, rp=remote_port: self._update_card(n, s, rp))
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _update_card(self, name, status):
+    def _update_card(self, name, status, remote_port=None):
         card = self.cards[name]
-        card["status_lbl"].config(text=status)
+        if status == "degraded":
+            card["status_lbl"].config(text="running (port {} down)".format(remote_port))
+        else:
+            card["status_lbl"].config(text=status)
         dot = card["dot"]
         dot.delete("all")
         if   status == "running":             color = self.theme.status_running
+        elif status == "degraded":            color = self.theme.yellow
         elif status in ("stopped", "failed"): color = self.theme.status_stopped
         else:                                 color = self.theme.status_unknown
         dot.create_oval(2, 2, 12, 12, fill=color, outline=color)

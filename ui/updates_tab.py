@@ -248,7 +248,14 @@ class UpdatesTab(tk.Frame):
                 pull_out, _, pull_code = ssh.run_sudo(
                     "docker pull {} 2>&1".format(shlex.quote(image)))
                 if pull_code != 0:
-                    status, tag = pull_out.strip()[:30] or "Check failed", "unknown"
+                    # Custom-built images (e.g. tracearr-db's local
+                    # TimescaleDB build) were never pushed anywhere, so
+                    # there's no registry to check -- that's not a failed
+                    # check, there's just nothing to compare against.
+                    if "repository does not exist" in pull_out or "pull access denied" in pull_out:
+                        status, tag = "Local build (no registry)", "current"
+                    else:
+                        status, tag = pull_out.strip()[:30] or "Check failed", "unknown"
                 else:
                     new_id_out, _, _ = ssh.run(
                         "docker inspect --format '{{.Id}}' " + shlex.quote(image) + " 2>/dev/null")
@@ -566,6 +573,19 @@ class UpdatesTab(tk.Frame):
         net_mode = host_cfg.get("NetworkMode") or ""
         if net_mode and net_mode not in ("default", "bridge"):
             parts += ["--network", shlex.quote(net_mode)]
+
+        pid_mode = host_cfg.get("PidMode") or ""
+        if pid_mode:
+            parts += ["--pid", shlex.quote(pid_mode)]
+
+        for cap in sorted(host_cfg.get("CapAdd") or []):
+            parts += ["--cap-add", shlex.quote(cap)]
+
+        for cap in sorted(host_cfg.get("CapDrop") or []):
+            parts += ["--cap-drop", shlex.quote(cap)]
+
+        for opt in (host_cfg.get("SecurityOpt") or []):
+            parts += ["--security-opt", shlex.quote(opt)]
 
         for cport, bindings in sorted((host_cfg.get("PortBindings") or {}).items()):
             for b in (bindings or []):

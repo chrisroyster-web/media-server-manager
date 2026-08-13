@@ -251,10 +251,24 @@ class ProwlarrTab(tk.Frame):
     def _populate(self, indexers, stats_by_id, hist_records, health):
         t = self.theme
 
+        # Prowlarr's own health check flags indexers by name (e.g. "Indexers
+        # unavailable due to failures: NZBgeek") before it ever sets
+        # status.disabledTill on the indexer object — cross-reference both
+        # so the Indexers table/card agree with what the Health tab shows.
+        unhealthy_names = set()
+        for item in health:
+            if item.get("source") == "IndexerStatusCheck":
+                _, _, names = item.get("message", "").partition(":")
+                unhealthy_names.update(n.strip() for n in names.split(",") if n.strip())
+
+        def _is_failing(idx):
+            if (not idx.get("status", {}).get("isRedirect", False)
+                    and idx.get("status", {}).get("disabledTill")):
+                return True
+            return idx.get("name") in unhealthy_names
+
         enabled = [i for i in indexers if i.get("enable")]
-        failing = [i for i in indexers
-                   if i.get("enable") and not i.get("status", {}).get("isRedirect", False)
-                   and i.get("status", {}).get("disabledTill")]
+        failing = [i for i in indexers if i.get("enable") and _is_failing(i)]
 
         total_grabs = sum(s.get("numberOfGrabs", 0) for s in stats_by_id.values())
 
@@ -273,11 +287,10 @@ class ProwlarrTab(tk.Frame):
             iid     = idx.get("id")
             s       = stats_by_id.get(iid, {})
             enabled_flag = idx.get("enable", False)
-            disabled_till = (idx.get("status") or {}).get("disabledTill", "")
             if not enabled_flag:
                 tag    = "disabled"
                 status = "Disabled"
-            elif disabled_till:
+            elif _is_failing(idx):
                 tag    = "error"
                 status = "Failing"
             else:

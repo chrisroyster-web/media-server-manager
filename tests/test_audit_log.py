@@ -64,11 +64,13 @@ def test_sftp_upload_is_audited(app, monkeypatch, tmp_path):
                         lambda **kw: str(local_file))
 
     class SyncThread:
-        def __init__(self, target=None, daemon=None):
+        def __init__(self, target=None, args=(), kwargs=None, daemon=None):
             self._target = target
+            self._args = args
+            self._kwargs = kwargs or {}
 
         def start(self):
-            self._target()
+            self._target(*self._args, **self._kwargs)
 
     monkeypatch.setattr(sftp_tab_module.threading, "Thread", SyncThread)
 
@@ -98,11 +100,13 @@ def test_sftp_upload_failure_is_audited(app, monkeypatch, tmp_path):
                         lambda **kw: str(local_file))
 
     class SyncThread:
-        def __init__(self, target=None, daemon=None):
+        def __init__(self, target=None, args=(), kwargs=None, daemon=None):
             self._target = target
+            self._args = args
+            self._kwargs = kwargs or {}
 
         def start(self):
-            self._target()
+            self._target(*self._args, **self._kwargs)
 
     monkeypatch.setattr(sftp_tab_module.threading, "Thread", SyncThread)
 

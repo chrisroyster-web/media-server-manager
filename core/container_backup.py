@@ -35,8 +35,13 @@ def backup_container_mounts(ssh, container: str, info: dict,
     mount was actually attempted and failed -- oversized mounts are
     "skipped", not "failed", and don't block the caller. Never raises.
     """
+    # Read-only mounts (e.g. netdata's /proc, /sys, /etc/passwd for host
+    # introspection) can never be modified by the container, so a recreate
+    # can't lose anything there -- and pseudo-filesystems like /sys fail a
+    # plain tar anyway (files that shrink between stat and read, permission-
+    # denied device nodes), which would otherwise abort the whole update.
     mounts = [m for m in (info.get("Mounts") or [])
-              if m.get("Source") and m.get("Destination")]
+              if m.get("Source") and m.get("Destination") and m.get("RW", True)]
     if not mounts:
         return {"ok": True, "backed_up": [], "skipped": [], "failed": [],
                 "dir": "", "output": "No bind-mounted data to back up."}

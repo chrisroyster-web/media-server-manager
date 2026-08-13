@@ -276,7 +276,7 @@ class LogViewerTab(tk.Frame):
 
     def _classify(self, line):
         ll = line.lower()
-        if any(w in ll for w in ("error", "fatal", "critical", "failed", "fail")):
+        if any(w in ll for w in ("error", "fatal", "critical", "failed")):
             return "error"
         if any(w in ll for w in ("warn", "warning")):
             return "warn"

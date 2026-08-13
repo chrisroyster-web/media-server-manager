@@ -1,5 +1,6 @@
 # core/service_manager.py
 
+import re
 import shlex
 
 
@@ -46,6 +47,41 @@ class ServiceManager:
             name: self._parse_status_word(lines[i].strip() if i < len(lines) else "")
             for i, name in enumerate(service_names)
         }
+
+    # ---------------------------------------------------------
+    # LISTENING PORTS
+    # ---------------------------------------------------------
+    # `systemctl is-active` only proves the unit's process is running — it
+    # says nothing about whether the ports that process is supposed to bind
+    # actually came up (e.g. Emby's HTTPS listener silently not binding
+    # because the network wasn't ready yet at startup, while the process
+    # itself stays "active" the whole time). This checks real listening
+    # sockets so that class of failure is visible instead of showing "running".
+    def get_listening_ports(self):
+        """
+        Returns the set of TCP ports currently in LISTEN state on the
+        server, as ints. One remote round trip covers every service —
+        callers just check `port in listening_ports`.
+        """
+        if not self.ssh.connected:
+            return set()
+
+        out, err, code = self.ssh.run("ss -tln 2>/dev/null || netstat -tln 2>/dev/null")
+        ports = set()
+        for line in out.splitlines():
+            if "LISTEN" not in line:
+                continue
+            # Local Address:Port is whichever whitespace-separated column
+            # has a colon in it (position varies slightly between `ss` and
+            # `netstat` output) — take the trailing :port off of it.
+            cols = line.split()
+            local_col = next((c for c in cols if ":" in c and c != "LISTEN"), None)
+            if not local_col:
+                continue
+            m = re.search(r':(\d+)$', local_col)
+            if m:
+                ports.add(int(m.group(1)))
+        return ports
 
     @staticmethod
     def _parse_status_word(word):
