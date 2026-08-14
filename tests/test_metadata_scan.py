@@ -141,6 +141,26 @@ def test_generate_and_upload_no_api_key():
     assert ssh.calls == []
 
 
+def test_upload_body_is_base64_not_raw_bytes():
+    """Regression test: Emby's Images/{Type} POST base64-decodes the request
+    body server-side and 500s ("not a valid Base-64 string") on raw bytes.
+    An earlier version of this function sent the raw file directly and
+    every upload in a 25-item real-server batch failed with exactly that
+    error before this was caught."""
+    ssh = _FakeSSH()
+    ssh.route("test -s", out="ok")
+    ssh.route("curl -s -o /dev/null", out="204", code=0)
+
+    metadata_scan.generate_and_upload_thumbnail(
+        ssh, "host", "8096", "key", "9", video_path="/movies/a.mkv")
+
+    assert any(c.startswith("base64 -w0") for c in ssh.calls)
+    upload_cmd = next(c for c in ssh.calls if c.startswith("curl -s -o /dev/null"))
+    assert "--data-binary @" in upload_cmd
+    b64_arg = upload_cmd.rsplit("@", 1)[1]
+    assert b64_arg.endswith(".b64")  # uploads the base64-encoded file, not the raw one
+
+
 def test_generate_and_upload_happy_path_ffmpeg_only():
     """No item_type/series_id/season/episode given -> TVmaze is skipped
     entirely and this behaves exactly like the original ffmpeg-only fix."""

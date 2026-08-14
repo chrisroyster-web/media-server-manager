@@ -229,14 +229,22 @@ def generate_and_upload_thumbnail(ssh, host, port, apikey, item_id: str, video_p
                 "error": "No image found via TVmaze, and ffmpeg could not extract a frame.",
                 "source": None}
 
+    # Emby's Images/{Type} POST body must be base64, not raw bytes -- it
+    # base64-decodes the request body server-side and 500s with "not a
+    # valid Base-64 string" otherwise. (Confirmed the hard way: this was
+    # missing in an earlier version of this function and every upload in
+    # a 25-item batch failed with exactly that error.)
+    qb64 = shlex.quote(tmp_jpg + ".b64")
+    ssh.run("base64 -w0 {} > {}".format(qtmp, qb64))
+
     url = "http://localhost:{}/emby/Items/{}/Images/Primary".format(
         port, urllib.parse.quote(item_id, safe=""))
     header = shlex.quote("X-Emby-Token: {}".format(apikey))
     out, err, code = ssh.run(
         "curl -s -o /dev/null -w '%{{http_code}}' -X POST {} "
         "-H {} -H 'Content-Type: image/jpeg' --data-binary @{}".format(
-            shlex.quote(url), header, qtmp))
-    ssh.run("rm -f {}".format(qtmp))
+            shlex.quote(url), header, qb64))
+    ssh.run("rm -f {} {}".format(qtmp, qb64))
 
     if code != 0 or out.strip() != "204":
         return {"ok": False, "error": "Emby upload returned HTTP {}".format(out.strip() or "?"),
