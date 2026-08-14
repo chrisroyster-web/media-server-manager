@@ -19,6 +19,7 @@ import time
 import shlex
 
 from core.install_manager import APP_REGISTRY, CATEGORIES, InstallManager
+from core import plugin_updater
 
 
 # ── Status display metadata ────────────────────────────────────────────────
@@ -41,6 +42,13 @@ _LABEL = {
     "error":         "Error",
 }
 
+# Apps whose real-time features depend on a companion plugin dropped
+# straight into Emby's plugins folder — not a container or service of its
+# own, so it's checked/updated via core.plugin_updater instead of
+# InstallManager's docker/service model. A small "Emby plugin: vX → vY"
+# sub-row is rendered under any app key listed here.
+_EMBY_PLUGIN_APPS = {"tracearr"}
+
 
 class InstallTab(tk.Frame):
     """Browse, install, and repair supported apps on the connected server."""
@@ -54,6 +62,8 @@ class InstallTab(tk.Frame):
         self._rows       = {}            # key → row-widget dict
         self._statuses   = {}            # key → status dict
         self._checks     = {}            # key → BooleanVar (checkbox)
+        self._plugin_rows   = {}         # key → Emby-plugin sub-row widget dict
+        self._plugin_status = {}         # key → last plugin_updater.check() result
         self._busy       = False
         self._scanned_host = None
         self._build_ui()
@@ -333,6 +343,64 @@ class InstallTab(tk.Frame):
         }
         self._statuses[key] = {"state": "unknown"}
 
+        if key in _EMBY_PLUGIN_APPS:
+            self._build_emby_plugin_row(row, app)
+
+    def _build_emby_plugin_row(self, parent_row, app):
+        """
+        Slim sub-row under an app whose real-time features need a companion
+        Emby plugin (see _EMBY_PLUGIN_APPS). Shows the installed vs. latest
+        plugin version and, once a newer one is known, an Update button.
+        """
+        t   = self.theme
+        key = app["key"]
+
+        sub = tk.Frame(parent_row, bg=t.surface, padx=10)
+        sub.pack(fill="x", pady=(0, 6))
+
+        tk.Frame(sub, width=34, bg=t.surface).pack(side="left")  # align under name column
+
+        status_lbl = tk.Label(sub, text="Emby plugin: —",
+                               bg=t.surface, fg=t.text_dim,
+                               font=t.font_small, anchor="w")
+        status_lbl.pack(side="left")
+
+        update_btn = tk.Button(
+            sub, text="Update Plugin",
+            command=lambda a=app: self._do_update_emby_plugin(a),
+            bg=t.blue, fg="#ffffff",
+            bd=0, relief="flat", font=t.font_small,
+            padx=10, pady=2, cursor="hand2",
+        )
+        # Only shown once a check finds a newer version — see _update_plugin_row.
+
+        self._plugin_rows[key] = {"status_lbl": status_lbl, "update_btn": update_btn}
+        self._plugin_status[key] = {"installed": "", "latest": "", "update_available": False, "error": None}
+
+    def _update_plugin_row(self, key: str, status: dict):
+        """Redraw one app's Emby-plugin sub-row. Safe to call from any thread."""
+        def _do():
+            rw = self._plugin_rows.get(key)
+            if not rw:
+                return
+            t = self.theme
+            self._plugin_status[key] = status
+
+            if status.get("error"):
+                rw["status_lbl"].config(text=f"Emby plugin: {status['error']}", fg=t.text_dim)
+                rw["update_btn"].pack_forget()
+            elif status.get("update_available"):
+                rw["status_lbl"].config(
+                    text=f"Emby plugin: v{status['installed']} → v{status['latest']} available",
+                    fg=t.yellow)
+                rw["update_btn"].pack(side="left", padx=(10, 0))
+            else:
+                installed = status.get("installed") or "?"
+                rw["status_lbl"].config(text=f"Emby plugin: v{installed} (up to date)",
+                                         fg=t.text_dim)
+                rw["update_btn"].pack_forget()
+        self.after(0, _do)
+
     def _update_row(self, key: str, status: dict):
         """Redraw one row's dot, label, and buttons. Safe to call from any thread."""
         def _do():
@@ -454,6 +522,20 @@ class InstallTab(tk.Frame):
                 msg_str = f"  —  {status['message']}" if state == "error" and status.get("message") else ""
                 self._log(state + method_str + msg_str + "\n", tag or ("error" if state == "error" else None))
 
+                if key in _EMBY_PLUGIN_APPS:
+                    self._log(f"  {name} — Emby plugin… ")
+                    try:
+                        plugin_status = plugin_updater.check(self.controller.config_manager)
+                    except Exception as ex:
+                        plugin_status = {"installed": "", "latest": "", "update_available": False, "error": str(ex)}
+                    self._update_plugin_row(key, plugin_status)
+                    if plugin_status.get("error"):
+                        self._log(plugin_status["error"] + "\n", "warn")
+                    elif plugin_status.get("update_available"):
+                        self._log(f"v{plugin_status['installed']} → v{plugin_status['latest']} available\n", "warn")
+                    else:
+                        self._log(f"v{plugin_status.get('installed')} (up to date)\n", "ok")
+
             self._log("── Scan complete ─────────────────────────────────────\n", "section")
             self.after(0, lambda: self._scan_btn.config(
                 state="normal", text="⟳  Scan All"))
@@ -480,6 +562,46 @@ class InstallTab(tk.Frame):
             self._run_op(app, "fix")
         else:
             self._log(f"\n  Run Scan first to determine the action for {app['name']}.\n", "warn")
+
+    def _do_update_emby_plugin(self, app):
+        """Update the companion Emby plugin for an app in _EMBY_PLUGIN_APPS
+        (e.g. Tracearr's real-time SSE plugin). Restarts emby-server, which
+        briefly drops any active Emby playback — confirm first."""
+        key    = app["key"]
+        status = self._plugin_status.get(key, {})
+        latest = status.get("latest")
+        if not latest:
+            self._log("  ✗  No known latest version — run Scan first.\n", "error")
+            return
+        if not self.controller.ssh.connected:
+            self._log("✗  Not connected.\n", "error")
+            return
+        if not messagebox.askyesno(
+                "Update Emby Plugin",
+                f"Update the Emby SSE plugin (used by {app['name']}) "
+                f"v{status.get('installed', '?')} → v{latest}?\n\n"
+                "This restarts emby-server to load it, which briefly drops "
+                "any active playback sessions.",
+                parent=self):
+            return
+
+        def _worker():
+            self._log(f"\n── Update Emby plugin for {app['name']} "
+                       f"(v{status.get('installed', '?')} → v{latest}) ──\n", "section")
+            ok = plugin_updater.update(self.controller.ssh, latest, self._log)
+            self.controller.audit_log(
+                "install.update_emby_plugin", app["name"],
+                result="ok" if ok else "fail")
+            time.sleep(6)  # let emby-server settle before re-querying its API
+            try:
+                new_status = plugin_updater.check(self.controller.config_manager)
+            except Exception as ex:
+                new_status = {"installed": "", "latest": latest, "update_available": False, "error": str(ex)}
+            self._update_plugin_row(key, new_status)
+            final = new_status.get("installed") or "?"
+            self._log(f"\n  → Emby plugin: v{final}\n", "ok" if ok else "error")
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     def _do_reinstall(self, app):
         if not messagebox.askyesno(
