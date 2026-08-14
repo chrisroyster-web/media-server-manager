@@ -38,7 +38,8 @@ def test_scan_flags_items_with_no_primary_tag(monkeypatch):
             {"Id": "1", "Name": "Has poster", "Type": "Movie", "Path": "/m/a.mkv",
              "ImageTags": {"Primary": "abc"}},
             {"Id": "2", "Name": "Bush Code", "Type": "Episode", "Path": "/tv/s07e06.mkv",
-             "SeriesName": "Alaskan Bush People", "ImageTags": {}},
+             "SeriesName": "Alaskan Bush People", "SeriesId": "3103568",
+             "ParentIndexNumber": 7, "IndexNumber": 6, "ImageTags": {}},
             {"Id": "3", "Name": "No tags at all", "Type": "Movie", "Path": "/m/c.mkv"},
         ],
     })
@@ -50,6 +51,12 @@ def test_scan_flags_items_with_no_primary_tag(monkeypatch):
     bush_code = next(it for it in result["items"] if it["id"] == "2")
     assert bush_code["series_name"] == "Alaskan Bush People"
     assert bush_code["path"] == "/tv/s07e06.mkv"
+    assert bush_code["series_id"] == "3103568"
+    assert bush_code["season"] == 7
+    assert bush_code["episode"] == 6
+    movie = next(it for it in result["items"] if it["id"] == "3")
+    assert movie["series_id"] is None
+    assert movie["season"] is None
 
 
 def test_scan_paginates_until_total_reached(monkeypatch):
@@ -134,7 +141,9 @@ def test_generate_and_upload_no_api_key():
     assert ssh.calls == []
 
 
-def test_generate_and_upload_happy_path():
+def test_generate_and_upload_happy_path_ffmpeg_only():
+    """No item_type/series_id/season/episode given -> TVmaze is skipped
+    entirely and this behaves exactly like the original ffmpeg-only fix."""
     ssh = _FakeSSH()
     ssh.route("test -s", out="ok")
     ssh.route("curl -s -o /dev/null", out="204", code=0)
@@ -143,7 +152,7 @@ def test_generate_and_upload_happy_path():
         ssh, "192.168.4.252", "8096", "testkey", "3106612",
         video_path="/mnt/nas/tvshows/S07E06.mkv")
 
-    assert result == {"ok": True, "error": None}
+    assert result == {"ok": True, "error": None, "source": "ffmpeg"}
     joined = " ".join(ssh.calls)
     assert "ffmpeg" in joined
     assert "3106612" in joined
@@ -195,3 +204,126 @@ def test_generate_and_upload_emby_rejects_the_image():
     assert result["ok"] is False
     assert "400" in result["error"]
     assert any(c.startswith("rm -f") for c in ssh.calls)  # still cleans up on failure
+
+
+# ── generate_and_upload_thumbnail() — TVmaze source ─────────────────────────
+
+def test_tvmaze_preferred_over_ffmpeg_when_available(monkeypatch):
+    monkeypatch.setattr(metadata_scan, "_series_tvmaze_id", lambda h, p, k, sid, cache: "1208")
+    monkeypatch.setattr(metadata_scan, "_get_external", lambda url: {
+        "image": {"original": "https://static.tvmaze.com/img/897677.jpg"}})
+
+    ssh = _FakeSSH()
+    ssh.route("test -s", out="ok")
+    ssh.route("curl -s -o /dev/null", out="204", code=0)
+
+    result = metadata_scan.generate_and_upload_thumbnail(
+        ssh, "host", "8096", "key", "3106612", video_path="/tv/s07e06.mkv",
+        item_type="Episode", series_id="3103568", season=7, episode=6)
+
+    assert result == {"ok": True, "error": None, "source": "tvmaze"}
+    joined = " ".join(ssh.calls)
+    assert "897677.jpg" in joined
+    assert "ffmpeg" not in joined  # never needed the fallback
+
+
+def test_falls_back_to_ffmpeg_when_tvmaze_has_no_image(monkeypatch):
+    monkeypatch.setattr(metadata_scan, "_series_tvmaze_id", lambda h, p, k, sid, cache: "1208")
+    monkeypatch.setattr(metadata_scan, "_get_external", lambda url: {"image": None})
+
+    ssh = _FakeSSH()
+    ssh.route("test -s", out="ok")
+    ssh.route("curl -s -o /dev/null", out="204", code=0)
+
+    result = metadata_scan.generate_and_upload_thumbnail(
+        ssh, "host", "8096", "key", "9", video_path="/tv/ep.mkv",
+        item_type="Episode", series_id="123", season=1, episode=1)
+
+    assert result["ok"] is True
+    assert result["source"] == "ffmpeg"
+    assert any(c.startswith("ffmpeg") for c in ssh.calls)
+
+
+def test_falls_back_to_ffmpeg_when_series_has_no_tvmaze_id(monkeypatch):
+    monkeypatch.setattr(metadata_scan, "_series_tvmaze_id", lambda h, p, k, sid, cache: None)
+
+    def _boom(*a, **k):
+        raise AssertionError("should never call the TVmaze episode API without a show id")
+    monkeypatch.setattr(metadata_scan, "_get_external", _boom)
+
+    ssh = _FakeSSH()
+    ssh.route("test -s", out="ok")
+    ssh.route("curl -s -o /dev/null", out="204", code=0)
+
+    result = metadata_scan.generate_and_upload_thumbnail(
+        ssh, "host", "8096", "key", "9", video_path="/tv/ep.mkv",
+        item_type="Episode", series_id="123", season=1, episode=1)
+
+    assert result["source"] == "ffmpeg"
+
+
+def test_movie_never_attempts_tvmaze(monkeypatch):
+    def _boom(*a, **k):
+        raise AssertionError("Movies have no episode to look up on TVmaze")
+    monkeypatch.setattr(metadata_scan, "_series_tvmaze_id", _boom)
+
+    ssh = _FakeSSH()
+    ssh.route("test -s", out="ok")
+    ssh.route("curl -s -o /dev/null", out="204", code=0)
+
+    result = metadata_scan.generate_and_upload_thumbnail(
+        ssh, "host", "8096", "key", "9", video_path="/movies/a.mkv", item_type="Movie")
+
+    assert result["source"] == "ffmpeg"
+
+
+def test_series_with_no_video_and_no_tvmaze_info_is_unfixable():
+    ssh = _FakeSSH()
+    result = metadata_scan.generate_and_upload_thumbnail(
+        ssh, "host", "8096", "key", "9", video_path="", item_type="Series")
+    assert result["ok"] is False
+    assert ssh.calls == []
+
+
+# ── _series_tvmaze_id() ──────────────────────────────────────────────────────
+
+def test_series_tvmaze_id_prefers_direct_provider_id(monkeypatch):
+    monkeypatch.setattr(metadata_scan, "_get", lambda h, p, k, path: {
+        "Items": [{"ProviderIds": {"TV Maze": "1208", "Tvdb": "281414"}}]})
+
+    def _boom(url):
+        raise AssertionError("should not resolve via TVDB when a direct id is present")
+    monkeypatch.setattr(metadata_scan, "_get_external", _boom)
+
+    result = metadata_scan._series_tvmaze_id("h", "p", "k", "3103568", {})
+    assert result == "1208"
+
+
+def test_series_tvmaze_id_resolves_via_tvdb_when_no_direct_id(monkeypatch):
+    monkeypatch.setattr(metadata_scan, "_get", lambda h, p, k, path: {
+        "Items": [{"ProviderIds": {"Tvdb": "281414"}}]})
+    monkeypatch.setattr(metadata_scan, "_get_external", lambda url: {"id": 1208})
+
+    result = metadata_scan._series_tvmaze_id("h", "p", "k", "3103568", {})
+    assert result == "1208"
+
+
+def test_series_tvmaze_id_none_when_no_provider_ids_at_all(monkeypatch):
+    monkeypatch.setattr(metadata_scan, "_get", lambda h, p, k, path: {
+        "Items": [{"ProviderIds": {}}]})
+    result = metadata_scan._series_tvmaze_id("h", "p", "k", "3103568", {})
+    assert result is None
+
+
+def test_series_tvmaze_id_is_cached_across_calls(monkeypatch):
+    calls = {"n": 0}
+
+    def fake_get(h, p, k, path):
+        calls["n"] += 1
+        return {"Items": [{"ProviderIds": {"TV Maze": "1208"}}]}
+    monkeypatch.setattr(metadata_scan, "_get", fake_get)
+
+    cache = {}
+    assert metadata_scan._series_tvmaze_id("h", "p", "k", "3103568", cache) == "1208"
+    assert metadata_scan._series_tvmaze_id("h", "p", "k", "3103568", cache) == "1208"
+    assert calls["n"] == 1  # second call served from cache, no second Emby request

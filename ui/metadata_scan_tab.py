@@ -325,9 +325,10 @@ class MetadataScanTab(tk.Frame):
 
         if len(targets) > 1 and not messagebox.askyesno(
                 "Generate Thumbnails",
-                "Extract a frame and set it as the Primary image for {} items?\n\n"
-                "This runs ffmpeg on the server once per item — it may take a "
-                "while for a large selection.".format(len(targets)),
+                "Set a Primary image for {} items?\n\n"
+                "Tries TVmaze's real episode stills first, falling back to an "
+                "ffmpeg frame extraction on the server — it may take a while "
+                "for a large selection.".format(len(targets)),
                 parent=self):
             return
 
@@ -340,13 +341,20 @@ class MetadataScanTab(tk.Frame):
         host, port, apikey = self._emby_cfg()
         ssh = self.controller.ssh
         ok_count, fail_count = 0, 0
+        # Shared across the whole run so fixing multiple episodes of the same
+        # show only resolves that series' TVmaze id once, not once per episode.
+        tvmaze_cache = {}
         self._log("\n── Generate & upload thumbnails ──────────────────────\n", "section")
         for it in targets:
             self._log("  {} — {}… ".format(it["type"], it["name"]))
-            result = generate_and_upload_thumbnail(ssh, host, port, apikey, it["id"], it["path"])
+            result = generate_and_upload_thumbnail(
+                ssh, host, port, apikey, it["id"], it["path"],
+                item_type=it.get("type", ""), series_id=it.get("series_id"),
+                season=it.get("season"), episode=it.get("episode"),
+                tvmaze_cache=tvmaze_cache)
             if result["ok"]:
                 ok_count += 1
-                self._log("done\n", "ok")
+                self._log("done (via {})\n".format(result.get("source") or "?"), "ok")
                 self.after(0, lambda i=it["id"]: self._row_info.pop(i, None))
             else:
                 fail_count += 1
