@@ -44,6 +44,7 @@ class Sidebar(tk.Frame):
         ("\U0001f465", "Media Users",    42,  None),
         ("\U0001f5c2", "Duplicate Media", 63,  None),
         ("\U0001fa7a", "Integrity Scan", 65,  None),
+        ("\U0001f5bc", "Metadata Scan",  69,  None),
 
         ("\U0001f3ac", "Arr",            11,  "REQUESTS"),
         ("\U0001f4ac", "Bazarr",         64,  None),

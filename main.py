@@ -73,6 +73,7 @@ from ui.secrets_audit_tab import SecretsAuditTab
 from ui.vuln_scan_tab import VulnScanTab
 from ui.media_dedup_tab import MediaDedupTab
 from ui.media_integrity_tab import MediaIntegrityTab
+from ui.metadata_scan_tab import MetadataScanTab
 from ui.recyclarr_tab import RecyclarrTab
 from core.metrics_store import MetricsStore
 from core.scheduler import TaskScheduler
@@ -140,6 +141,7 @@ _TAB_NAMES = {
     59: "Watchstate",
     60: "Cloudflare",   61: "Audit Log",
     64: "Bazarr",
+    69: "Metadata Scan",
 }
 
 
@@ -321,6 +323,7 @@ class MediaServerManager(tk.Tk):
         self.recyclarr_tab         = RecyclarrTab(self.tabs, self)         # 66
         self.watchdog_tab          = WatchdogTab(self.tabs, self)          # 67
         self.secrets_audit_tab     = SecretsAuditTab(self.tabs, self)      # 68
+        self.metadata_scan_tab     = MetadataScanTab(self.tabs, self)      # 69
 
         for tab in [
             self.connection_panel, self.quick_commands, self.dashboard_tab,
@@ -355,6 +358,7 @@ class MediaServerManager(tk.Tk):
             self.recyclarr_tab,
             self.watchdog_tab,
             self.secrets_audit_tab,
+            self.metadata_scan_tab,
         ]:
             self.tabs.add(tab)
 
@@ -580,6 +584,7 @@ class MediaServerManager(tk.Tk):
                 self.after(15000, self.start_security_watchdog)
                 self.after(15500, self.start_restic_verify_watchdog)
                 self.after(16000, self.start_tunnel_exposure_watchdog)
+                self.after(16500, self.start_metadata_scan_watchdog)
                 self.after(16000, self._check_for_update_bg)
                 self._maybe_show_onboarding()
         except tk.TclError:
@@ -983,6 +988,7 @@ class MediaServerManager(tk.Tk):
             66: lambda: self.recyclarr_tab.on_show(),
             67: lambda: self.watchdog_tab.on_show(),
             68: lambda: self.secrets_audit_tab.on_show(),
+            69: lambda: self.metadata_scan_tab.on_show(),
         }
         fn = m.get(idx)
         if fn:
@@ -1705,6 +1711,67 @@ class MediaServerManager(tk.Tk):
                             len(newly_corrupt) - 5)
                         body = "{} new corrupt file{}: {}{}".format(
                             len(newly_corrupt), "s" if len(newly_corrupt) != 1 else "", names, more)
+                        self.after(0, lambda t=title, b=body: self.show_toast(
+                            t, b, level="error"))
+                        self.notification_manager.send_alert(title, body)
+                except Exception as e:
+                    self.watchdog_registry.record_error(NAME, e)
+                else:
+                    self.watchdog_registry.record_ok(NAME)
+        threading.Thread(target=_loop, daemon=True).start()
+
+    # ---------------------------------------------------------
+    # EMBY METADATA SCAN WATCHDOG
+    # ---------------------------------------------------------
+    def start_metadata_scan_watchdog(self):
+        import threading
+        from datetime import datetime, timedelta
+        from core.metadata_scan import scan, diff_new_missing
+
+        NAME = "Emby Metadata Scan"
+        self.watchdog_registry.register(NAME, 1800)
+        stop = threading.Event()
+        self._metadata_scan_watchdog_stop = stop
+
+        def _is_due(cfg):
+            schedule = cfg.get_metadata_scan_schedule()
+            if schedule == "disabled":
+                return False
+            last_run = cfg.get_metadata_scan_last_run()
+            if not last_run:
+                return True
+            try:
+                last = datetime.fromisoformat(last_run)
+            except ValueError:
+                return True
+            days = 1 if schedule == "daily" else 7
+            return datetime.now() >= last + timedelta(days=days)
+
+        def _loop():
+            while not stop.wait(1800):
+                cfg = self.config_manager
+                if not _is_due(cfg):
+                    continue
+                apikey = cfg.emby_apikey
+                if not apikey:
+                    continue
+                try:
+                    result = scan(cfg.emby_host, cfg.emby_port, apikey)
+                    if result.get("error"):
+                        raise RuntimeError(result["error"])
+                    items = result.get("items", [])
+                    baseline = cfg.get_metadata_scan_baseline()
+                    new_baseline, newly_missing = diff_new_missing(baseline, items)
+                    cfg.set_metadata_scan_baseline(new_baseline)
+                    cfg.set_metadata_scan_last_run(datetime.now().isoformat(timespec="seconds"))
+
+                    if newly_missing:
+                        title = "New items missing a Primary image"
+                        names = ", ".join(it["name"] for it in newly_missing[:5])
+                        more = "" if len(newly_missing) <= 5 else " (+{} more)".format(
+                            len(newly_missing) - 5)
+                        body = "{} new item{}: {}{}".format(
+                            len(newly_missing), "s" if len(newly_missing) != 1 else "", names, more)
                         self.after(0, lambda t=title, b=body: self.show_toast(
                             t, b, level="error"))
                         self.notification_manager.send_alert(title, body)

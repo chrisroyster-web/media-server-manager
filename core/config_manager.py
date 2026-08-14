@@ -366,6 +366,30 @@ class ConfigManager:
         self._ss("integrity_scan_baseline", baseline)
 
     # ---------------------------------------------------------
+    # EMBY METADATA SCAN SCHEDULE  (per-server)
+    # ---------------------------------------------------------
+    def get_metadata_scan_schedule(self):
+        """'disabled' | 'daily' | 'weekly'"""
+        return self._gs("metadata_scan_schedule", "disabled")
+
+    def set_metadata_scan_schedule(self, value):
+        self._ss("metadata_scan_schedule", value)
+
+    def get_metadata_scan_last_run(self):
+        return self._gs("metadata_scan_last_run", "")
+
+    def set_metadata_scan_last_run(self, iso_timestamp):
+        self._ss("metadata_scan_last_run", iso_timestamp)
+
+    def get_metadata_scan_baseline(self):
+        """[item_id, ...] — items known to be missing a Primary image as of
+        the last check."""
+        return self._gs("metadata_scan_baseline", [])
+
+    def set_metadata_scan_baseline(self, baseline):
+        self._ss("metadata_scan_baseline", baseline)
+
+    # ---------------------------------------------------------
     # WATCHDOG AUTO-REMEDIATION  (per-server)
     # ---------------------------------------------------------
     def get_service_watchdog_auto_restart(self):
