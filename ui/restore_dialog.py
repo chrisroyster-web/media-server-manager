@@ -241,22 +241,33 @@ class RestoreDialog(tk.Toplevel):
         self._mount_status.config(text="Mounting…", fg=self.theme.blue_bright)
 
         def worker():
+            # Check first with a plain (unprivileged) command — no need to
+            # invoke sudo at all if it's already mounted.
+            check_out, _, _ = self.ssh.run(
+                "mountpoint -q /mnt/nas/wsbackup && echo YES || echo NO")
+            if "YES" in (check_out or ""):
+                self.after(0, lambda: self._on_mount_result(True, "ALREADY_MOUNTED", ""))
+                return
+
             cmd = (
-                "if mountpoint -q /mnt/nas/wsbackup; then echo ALREADY_MOUNTED; else "
-                "sudo apt-get install -y cifs-utils restic >/dev/null 2>&1; "
-                "sudo mkdir -p /mnt/nas/wsbackup && "
+                "apt-get install -y cifs-utils restic >/dev/null 2>&1; "
+                "mkdir -p /mnt/nas/wsbackup && "
                 "printf 'username=%s\\npassword=%s\\n' {user} {password} "
-                "| sudo tee /etc/nas-credentials-temp >/dev/null && "
-                "sudo chmod 600 /etc/nas-credentials-temp && "
-                "sudo mount -t cifs //{host}/wsbackup /mnt/nas/wsbackup "
+                "> /etc/nas-credentials-temp && "
+                "chmod 600 /etc/nas-credentials-temp && "
+                "mount -t cifs //{host}/wsbackup /mnt/nas/wsbackup "
                 "-o credentials=/etc/nas-credentials-temp,vers=2.0,uid=0,gid=0,"
                 "file_mode=0777,dir_mode=0777 "
                 "&& echo MOUNT_OK || echo MOUNT_FAILED; "
-                "sudo rm -f /etc/nas-credentials-temp; fi"
+                "rm -f /etc/nas-credentials-temp"
             ).format(user=shlex.quote(user), password=shlex.quote(password),
                      host=shlex.quote(host))
-            out, err, code = self.ssh.run(cmd)
-            ok = "MOUNT_OK" in (out or "") or "ALREADY_MOUNTED" in (out or "")
+            # run_sudo() feeds the connection's stored password to a single
+            # `sudo -S` invocation — this needs to be ONE sudo call wrapping
+            # everything, not several hand-prefixed "sudo x" pieces chained
+            # together, since only the first would ever see a terminal/password.
+            out, err, code = self.ssh.run_sudo(cmd)
+            ok = "MOUNT_OK" in (out or "")
             self.after(0, lambda: self._on_mount_result(ok, out, err))
 
         threading.Thread(target=worker, daemon=True).start()
@@ -296,8 +307,8 @@ class RestoreDialog(tk.Toplevel):
         self._log_line("Listing snapshots…")
 
         def worker():
-            out, err, code = self.ssh.run(
-                "sudo env {env} restic snapshots --tag fullsystem --json 2>&1".format(
+            out, err, code = self.ssh.run_sudo(
+                "env {env} restic snapshots --tag fullsystem --json".format(
                     env=self._restic_env()))
             self.after(0, lambda: self._on_snapshots_listed(out, err, code))
 
@@ -332,8 +343,8 @@ class RestoreDialog(tk.Toplevel):
         snap_id = snap.split()[0]
 
         def worker():
-            out, _, _ = self.ssh.run(
-                "sudo env {env} restic stats {sid} --json 2>/dev/null".format(
+            out, _, _ = self.ssh.run_sudo(
+                "env {env} restic stats {sid} --json".format(
                     env=self._restic_env(), sid=shlex.quote(snap_id)))
             try:
                 stats = json.loads(out or "{}")
@@ -379,57 +390,138 @@ class RestoreDialog(tk.Toplevel):
 
             self.after(0, lambda: self._log_line(
                 "Restoring system manifest…"))
-            out, err, code = self.ssh.run(
-                "sudo env {env} restic restore {sid} --target / "
-                "--include {info} 2>&1".format(
+            out, err, code = self.ssh.run_sudo(
+                "env {env} restic restore {sid} --target / "
+                "--include {info}".format(
                     env=env, sid=shlex.quote(snap_id),
                     info=shlex.quote(INFO_DIR)))
             self.after(0, lambda: self._log_line(
                 "Manifest restore: exit {}".format(code)))
 
             self.after(0, lambda: self._log_line("Updating package index…"))
-            out, err, code = self.ssh.run("sudo apt-get update 2>&1")
+            out, err, code = self.ssh.run_sudo("apt-get update")
             self.after(0, lambda: self._log_line(
                 "apt-get update: exit {}".format(code)))
 
-            self.after(0, lambda: self._log_line("Reinstalling packages from manifest…"))
-            out, err, code = self.ssh.run(
-                "sudo xargs -a {info}/apt-manual-packages.txt "
-                "apt-get install -y 2>&1".format(info=INFO_DIR))
+            # apt-manual-packages.txt (apt-mark showmanual) only lists the
+            # few dozen top-level packages — NOT the ~1000+ auto-installed
+            # dependencies underneath them (libraries, runc, Python modules,
+            # etc.). Reinstalling only that short list leaves dpkg's
+            # database (about to be overwritten wholesale from the old
+            # machine below) claiming hundreds of packages are installed
+            # when only a fraction actually have files on disk: services
+            # exist in systemd but the unit file is missing, docker/
+            # certbot/avahi fail on missing shared libraries, and so on.
+            # dpkg-selections.txt is the full list and is what actually
+            # needs reinstalling here, while the dpkg database is still
+            # this fresh install's own (i.e. before the restic restore
+            # below replaces it).
             self.after(0, lambda: self._log_line(
-                "Package reinstall: exit {}".format(code)))
+                "Reinstalling the full original package set (every package "
+                "the old machine had, not just the manually-installed "
+                "ones — this can take a while)…"))
+            # dpkg-selections.txt is world-readable (restored as plain root:
+            # root 644), so building the package list needs no privilege —
+            # only the apt-get step below does. Kept as two separate calls
+            # rather than one "awk ... && apt-get ..." run_sudo() string:
+            # run_sudo() only elevates the single command it's given, so an
+            # "&&"-chained second command after it would silently run
+            # unprivileged and fail.
+            self.ssh.run(
+                "awk '$2==\"install\"{{print $1}}' {info}/dpkg-selections.txt "
+                "> /tmp/all-packages.txt".format(info=INFO_DIR))
+            out, err, code = self.ssh.run_sudo(
+                "xargs -a /tmp/all-packages.txt "
+                "apt-get install --reinstall -y")
+            self.after(0, lambda: self._log_line(
+                "Full package reinstall: exit {}".format(code)))
+
+            missing = self._verify_no_missing_files()
+            self.after(0, lambda: self._log_line(
+                "{} file(s) missing after first reinstall pass.".format(missing)))
+            if missing > 0:
+                self.after(0, lambda: self._log_line(
+                    "Retrying the reinstall once to pick up anything the "
+                    "first pass missed…"))
+                self.ssh.run_sudo(
+                    "xargs -a /tmp/all-packages.txt "
+                    "apt-get install --reinstall -y")
+                missing = self._verify_no_missing_files()
+                self.after(0, lambda: self._log_line(
+                    "{} file(s) still missing after retry.".format(missing)))
 
             self.after(0, lambda: self._log_line(
                 "Restoring everything else (excluding /boot) — this is the main step…"))
-            out, err, code = self.ssh.run(
-                "sudo env {env} restic restore {sid} --target / "
-                "--exclude /boot 2>&1".format(env=env, sid=shlex.quote(snap_id)))
+            out, err, code = self.ssh.run_sudo(
+                "env {env} restic restore {sid} --target / "
+                "--exclude /boot".format(env=env, sid=shlex.quote(snap_id)))
             self.controller.audit_log(
                 "restore.run", "snapshot {}".format(snap_id),
                 detail="host={}".format(self._confirm_host),
                 result="ok" if code == 0 else "fail")
-            if code == 0:
-                self.after(0, lambda: self._log_line(
-                    "Restore OK (exit {}).".format(code)))
-            else:
+            if code != 0:
                 self.after(0, lambda: self._log_line(
                     "RESTORE FAILED (exit {}): {}".format(
                         code, (err or out or "")[-500:])))
+                self.after(0, self._on_restore_done)
+                return
+
+            # The restic restore above just overwrote /var/lib/dpkg with the
+            # old machine's copy. That shouldn't reintroduce missing files
+            # (the packages reinstalled above already have their real files
+            # under /usr, /opt, etc., which /var doesn't touch) but this is
+            # the true final state of the machine, so it's the number that
+            # actually matters — confirm it rather than assume restic's own
+            # exit code means the resulting system is coherent.
+            final_missing = self._verify_no_missing_files()
+            self.after(0, lambda: self._log_line(
+                "Restore OK (exit {}). Final verification: {} file(s) "
+                "missing{}.".format(
+                    code, final_missing,
+                    "" if final_missing <= 20 else
+                    " — WARNING: run 'dpkg -V | grep missing' on the server "
+                    "before trusting it")))
 
             self.after(0, self._on_restore_done)
 
         threading.Thread(target=worker, daemon=True).start()
 
+    def _verify_no_missing_files(self):
+        """Count files owned by installed packages that aren't actually on
+        disk (excluding docs/man pages, which regenerate on their own and
+        aren't load-bearing). Called synchronously from the restore worker
+        thread — blocks until the check completes."""
+        out, _, _ = self.ssh.run_sudo(
+            "dpkg -V 2>/dev/null | grep '^missing' | "
+            "grep -v '/usr/share/doc/\\|/usr/share/man/\\|/usr/share/lintian/' | "
+            "wc -l")
+        try:
+            return int((out or "0").strip())
+        except ValueError:
+            return -1  # verification itself failed to run — surfaced as-is, not treated as 0
+
     def _on_restore_done(self):
         self._log_line("--- Restore finished ---")
         self._log_line(
-            "Next: reboot, confirm services come up, then use the Backup "
-            "tab's 'Save & Init Repo' and redeploy backup.sh / "
+            "Next: reboot, then confirm systemctl status for emby-server "
+            "jellyfin sonarr radarr prowlarr bazarr sabnzbdplus cloudflared "
+            "docker avahi-daemon certbot.timer fail2ban nut-server; "
+            "'docker ps -a' (everything Up, nothing Restarting/Exited); "
+            "'certbot renew --dry-run' (an active timer doesn't mean "
+            "renewal actually works); and if this is new hardware, update "
+            "any router DHCP reservation / port-forward that was keyed to "
+            "the old machine's MAC/IP (verify from OUTSIDE the LAN, not "
+            "just locally) before considering the migration done. Then use "
+            "the Backup tab's 'Save & Init Repo' and redeploy backup.sh / "
             "full-system-backup.sh to resume scheduled backups. /boot was "
             "NOT restored automatically — see RESTORE.md if you need "
             "anything from it.")
         messagebox.showinfo(
             "Restore Complete",
-            "Restore finished. Reboot the server, then check services and "
-            "redeploy the backup scripts from the Backup tab.",
+            "Restore finished. Reboot the server, then check services "
+            "(including docker/avahi — see the log for the full list), "
+            "verify certbot renewal actually works (not just that its "
+            "timer is active), update any router DHCP reservation/port-"
+            "forward for new hardware, and redeploy the backup scripts "
+            "from the Backup tab.",
             parent=self)

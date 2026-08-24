@@ -101,11 +101,45 @@ fi
 echo "-- Restoring system manifest..."
 restic restore "$SNAP_ID" --target / --include "$INFO_DIR"
 
-# --- Phase 2: reinstall packages from the manifest ------------------------
+# --- Phase 2: reinstall EVERY originally-installed package ----------------
+# apt-manual-packages.txt only lists top-level packages (apt-mark showmanual)
+# — a few dozen entries. It deliberately does NOT include the ~1000+
+# auto-installed dependencies underneath them (libraries, runc, Python
+# modules, etc.). Installing only the manual list leaves dpkg's database
+# (restored wholesale from the old machine in Phase 3 below) claiming
+# hundreds of packages are installed when only a fraction actually have
+# files on disk — every "systemctl status" shows the unit just doesn't
+# exist, docker/certbot/avahi fail with missing shared libraries, and so
+# on. dpkg-selections.txt is the FULL list (dpkg --get-selections) and is
+# what actually needs reinstalling here, while the dpkg database is still
+# this fresh install's own (i.e. before Phase 3 overwrites it).
 echo "-- Updating package index..."
 apt-get update -qq
-echo "-- Reinstalling packages from manifest..."
-xargs -a "$INFO_DIR/apt-manual-packages.txt" apt-get install -y
+echo "-- Reinstalling the full original package set (this can take a while —"
+echo "   it's every package the old machine had, not just the manually"
+echo "   installed ones)..."
+awk '$2=="install"{print $1}' "$INFO_DIR/dpkg-selections.txt" > /tmp/all-packages.txt
+xargs -a /tmp/all-packages.txt apt-get install --reinstall -y \
+    || echo "WARNING: some packages failed to reinstall — see output above; the verification step below will catch anything left broken."
+
+echo "-- Verifying every package's files actually landed on disk..."
+missing_file_count() {
+    # dpkg -V and grep both routinely exit non-zero (verify found something /
+    # no matching lines) even when nothing is actually wrong — under
+    # set -o pipefail that would otherwise trip set -e and kill the script
+    # before it ever prints a result, so the whole pipeline is deliberately
+    # forced to exit 0; the wc -l count on stdout is what actually matters.
+    { dpkg -V 2>/dev/null | grep '^missing' \
+        | grep -v '/usr/share/doc/\|/usr/share/man/\|/usr/share/lintian/' | wc -l ; } || true
+}
+MISSING=$(missing_file_count)
+echo "   $MISSING file(s) missing (excluding docs/man, which regenerate on their own)."
+if [ "$MISSING" -gt 0 ]; then
+    echo "-- Retrying the reinstall once to pick up anything the first pass missed..."
+    xargs -a /tmp/all-packages.txt apt-get install --reinstall -y || true
+    MISSING=$(missing_file_count)
+    echo "   $MISSING file(s) still missing after the retry."
+fi
 
 # --- Phase 3: restore everything else, excluding /boot --------------------
 # /boot is deliberately left alone: the fresh install's own bootloader/
@@ -116,19 +150,44 @@ xargs -a "$INFO_DIR/apt-manual-packages.txt" apt-get install -y
 echo "-- Restoring everything else (excluding /boot) — this is the main step..."
 restic restore "$SNAP_ID" --target / --exclude /boot
 
+# --- Phase 4: final verification (Phase 3 just overwrote /var/lib/dpkg) ---
+# Restoring /var replaces dpkg's own bookkeeping with the old machine's
+# copy. It shouldn't reintroduce missing files (the packages reinstalled
+# above already have their real files under /usr, /opt, etc., which /var
+# doesn't touch) but this is the true final state of the machine, so it's
+# the number that actually matters — confirm it here rather than assume.
+echo "-- Final verification..."
+FINAL_MISSING=$(missing_file_count)
+if [ "$FINAL_MISSING" -gt 20 ]; then
+    echo "WARNING: $FINAL_MISSING files are still missing after restore."
+    echo "Run 'dpkg -V | grep missing' to see what's left before trusting this box."
+else
+    echo "OK: package files verified intact ($FINAL_MISSING trivial leftover(s), if any — e.g. stale old-kernel-module dpkg entries)."
+fi
+
 echo
 echo "=== Restore finished ==="
 echo "Next steps:"
 echo "  1. Reboot."
-echo "  2. Confirm services: systemctl status emby-server sonarr radarr prowlarr bazarr sabnzbdplus"
-echo "  3. Confirm containers: docker ps"
+echo "  2. Confirm services: systemctl status emby-server jellyfin sonarr radarr"
+echo "     prowlarr bazarr sabnzbdplus cloudflared docker avahi-daemon"
+echo "     certbot.timer fail2ban nut-server"
+echo "  3. Confirm containers: docker ps -a  (every one should be Up, none"
+echo "     Restarting/Exited)"
 echo "  4. Confirm NAS shares remount: mount -a"
-echo "  5. Re-run backup.sh and full-system-backup.sh once manually (or via"
+echo "  5. Confirm SSL renewal actually works, not just that the timer is"
+echo "     active: sudo certbot renew --dry-run"
+echo "  6. Re-run backup.sh and full-system-backup.sh once manually (or via"
 echo "     the app's Backup tab) to confirm both still work and to"
 echo "     re-establish crontab entries if the restore didn't bring"
 echo "     etc/cron.d and the root crontab back correctly."
-echo "  6. /boot was NOT restored automatically — see RESTORE.md if you"
+echo "  7. /boot was NOT restored automatically — see RESTORE.md if you"
 echo "     need anything from it."
-echo "  7. Run harden-server.sh — the restored snapshot should already carry"
+echo "  8. Run harden-server.sh — the restored snapshot should already carry"
 echo "     the security hardening (it's just /etc config), but this confirms"
 echo "     it and is a safe no-op if so: sudo bash harden-server.sh"
+echo "  9. New hardware means a new MAC address (see RESTORE.md's networking"
+echo "     note) — update any router DHCP reservation / port-forward (e.g."
+echo "     Emby's remote port 8920) to point at this machine before"
+echo "     considering the migration done, and verify from OUTSIDE the LAN,"
+echo "     not just locally."
