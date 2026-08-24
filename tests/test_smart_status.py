@@ -1,4 +1,4 @@
-from core.smart_status import check_smart_health
+from core.smart_status import check_smart_health, parse_nvme_extra
 
 
 class _FakeSSH:
@@ -91,6 +91,52 @@ def test_multiple_devices_each_queried():
     assert rows[1]["device"] == "/dev/sdb"
     assert rows[0]["health"] == "PASSED"
     assert rows[1]["health"] == "FAILED"
+
+
+_NVME_ATTRS_CLEAN = (
+    "Critical Warning:                   0x00\n"
+    "Temperature:                        38 Celsius\n"
+    "Available Spare:                    100%\n"
+    "Percentage Used:                    0%\n"
+    "Media and Data Integrity Errors:    0\n"
+)
+_NVME_ATTRS_BAD = (
+    "Critical Warning:                   0x04\n"
+    "Temperature:                        38 Celsius\n"
+    "Percentage Used:                    5%\n"
+    "Media and Data Integrity Errors:    2\n"
+)
+
+
+def test_parse_nvme_extra_reads_media_errors_and_critical_warning():
+    extra = parse_nvme_extra(_NVME_ATTRS_BAD)
+    assert extra == {"uncorr": "2", "pending": "4"}
+
+
+def test_parse_nvme_extra_clean_drive_reports_zero():
+    extra = parse_nvme_extra(_NVME_ATTRS_CLEAN)
+    assert extra == {"uncorr": "0", "pending": "0"}
+
+
+def test_parse_nvme_extra_ignores_percentage_used():
+    # Percentage Used climbs steadily under normal use -- must never be
+    # mapped into an error-style field, or every aging drive would "warn".
+    extra = parse_nvme_extra("Percentage Used:                    37%\n")
+    assert extra == {}
+
+
+def test_nvme_drive_gets_media_errors_mapped_onto_uncorr():
+    ssh = _FakeSSH()
+    ssh._responses = [
+        ("/dev/nvme0n1", "", 0),                # lsblk
+        ("Model Number: YMTC PC41Q\n", "", 0),  # -i
+        (_HEALTH_PASSED, "", 0),                # -H (NVMe still reports PASSED/FAILED)
+        (_NVME_ATTRS_BAD, "", 0),               # -A (NVMe log-page format)
+    ]
+    rows = check_smart_health(ssh)
+    assert rows[0]["reallocated"] == "--"   # no SATA equivalent -- correctly left blank
+    assert rows[0]["uncorr"] == "2"
+    assert rows[0]["pending"] == "4"
 
 
 def test_a_probe_exception_is_skipped_not_fatal():

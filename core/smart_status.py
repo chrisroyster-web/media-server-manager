@@ -27,6 +27,41 @@ def _needs_flag(text):
     return any(m in (text or "") for m in _USB_MARKERS)
 
 
+def parse_nvme_extra(attrs_out):
+    """
+    NVMe drives' `smartctl -A` output is a log page (Critical Warning,
+    Temperature, Available Spare, Percentage Used, Media and Data Integrity
+    Errors, ...), not SATA's numbered attribute table -- so the id-5/197/198
+    lookup below never matches anything for them, and reallocated/pending/
+    uncorr silently stay "--" forever. That's invisible to both the tab's
+    warn-highlighting and main.py's disk-health watchdog (whose _attr_bad
+    only checks those three keys), so a wearing-out NVMe drive with real
+    media errors never triggers an alert -- only a full "FAILED" overall
+    health verdict would, which usually means the drive is already toast.
+
+    Maps NVMe's own error-style fields onto the same "pending"/"uncorr"
+    slots so the existing warn/alert logic picks them up unchanged:
+      - "Media and Data Integrity Errors" -> uncorr (same 0-good/>0-bad
+        semantics as SATA's uncorrectable-sector count).
+      - "Critical Warning" (a hex bitmask, 0x00 = nothing set) -> pending,
+        converted to decimal so int(...) > 0 works the same way.
+    "Percentage Used" is deliberately left unmapped -- it climbs steadily
+    under normal use (unlike an error count), so treating any nonzero value
+    as "bad" would false-alarm on every drive that isn't brand new.
+    """
+    extra = {}
+    for line in (attrs_out or "").splitlines():
+        if line.startswith("Media and Data Integrity Errors:"):
+            extra["uncorr"] = line.rsplit(":", 1)[-1].strip()
+        elif line.startswith("Critical Warning:"):
+            raw = line.rsplit(":", 1)[-1].strip()
+            try:
+                extra["pending"] = str(int(raw, 16))
+            except ValueError:
+                pass
+    return extra
+
+
 def _query_one(ssh, dev):
     result = {
         "device": dev, "model": "?", "health": "UNKNOWN",
@@ -85,6 +120,12 @@ def _query_one(ssh, dev):
         parts = line.split()
         if len(parts) >= 10 and parts[0] in attr_map:
             result[attr_map[parts[0]]] = parts[-1]
+
+    # NVMe drives use a completely different -A format (see parse_nvme_extra) --
+    # fill in their equivalents wherever the SATA-style loop above found nothing.
+    for key, val in parse_nvme_extra(attrs_out).items():
+        if result[key] == "--":
+            result[key] = val
 
     return result
 

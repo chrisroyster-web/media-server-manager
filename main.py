@@ -585,6 +585,7 @@ class MediaServerManager(tk.Tk):
                 self.after(15500, self.start_restic_verify_watchdog)
                 self.after(16000, self.start_tunnel_exposure_watchdog)
                 self.after(16500, self.start_metadata_scan_watchdog)
+                self.after(17000, self.start_lvm_free_space_watchdog)
                 self.after(16000, self._check_for_update_bg)
                 self._maybe_show_onboarding()
         except tk.TclError:
@@ -2092,6 +2093,59 @@ class MediaServerManager(tk.Tk):
                                 t, b, level="error"))
                             self.notification_manager.send_alert(title, body)
                         self._mount_prev_states[path] = mounted
+                except Exception as e:
+                    self.watchdog_registry.record_error(NAME, e)
+                else:
+                    self.watchdog_registry.record_ok(NAME)
+        threading.Thread(target=_loop, daemon=True).start()
+
+    # ---------------------------------------------------------
+    # LVM FREE SPACE WATCHDOG
+    # ---------------------------------------------------------
+    def start_lvm_free_space_watchdog(self):
+        import threading
+        from core.lvm_status import check_vg_free_space
+
+        NAME = "LVM Free Space Watchdog"
+        self.watchdog_registry.register(NAME, 21600)
+        self._lvm_free_prev_bad = {}
+        stop = threading.Event()
+        self._lvm_free_watchdog_stop = stop
+
+        def _loop():
+            while not stop.wait(21600):  # every 6h -- a capacity mistake, not urgent
+                if not self.ssh.connected:
+                    continue
+                try:
+                    vgs = check_vg_free_space(self.ssh)
+                    for row in vgs:
+                        vg   = row["vg"]
+                        bad  = row["bad"]
+                        # Defaults to False (not None) so a VG that's ALREADY
+                        # bad the very first time this watchdog ever checks it
+                        # (e.g. right after a restore that dropped a volume,
+                        # like the 2026-08-24 MS-01 migration) still alerts --
+                        # unlike a dropped mount, there's essentially no
+                        # legitimate reason for hundreds of GB to sit
+                        # permanently unallocated, so "first observed state"
+                        # doesn't need the same benefit-of-the-doubt treatment
+                        # start_mount_watchdog gives it. Still only alerts
+                        # once per bad *streak*, not every 6h it stays bad.
+                        prev = self._lvm_free_prev_bad.get(vg, False)
+                        if bad and not prev:
+                            title = "Unallocated disk space: {}".format(vg)
+                            body  = (
+                                "{:.0f}GB is sitting free in volume group '{}', not "
+                                "part of any filesystem. This is exactly what "
+                                "happened after the 2026-08-24 MS-01 restore (fstab "
+                                "referenced a volume that no longer existed) -- run "
+                                "'vgs'/'lvs' on the server and see RESTORE.md's "
+                                "downloads-volume note.".format(row["free_gb"], vg)
+                            )
+                            self.after(0, lambda t=title, b=body: self.show_toast(
+                                t, b, level="error"))
+                            self.notification_manager.send_alert(title, body)
+                        self._lvm_free_prev_bad[vg] = bad
                 except Exception as e:
                     self.watchdog_registry.record_error(NAME, e)
                 else:

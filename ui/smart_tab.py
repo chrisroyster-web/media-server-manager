@@ -6,6 +6,8 @@ import threading
 import time
 import shlex
 
+from core.smart_status import parse_nvme_extra
+
 
 class SmartTab(tk.Frame):
     """
@@ -280,6 +282,14 @@ class SmartTab(tk.Frame):
                     for i, p in enumerate(parts):
                         if p == "Temperature:" and i + 1 < len(parts):
                             result["temp"] = parts[i + 1]
+
+        # NVMe's -A output has no numbered attribute table, so reallocated/
+        # pending/uncorr above stay "--" for it -- fill in NVMe's own
+        # error-style fields (see core.smart_status.parse_nvme_extra) so a
+        # wearing-out NVMe drive still gets the "warn" row-highlighting below.
+        for key, val in parse_nvme_extra(attrs_out).items():
+            if result[key] == "--":
+                result[key] = val
 
         return result
 

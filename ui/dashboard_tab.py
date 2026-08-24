@@ -176,6 +176,7 @@ class DashboardTab(tk.Frame):
         rnet.pack(fill="x", padx=16, pady=6)
         self.card_net_rx = self._stat_card(rnet, "Download (RX)", "--", self.theme.status_running)
         self.card_net_tx = self._stat_card(rnet, "Upload (TX)",   "--", self.theme.blue)
+        self.card_nic_bond = self._stat_card(rnet, "NIC Bond",    "--", self.theme.text_muted)
 
         # ---- UPS ----
         self._section("UPS")
@@ -790,7 +791,7 @@ class DashboardTab(tk.Frame):
         self.card_connection.config(text="Not connected", fg=m)
         for card in (self.card_uptime, self.card_temp, self.card_cpu,
                      self.card_ram, self.card_disk, self.card_net_rx,
-                     self.card_net_tx, self.card_ups_battery,
+                     self.card_net_tx, self.card_nic_bond, self.card_ups_battery,
                      self.card_ups_load, self.card_ups_runtime,
                      self.card_gpu_util, self.card_gpu_vram, self.card_gpu_temp):
             card.config(text="--", fg=m)
@@ -945,6 +946,31 @@ class DashboardTab(tk.Frame):
                        self.card_disk_forecast.config(text=t, fg=c))
             self.after(0, lambda t=rx_text: self.card_net_rx.config(text=t))
             self.after(0, lambda t=tx_text: self.card_net_tx.config(text=t))
+
+            # -- NIC bond status --
+            # No tab previously surfaced this at all -- a slave link dropping
+            # (e.g. one leg of the MS-01's bond0) was invisible short of
+            # manually running `cat /proc/net/bonding/bond0`.
+            bond_out, _, _ = ssh.run(
+                'for f in /proc/net/bonding/*; do echo "==BOND:$(basename "$f")=="; '
+                'cat "$f" 2>/dev/null; done 2>/dev/null'
+            )
+            bond_text, bond_color = "--", self.theme.text_muted
+            if bond_out and "==BOND:" in bond_out:
+                # Only the first bond interface is shown -- this server only
+                # has one (bond0), and a single stat card has no room for more.
+                block = bond_out.split("==BOND:", 1)[1]
+                _bond_name, _, block = block.partition("==\n")
+                slave_chunks = block.split("Slave Interface:")[1:]
+                total = len(slave_chunks)
+                up    = sum(1 for c in slave_chunks if "MII Status: up" in c)
+                if total:
+                    bond_text  = "{}/{} up".format(up, total)
+                    bond_color = (self.theme.status_running if up == total
+                                  else self.theme.status_stopped_text if up == 0
+                                  else self.theme.yellow)
+            self.after(0, lambda t=bond_text, c=bond_color:
+                       self.card_nic_bond.config(text=t, fg=c))
 
             # -- UPS --
             out, _, _ = ssh.run("upsc apcups@localhost 2>/dev/null")
