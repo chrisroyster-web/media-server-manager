@@ -145,9 +145,49 @@ to the Cloudflare account, not the hardware, so it should just work once the
    sudo -E restic restore <snapshot-id> --target /tmp/boot-ref --include /boot
    ```
 
+   **If a previous box had `/opt/media/downloads` split off onto its own
+   LVM volume** (done to avoid downloads/config data competing with the OS
+   for space on a small root partition — see the `server-environment`
+   notes), the just-restored `/etc/fstab` references *that old volume's
+   UUID*, which doesn't exist on the fresh disk. Left alone,
+   `/opt/media/downloads` silently becomes an ordinary directory inside the
+   (often small) root filesystem again, and the rest of the drive sits
+   unused — this is exactly what happened during the 2026-08-24 MS-01
+   migration (850GB of a 951GB drive went unallocated until caught and
+   fixed manually afterward). Check for this and fix it before moving on:
+   ```
+   df -h /opt/media/downloads   # if it reports the root filesystem's own
+                                 # size, not a size of its own, the volume
+                                 # needs recreating
+   vgs                          # confirms free space is sitting unused in
+                                 # the volume group
+   ```
+   If so, recreate it (adjust the VG name if yours differs from `ubuntu-vg`):
+   ```
+   sudo mv /opt/media/downloads /opt/media/downloads.tmp   # restic already
+                                                             # restored its
+                                                             # contents here
+   sudo lvcreate -l 100%FREE -n downloads-lv ubuntu-vg
+   sudo mkfs.ext4 -L downloads /dev/ubuntu-vg/downloads-lv
+   sudo mkdir -p /opt/media/downloads
+   NEW_UUID=$(sudo blkid -s UUID -o value /dev/ubuntu-vg/downloads-lv)
+   sudo sed -i '\#/opt/media/downloads#d' /etc/fstab
+   echo "UUID=$NEW_UUID  /opt/media/downloads  ext4  defaults  0  2" | sudo tee -a /etc/fstab
+   sudo mount /opt/media/downloads
+   sudo rsync -aHAX /opt/media/downloads.tmp/ /opt/media/downloads/
+   sudo rm -rf /opt/media/downloads.tmp
+   sudo chown mediasvr:mediasvr /opt/media/downloads
+   ```
+   `rebuild-server.sh` now does this step automatically (see its "Phase
+   3.5") — this manual version is only needed if you're following this
+   document by hand instead of running the script.
+
 6. **Reboot**, then confirm:
    - `mount -a` remounts all the NAS shares from the restored `/etc/fstab`
      without errors.
+   - `df -h /opt/media/downloads` reports its own filesystem, not the root
+     filesystem's size — otherwise see the downloads-volume note under
+     step 5 above.
    - `systemctl status emby-server jellyfin sonarr radarr prowlarr bazarr
      sabnzbdplus cloudflared docker avahi-daemon certbot.timer fail2ban
      nut-server` — services come up. For `cloudflared` specifically, also

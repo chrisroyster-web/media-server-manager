@@ -150,6 +150,55 @@ fi
 echo "-- Restoring everything else (excluding /boot) — this is the main step..."
 restic restore "$SNAP_ID" --target / --exclude /boot
 
+# --- Phase 3.5: recreate a split-off downloads volume, if the old box had one ---
+# A prior box's admin may have carved /opt/media/downloads off the root LV
+# into its own volume so downloads/config data doesn't compete with the OS
+# for space on what's often a small root partition (see server-environment
+# notes). The fstab line Phase 3 just restored references *that old
+# volume's UUID*, which doesn't exist on this fresh disk — left alone,
+# /opt/media/downloads silently becomes an ordinary directory inside the
+# small root LV again, and the rest of the drive sits unused. This is
+# exactly what happened during the 2026-08-24 MS-01 migration (850GB of a
+# 951GB drive went unallocated until caught and fixed manually afterward).
+# Detect and fix it automatically here instead of relying on someone
+# noticing.
+echo "-- Checking for a downloads volume to recreate..."
+VG_NAME=$(vgs --noheadings -o vg_name 2>/dev/null | awk '{print $1}' | head -1)
+if [ -n "$VG_NAME" ] && ! lvs "$VG_NAME/downloads-lv" >/dev/null 2>&1; then
+    VG_FREE=$(vgs --noheadings -o vg_free --units g "$VG_NAME" 2>/dev/null | tr -d ' g')
+    if awk "BEGIN{exit !($VG_FREE > 5)}" 2>/dev/null; then
+        echo "   Found ${VG_FREE}G free in $VG_NAME -- creating downloads-lv..."
+        lvcreate -l 100%FREE -n downloads-lv "$VG_NAME"
+        mkfs.ext4 -L downloads "/dev/$VG_NAME/downloads-lv"
+        NEW_UUID=$(blkid -s UUID -o value "/dev/$VG_NAME/downloads-lv")
+
+        # restic already restored /opt/media/downloads's *contents* onto
+        # the root filesystem at that path (the volume didn't exist yet to
+        # receive them) -- move them aside, mount the new volume, then
+        # copy them back onto it so nothing from the old box is lost.
+        if [ -d /opt/media/downloads ]; then
+            mv /opt/media/downloads /opt/media/downloads.tmp-premount
+        fi
+        mkdir -p /opt/media/downloads
+        # Replace any stale /opt/media/downloads fstab line (old box's
+        # UUID, commented or not) with one pointing at the volume just
+        # created.
+        sed -i '\#/opt/media/downloads#d' /etc/fstab
+        echo "UUID=$NEW_UUID  /opt/media/downloads  ext4  defaults  0  2" >> /etc/fstab
+        mount /opt/media/downloads
+        if [ -d /opt/media/downloads.tmp-premount ]; then
+            rsync -aHAX /opt/media/downloads.tmp-premount/ /opt/media/downloads/
+            rm -rf /opt/media/downloads.tmp-premount
+        fi
+        chown mediasvr:mediasvr /opt/media/downloads 2>/dev/null || true
+        echo "   downloads-lv created and mounted (${VG_FREE}G)."
+    else
+        echo "   Only ${VG_FREE}G free in $VG_NAME -- not enough to bother, skipping."
+    fi
+else
+    echo "   downloads-lv already exists or no LVM volume group found -- skipping."
+fi
+
 # --- Phase 4: final verification (Phase 3 just overwrote /var/lib/dpkg) ---
 # Restoring /var replaces dpkg's own bookkeeping with the old machine's
 # copy. It shouldn't reintroduce missing files (the packages reinstalled
@@ -175,6 +224,9 @@ echo "     certbot.timer fail2ban nut-server"
 echo "  3. Confirm containers: docker ps -a  (every one should be Up, none"
 echo "     Restarting/Exited)"
 echo "  4. Confirm NAS shares remount: mount -a"
+echo "     Also confirm 'df -h /opt/media/downloads' shows its own volume,"
+echo "     not the root filesystem's size (Phase 3.5 above handles this"
+echo "     automatically, but double-check the output above for warnings)."
 echo "  5. Confirm SSL renewal actually works, not just that the timer is"
 echo "     active: sudo certbot renew --dry-run"
 echo "  6. Re-run backup.sh and full-system-backup.sh once manually (or via"
