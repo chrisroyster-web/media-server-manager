@@ -216,8 +216,20 @@ curl -s https://packagecloud.io/install/repositories/ookla/speedtest-cli/script.
 sudo apt install speedtest
 ```
 
-### Cloudflare (DNS, security events, Tunnel status, cache purge)
-No server-side install needed — this integration talks to Cloudflare's API directly, not your server. You just need a scoped API Token, your Zone ID, and (optionally) your Account ID. Click the **?** button next to the Cloudflare section in Config for exact token permissions and where to find your IDs.
+### Cloudflare — two independent pieces
+
+**1. Cloudflare API integration (DNS, security events, Tunnel status, cache purge)** — no server-side install needed, this talks to Cloudflare's API directly, not your server. You just need a scoped API Token, your Zone ID, and (optionally) your Account ID. Click the **?** button next to the Cloudflare section in Config for exact token permissions and where to find your IDs. This is what shows Tunnel status in the app — it does not create or run a tunnel by itself.
+
+**2. Cloudflare Tunnel (`cloudflared`) — actually exposes services to the internet, and does need a server-side install.** This is a separate, one-time setup independent of the app. On this server it's a systemd service (`/usr/bin/cloudflared --no-autoupdate --config /etc/cloudflared/config.yml tunnel run`), reading a named-tunnel config at `/etc/cloudflared/config.yml` with per-service ingress rules (hostname → `http://localhost:PORT`) and a credentials file under `/root/.cloudflared/<tunnel-id>.json`. Both paths fall under `/etc` and `/root`, so they're captured automatically by the full-system backup (see [RESTORE.md](RESTORE.md)) — no extra backup step needed, but after a rebuild, confirm `systemctl status cloudflared` is active and re-verify each tunneled hostname resolves.
+
+**Not every service needs to go through the tunnel.** Only what's listed in `config.yml`'s `ingress` section is reachable via its Cloudflare hostname; anything else (e.g. Emby) still needs a traditional router port-forward for remote access — check `/etc/cloudflared/config.yml` on the server to see exactly what's currently tunneled versus what isn't.
+
+**HTTPS for the tunneled hostnames comes from a separate piece: a wildcard Let's Encrypt certificate**, obtained via `certbot` using the `python3-certbot-dns-cloudflare` plugin (a DNS-01 challenge — proves domain ownership through Cloudflare's API rather than needing port 80 open) and auto-renewed by `certbot.timer`. This is what the app's SSL certificate expiry checker (Tools → SSL Certs) is watching. Install with:
+```bash
+sudo apt install certbot python3-certbot-dns-cloudflare
+sudo certbot certonly --dns-cloudflare --dns-cloudflare-credentials /path/to/cloudflare.ini -d yourdomain.com -d '*.yourdomain.com'
+```
+The Cloudflare API token used here needs `Zone:DNS:Edit` permission on the zone — this can be the same token used for the app's Cloudflare integration, or a separate narrower-scoped one.
 
 ---
 
@@ -242,14 +254,14 @@ Open the **Config** tab (gear icon in the sidebar). Every integration section ha
 | Radarr | Host, port (7878), API key |
 | Prowlarr | Host, port (9797), API key |
 | Overseerr | Host, port (5055), API key |
-| Jellyseerr | Host, port (5055), API key |
+| Jellyseerr | Host, port (default 5055, but check what your instance actually listens on — Jellyseerr and Overseerr share the same default and often get moved to avoid colliding), API key |
 | Tautulli | Host, port (8181), API key |
 | Uptime Kuma | Host, port (3001), slug, API key |
 | Netdata | Host, port (19999) |
 | Glances | Host, port (61208), username/password (if auth enabled) |
 | What's Up Docker | Host, port (defaults to 3000 — set to 3002 if you used the docker run example below, which maps it to 3002 to avoid colliding with Uptime Kuma) |
 | Watchstate | Host, port (default 8090) |
-| Cloudflare | API Token, Zone ID, Account ID (optional, for Tunnel status) — see the **?** button in this section |
+| Cloudflare | API Token, Zone ID, Account ID (optional, for Tunnel status) — see the **?** button in this section. This configures the app's read/write access to your Cloudflare account; it does not install or run the Tunnel itself — see "Cloudflare — two independent pieces" under Server-Side Prerequisites. |
 | VPN | Enable/disable + type (ProtonVPN / WireGuard / OpenVPN) |
 | Reverse Proxy | Enable/disable + type (Nginx / Caddy / Traefik) |
 | Tailscale | Enable/disable to show the Tailscale tab |
@@ -297,21 +309,22 @@ Output: `installer_output\AllClearServerServices_v2.0.0_Setup.exe`
 
 ## Backup
 
-`backup.sh` runs weekly (Sunday 03:00 via root crontab) and copies config and data for:
+`backup.sh` runs **daily** (03:00 via root crontab) and copies config and data for:
 - Emby library and config
-- Sonarr, Radarr, Prowlarr, Bazarr
+- Sonarr, Radarr, Prowlarr, Bazarr (including each app's recent in-app backup zips)
 - SABnzbd
-- Docker compose files
-- Uptime Kuma data volume
+- Docker (compose files, volumes)
 - WUD and ntfy config directories
 - System files (fstab, netplan, crontab)
 - The backup and cleanup scripts themselves
+
+**Cloudflare Tunnel config is *not* part of this daily backup.** `/etc/cloudflared/config.yml` and its credentials file are only captured by the separate **weekly full-system snapshot** (`full-system-backup.sh`, documented in [RESTORE.md](RESTORE.md)) — if you ever need to recover just the tunnel config without a full rebuild, pull it from a `restic restore` of that repository, not from the daily backup below.
 
 Backups are written to `/mnt/nas/wsbackup/mediaserver/YYYYMMDD/` and pruned after 30 days.
 
 Schedule (add with `sudo crontab -e`):
 ```
-0 3 * * 0  /opt/media/backup.sh >> /var/log/media-backup.log 2>&1
+0 3 * * *  /opt/media/backup.sh >> /var/log/media-backup.log 2>&1
 ```
 
 You can also trigger a backup on demand from the **Backups** tab or the **Quick Commands** panel.
@@ -329,8 +342,9 @@ You can also trigger a backup on demand from the **Backups** tab or the **Quick 
 | Sonarr | 8989 |
 | Radarr | 7878 |
 | Prowlarr | 9797 |
+| Bazarr | 6767 |
 | Overseerr | 5055 |
-| Jellyseerr | 5055 |
+| Jellyseerr | 5055 *(default — confirm on your instance; often moved, e.g. 5056, to avoid colliding with Overseerr)* |
 | Tautulli | 8181 |
 | Uptime Kuma | 3001 |
 | WUD | 3002 |
@@ -338,7 +352,11 @@ You can also trigger a backup on demand from the **Backups** tab or the **Quick 
 | Watchstate | 8090 *(change one if you also run ntfy)* |
 | Netdata | 19999 |
 | Glances | 61208 |
+| Homarr | 7575 |
+| Tracearr | 3000 |
 | Pi-hole | 80 |
+
+Some of these may also be reachable from outside your LAN via a Cloudflare Tunnel hostname instead of a router port-forward — see the Cloudflare Tunnel entry under Server-Side Prerequisites, and check `/etc/cloudflared/config.yml` on your server for which ones are actually configured that way.
 
 ---
 
