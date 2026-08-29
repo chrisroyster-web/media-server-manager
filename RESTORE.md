@@ -76,6 +76,42 @@ separate step is needed, but do re-verify it in step 6 — a tunnel ID is tied
 to the Cloudflare account, not the hardware, so it should just work once the
 `cloudflared` package itself is (re)installed.
 
+**Emby's reverse proxy (`caddy`)** — added 2026-08-27 — fronts Emby on the
+same external port (8920) that was previously forwarded straight to Emby
+itself; this is deliberately *not* routed through the Cloudflare Tunnel
+above (Cloudflare's proxy isn't meant for sustained large-file/video
+streaming on standard plans, which is also presumably why Emby was never in
+`cloudflared`'s ingress list to begin with). Everything Caddy needs is
+ordinary `/etc` content, restored automatically in step 5 like any other
+config:
+- `/etc/caddy/Caddyfile` — the site block (`emby.mrbitter.com:8920 →
+  localhost:8096`), with HTTP/3 and HTTP/2 both disabled
+  (`servers { protocols h1 }`) for native-app compatibility — re-enabling
+  either broke the iOS Emby app's ability to connect (see git history for
+  the full debugging trail if this needs revisiting).
+- `/etc/caddy/certs/{fullchain,privkey}.pem` — Caddy's own copy of the
+  existing `*.mrbitter.com` wildcard cert (same one Emby used to load as a
+  `.pfx`), kept in sync by a certbot deploy hook rather than Caddy managing
+  its own ACME/Let's Encrypt account.
+- Two certbot deploy hooks now fire on every renewal, both under
+  `/etc/letsencrypt/renewal-hooks/deploy/`: `emby-cert.sh` (pre-existing —
+  regenerates the NAS-hosted `.pfx` at `/mnt/nas/audiobooks/_.mrbitter.com.pfx`
+  for other devices that still read it directly; no longer restarts
+  `emby-server`, since Emby itself stopped needing that file) and
+  `caddy-emby.sh` (new — copies the PEM pair into `/etc/caddy/certs` with
+  `caddy`-readable permissions and reloads the `caddy` service).
+
+To make this work, Emby's own HTTPS had to be turned off in
+`/var/lib/emby/config/system.xml` (restored automatically as part of `var`,
+but **worth explicitly confirming after a restore** in case a fresh
+`emby-server` install ever regenerates defaults): `EnableHttps` → `false`,
+`HttpsPortNumber` → `0` (setting `EnableHttps` alone does **not** stop Emby
+binding the port — the port number itself has to be zeroed too),
+`RequireHttps` → `false`, `IsBehindProxy` → `true`. If `emby-server` comes
+back up still listening on `8920` itself after a restore, Caddy will fail to
+bind that port and its own `systemctl status caddy` will show it — that's
+the tell that these flags need reapplying by hand.
+
 ## Restore procedure
 
 1. **Install a minimal Ubuntu server** on the new/repaired hardware. Match
@@ -116,7 +152,14 @@ to the Cloudflare account, not the hardware, so it should just work once the
    MS-01 migration: Docker, `avahi-daemon`, `certbot`, and Emby all showed
    up as "installed" in `systemctl`/`dpkg -l` while missing the actual
    shared libraries or unit files they needed, and it took hours to
-   discover piecemeal instead of catching it here in one pass.
+   discover piecemeal instead of catching it here in one pass. Packages from
+   a **third-party apt repo** (Docker, `cloudflared`, certbot's Cloudflare
+   DNS plugin, and — since 2026-08-27 — `caddy`) are the most likely to hit
+   this: their repo definition lives under `/etc/apt/sources.list.d/`, which
+   isn't restored until step 5, *after* this reinstall pass runs against a
+   fresh install's default (Ubuntu-only) sources. Re-run the `xargs ... apt
+   install --reinstall` command again once step 5 has restored `/etc` — it's
+   idempotent — and re-check `dpkg -V` for these specifically.
    ```
    sudo apt update
    awk '$2=="install"{print $1}' /var/lib/media-fullbackup-info/dpkg-selections.txt \
@@ -189,22 +232,29 @@ to the Cloudflare account, not the hardware, so it should just work once the
      filesystem's size — otherwise see the downloads-volume note under
      step 5 above.
    - `systemctl status emby-server jellyfin sonarr radarr prowlarr bazarr
-     sabnzbdplus cloudflared docker avahi-daemon certbot.timer fail2ban
-     nut-server` — services come up. For `cloudflared` specifically, also
-     confirm each hostname in `/etc/cloudflared/config.yml` actually
+     sabnzbdplus cloudflared caddy docker avahi-daemon certbot.timer
+     fail2ban nut-server` — services come up. For `cloudflared` specifically,
+     also confirm each hostname in `/etc/cloudflared/config.yml` actually
      resolves — the tunnel itself coming up doesn't guarantee every
      ingress rule's local service is listening yet. `avahi-daemon` (mDNS —
      lets other devices find the server as `<hostname>.local`) is easy to
-     forget precisely because nothing else depends on it to start.
+     forget precisely because nothing else depends on it to start. For
+     `caddy`, confirm it — not `emby-server` — owns port 8920
+     (`sudo ss -tlnp | grep 8920` should show `caddy`); if `emby-server`
+     has it instead, its HTTPS-disabling flags need reapplying (see the
+     Emby reverse proxy note above), and then `curl -s
+     https://emby.mrbitter.com:8920/web/index.html` should return Emby's
+     page through the proxy.
    - `sudo certbot renew --dry-run` — don't stop at `certbot.timer` being
      active or `certbot certificates` listing the cert; neither actually
      exercises the renewal path. A broken certbot install (missing Python
      deps like `josepy` or the Cloudflare DNS plugin, both hit during the
      2026-08-23 migration) can leave the timer "active" while every real
      renewal attempt would fail — the dry-run is the only check that
-     actually proves auto-renewal works, including the
-     `/etc/letsencrypt/renewal-hooks/deploy/emby-cert.sh` hook that
-     regenerates Emby's `.pfx` from the renewed cert.
+     actually proves auto-renewal works, including both deploy hooks under
+     `/etc/letsencrypt/renewal-hooks/deploy/`: `emby-cert.sh` (regenerates
+     the NAS-hosted `.pfx` for other devices) and `caddy-emby.sh` (refreshes
+     Caddy's copy and reloads it).
    - `docker ps -a` — every container should be `Up` (containers restart
      automatically once Docker itself is healthy; compose files were
      restored under `/opt/media/*`, and images will be re-pulled
@@ -219,7 +269,9 @@ to the Cloudflare account, not the hardware, so it should just work once the
      your router keyed to the old one — DHCP reservations and port-forwards
      alike (this is what broke Emby's external/WAN access during the
      2026-08-23 migration: the port-8920 forward was still pointed at the
-     old machine). The bonded/primary interface's MAC is systemd-generated
+     old machine). Since 2026-08-27 that forward lands on `caddy`, not
+     `emby-server`, directly on the box — same port, same fix if it breaks.
+     The bonded/primary interface's MAC is systemd-generated
      from `/etc/machine-id` unless pinned in netplan, so it changes on
      every fresh install — either pin it explicitly (add `macaddress: ...`
      under the interface in `/etc/netplan/*.yaml`) so it's stable across
@@ -227,6 +279,21 @@ to the Cloudflare account, not the hardware, so it should just work once the
      to the new MAC and **verify reachability from outside the LAN**, not
      just locally (a local test can succeed via NAT hairpinning even when
      external access is actually broken).
+   - **If any unused NIC ports or a Wi-Fi chip are present but never
+     cabled/connected** (e.g. the MS-01's two 10G SFP+ ports, unused until
+     there's a 10G switch — see the `server-environment` notes), check
+     `journalctl -p err | grep -i wait-online` for recurring
+     `apt-helper`/`systemd-networkd-wait-online: Timeout occurred` errors.
+     These are cosmetic — real connectivity over `bond0` is fine — caused by
+     `apt-helper wait-online` (apt's daily-update timer) bypassing netplan's
+     own correctly-scoped `systemd-networkd-wait-online` drop-in and instead
+     waiting on *every* networkd-managed link, including ones that will
+     never get carrier. Restoring `/etc` in step 5 already brings back the
+     fix (`/etc/apt/apt.conf.d/80wait-online-disable`, set
+     `APT::Update::Wait-Online "false";`, added 2026-08-25) — this bullet is
+     only relevant if you're setting up genuinely new hardware from scratch
+     (step 1) rather than restoring, in which case recreate that file by
+     hand if the same symptom shows up.
    - From the Backup tab, click "Save & Init Repo" again (re-establishes
      `/root/.restic-password` on the new install) and re-run `backup.sh` /
      `full-system-backup.sh` once manually to confirm both are still
