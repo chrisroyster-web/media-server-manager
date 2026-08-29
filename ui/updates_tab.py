@@ -84,6 +84,12 @@ class UpdatesTab(tk.Frame):
         t.style_button(self._apply_btn)
         self._apply_btn.pack(side="right")
 
+        self._apply_all_btn = tk.Button(docker_hdr, text="⬆⬆ Apply All Updates",
+                                         command=self._apply_all_updates, state="disabled")
+        t.style_button(self._apply_all_btn)
+        self._apply_all_btn.configure(fg=t.status_stopped_text)
+        self._apply_all_btn.pack(side="right", padx=(0, 6))
+
         self._backup_before_recreate_var = tk.BooleanVar(
             value=self.controller.config_manager.get_recreate_backup_enabled())
         tk.Checkbutton(
@@ -298,6 +304,8 @@ class UpdatesTab(tk.Frame):
                 "name": name, "image": image, "tag": stag, "container": container,
             }
         self._apply_btn.config(state="disabled")
+        has_updates = any(r["tag"] == "update" for r in self._docker_row_info.values())
+        self._apply_all_btn.config(state="normal" if has_updates else "disabled")
 
         # Summary cards
         for w in self._summary_frame.winfo_children():
@@ -378,6 +386,7 @@ class UpdatesTab(tk.Frame):
         if not row or not row["container"]:
             return
         self._apply_btn.config(state="disabled", text="Applying…")
+        self._apply_all_btn.config(state="disabled")
         self._log("\n--- Applying update for {} ---\n".format(row["name"]), "warn")
         threading.Thread(target=self._do_apply_update,
                           args=(row["container"], row["name"], row["image"]),
@@ -409,6 +418,15 @@ class UpdatesTab(tk.Frame):
             self._prompt_recreate(ssh, container, info, display_name, image)
 
     def _apply_via_compose(self, ssh, container, info, project, service, config_file, display_name):
+        ok, msg = self._apply_via_compose_sync(
+            ssh, container, info, project, service, config_file, display_name)
+        self.after(0, lambda: self._finish_apply(ok, msg))
+
+    def _apply_via_compose_sync(self, ssh, container, info, project, service, config_file, display_name):
+        """Synchronous compose update: stop, optionally back up, `pull && up -d`.
+        Returns (ok, message) instead of driving the single-item UI callback,
+        so both the single "Apply Update" button and the "Apply All" batch
+        runner share this one code path."""
         # -p (project name) alone isn't reliably enough for `pull`/`up` on every
         # Compose version -- those need to read the actual compose file, and not
         # every version can recover its location from container labels ("No
@@ -428,10 +446,8 @@ class UpdatesTab(tk.Frame):
         self._log("Stopping {}…\n".format(display_name))
         _, stop_err, stop_code = ssh.run("docker stop {}".format(shlex.quote(container)))
         if stop_code != 0:
-            self.after(0, lambda: self._finish_apply(
-                False, "Stop failed (exit {}) — update aborted, container "
-                       "untouched: {}".format(stop_code, stop_err)))
-            return
+            return False, ("Stop failed (exit {}) — update aborted, container "
+                            "untouched: {}".format(stop_code, stop_err))
 
         backup_note = ""
         if self.controller.config_manager.get_recreate_backup_enabled():
@@ -449,13 +465,11 @@ class UpdatesTab(tk.Frame):
                 result="ok" if result["ok"] else "fail")
             self._log(result["output"] + "\n", "ok" if result["ok"] else "err")
             if not result["ok"]:
-                self.after(0, lambda: self._finish_apply(
-                    False, "Backup failed before update — {} is stopped but "
-                           "compose has NOT been run, nothing else was "
-                           "touched. Fix the backup problem (disk space / "
-                           "permissions on {}) and retry."
-                           .format(display_name, result["dir"])))
-                return
+                return False, ("Backup failed before update — {} is stopped but "
+                                "compose has NOT been run, nothing else was "
+                                "touched. Fix the backup problem (disk space / "
+                                "permissions on {}) and retry."
+                                .format(display_name, result["dir"]))
             if result["backed_up"]:
                 backup_note = " Pre-update backup saved to {}.".format(result["dir"])
 
@@ -464,11 +478,9 @@ class UpdatesTab(tk.Frame):
         self._log("$ {}\n".format(cmd), "warn")
         out, err, code = ssh.run(cmd)
         self._log((out or "") + (err or "") + "\n", "ok" if code == 0 else "err")
-        self.after(0, lambda: self._finish_apply(
-            code == 0,
-            "{} updated and recreated via compose.{}".format(display_name, backup_note)
-            if code == 0 else
-            "compose pull/up failed (exit {}) — see output above.{}".format(code, backup_note)))
+        if code == 0:
+            return True, "{} updated and recreated via compose.{}".format(display_name, backup_note)
+        return False, "compose pull/up failed (exit {}) — see output above.{}".format(code, backup_note)
 
     # ---- Standalone (non-compose) container: best-effort recreate ----
     def _prompt_recreate(self, ssh, container, info, display_name, image):
@@ -496,20 +508,23 @@ class UpdatesTab(tk.Frame):
             self._backup_before_recreate_var.get())
 
     def _run_recreate_with_backup(self, ssh, container, info, image, display_name):
-        """Staged, unlike the old one-shot `stop && rm && run`: stop first
-        (abort cleanly if that fails -- container untouched), then back up
-        bind mounts if enabled (abort BEFORE rm if the backup itself fails
-        -- the container is left stopped-but-not-removed, which is
-        recoverable), then rm && run. This is strictly safer than the old
-        single shell command, which could already leave zero containers
-        running if the connection dropped mid-sequence."""
+        ok, msg = self._apply_recreate_sync(ssh, container, info, image, display_name)
+        self.after(0, lambda: self._finish_apply(ok, msg))
+
+    def _apply_recreate_sync(self, ssh, container, info, image, display_name):
+        """Staged, unlike a one-shot `stop && rm && run`: stop first (abort
+        cleanly if that fails -- container untouched), then back up bind
+        mounts if enabled (abort BEFORE rm if the backup itself fails --
+        the container is left stopped-but-not-removed, which is
+        recoverable), then rm && run. Strictly safer than a single shell
+        command, which could leave zero containers running if the
+        connection dropped mid-sequence. Returns (ok, message); shared by
+        the single "Apply Update" button and the "Apply All" batch runner."""
         self._log("Stopping {}…\n".format(display_name))
         _, stop_err, stop_code = ssh.run_sudo("docker stop {}".format(shlex.quote(container)))
         if stop_code != 0:
-            self.after(0, lambda: self._finish_apply(
-                False, "Stop failed (exit {}) — recreate aborted, container "
-                       "untouched: {}".format(stop_code, stop_err)))
-            return
+            return False, ("Stop failed (exit {}) — recreate aborted, container "
+                            "untouched: {}".format(stop_code, stop_err))
 
         backup_note = ""
         if self.controller.config_manager.get_recreate_backup_enabled():
@@ -527,12 +542,10 @@ class UpdatesTab(tk.Frame):
                 result="ok" if result["ok"] else "fail")
             self._log(result["output"] + "\n", "ok" if result["ok"] else "err")
             if not result["ok"]:
-                self.after(0, lambda: self._finish_apply(
-                    False, "Backup failed before recreate — {} is stopped but "
-                           "NOT removed, no data was touched. Fix the backup "
-                           "problem (disk space / permissions on {}) and retry."
-                           .format(display_name, result["dir"])))
-                return
+                return False, ("Backup failed before recreate — {} is stopped but "
+                                "NOT removed, no data was touched. Fix the backup "
+                                "problem (disk space / permissions on {}) and retry."
+                                .format(display_name, result["dir"]))
             if result["backed_up"]:
                 backup_note = " Pre-recreate backup saved to {}.".format(result["dir"])
 
@@ -541,12 +554,25 @@ class UpdatesTab(tk.Frame):
         self._log("$ {}\n".format(cmd), "warn")
         out, err, code = ssh.run_sudo(cmd)
         self._log((out or "") + (err or "") + "\n", "ok" if code == 0 else "err")
-        self.after(0, lambda: self._finish_apply(
-            code == 0,
-            "{} recreated on the new image.{}".format(display_name, backup_note)
-            if code == 0 else
-            "Recreate failed (exit {}) — the old container may already be "
-            "stopped/removed. Check the output above.{}".format(code, backup_note)))
+        if code == 0:
+            return True, "{} recreated on the new image.{}".format(display_name, backup_note)
+        return False, ("Recreate failed (exit {}) — the old container may already be "
+                        "stopped/removed. Check the output above.{}".format(code, backup_note))
+
+    def _apply_one_sync(self, ssh, container, info, display_name, image):
+        """Route a single container to its update path (compose vs. manual
+        recreate) and run it synchronously. Used by the "Apply All" batch
+        runner; the single-item flow instead calls _apply_via_compose /
+        _run_recreate_with_backup directly since it also needs the
+        recreate confirmation dialog first."""
+        labels  = (info.get("Config") or {}).get("Labels") or {}
+        project = labels.get("com.docker.compose.project")
+        service = labels.get("com.docker.compose.service")
+        config_file = labels.get("com.docker.compose.project.config_files", "")
+        if project and service:
+            return self._apply_via_compose_sync(
+                ssh, container, info, project, service, config_file, display_name)
+        return self._apply_recreate_sync(ssh, container, info, image, display_name)
 
     def _build_recreate_cmd(self, container, info, image):
         """Preview text for the confirmation dialog only -- actual execution
@@ -615,10 +641,105 @@ class UpdatesTab(tk.Frame):
 
     def _finish_apply(self, ok, message):
         self._apply_btn.config(state="normal", text="⬆  Apply Update")
+        has_updates = any(r["tag"] == "update" for r in self._docker_row_info.values())
+        self._apply_all_btn.config(state="normal" if has_updates else "disabled")
         self._log(message + "\n", "ok" if ok else ("err" if ok is False else "warn"))
         self._set_status(message, "ok" if ok else ("error" if ok is False else "info"))
         if ok:
             self.after(800, self._refresh)
+
+    # =========================================================
+    # DOCKER — APPLY ALL UPDATES
+    # =========================================================
+    def _apply_all_updates(self):
+        pending = [row for row in self._docker_row_info.values() if row["tag"] == "update"]
+        if not pending:
+            return
+        self._apply_btn.config(state="disabled")
+        self._apply_all_btn.config(state="disabled", text="Preparing…")
+        threading.Thread(target=self._prepare_apply_all, args=(pending,), daemon=True).start()
+
+    def _prepare_apply_all(self, pending):
+        """Inspect every pending container up front so the confirmation
+        dialog can tell the user which ones are safe compose updates vs.
+        which need a best-effort manual recreate — and so the batch run
+        itself doesn't need to re-inspect anything."""
+        ssh = self.controller.ssh
+        plan = []
+        for row in pending:
+            container = row["container"]
+            out, _, code = ssh.run("docker inspect {} 2>/dev/null".format(shlex.quote(container)))
+            info = None
+            if code == 0 and out.strip():
+                try:
+                    data = json.loads(out)
+                    info = data[0] if data else None
+                except Exception:
+                    info = None
+            labels = ((info or {}).get("Config") or {}).get("Labels") or {}
+            method = ("compose" if labels.get("com.docker.compose.project")
+                      and labels.get("com.docker.compose.service") else "recreate")
+            plan.append(dict(row, info=info, method=method))
+        self.after(0, lambda: self._confirm_apply_all(plan))
+
+    def _confirm_apply_all(self, plan):
+        lines = ["  • {} ({}) — {}".format(
+            p["name"], p["image"],
+            "compose" if p["method"] == "compose" else "MANUAL RECREATE"
+            if p["info"] else "SKIP — not inspectable") for p in plan]
+        n_recreate = sum(1 for p in plan if p["method"] == "recreate" and p["info"])
+        warn = ("\n\n{} container{} will use a best-effort manual recreate "
+                "(clones current ports/volumes/env/restart policy/network — "
+                "anything else is not preserved). Watch the output console "
+                "as it runs.".format(n_recreate, "s" if n_recreate != 1 else "")
+                ) if n_recreate else ""
+        msg = (
+            "This will update {} container{} one at a time, in this order:\n\n{}\n\n"
+            "Each is stopped, optionally backed up (per the checkbox above), "
+            "then recreated on its new image. A failure on one does not stop "
+            "the rest — you'll get a summary when it's done.{}\n\nContinue?"
+        ).format(len(plan), "s" if len(plan) != 1 else "", "\n".join(lines), warn)
+
+        if not messagebox.askyesno("Apply All Updates", msg, parent=self):
+            self._apply_all_btn.config(state="normal", text="⬆⬆ Apply All Updates")
+            self._on_docker_select()
+            return
+
+        runnable = [p for p in plan if p["info"] is not None]
+        skipped  = [p for p in plan if p["info"] is None]
+        for p in skipped:
+            self._log("Skipping {} — could not inspect it (is it still "
+                       "running?)\n".format(p["name"]), "err")
+
+        self._log("\n=== Applying {} update{} ===\n".format(
+            len(runnable), "s" if len(runnable) != 1 else ""), "warn")
+        self._apply_all_btn.config(text="Applying All…")
+        threading.Thread(target=self._do_apply_all,
+                          args=(runnable, len(skipped)), daemon=True).start()
+
+    def _do_apply_all(self, plan, pre_skipped):
+        ssh = self.controller.ssh
+        oks = []
+        for p in plan:
+            self._log("\n--- {} ---\n".format(p["name"]), "warn")
+            ok, msg = self._apply_one_sync(ssh, p["container"], p["info"], p["name"], p["image"])
+            self._log(msg + "\n", "ok" if ok else "err")
+            oks.append(ok)
+
+        ok_count   = sum(oks)
+        total      = len(plan) + pre_skipped
+        fail_count = total - ok_count
+        summary = "Applied {}/{} update{} successfully.".format(
+            ok_count, total, "s" if total != 1 else "")
+        if fail_count:
+            summary += " {} failed or skipped — see output above.".format(fail_count)
+        self.after(0, lambda: self._finish_apply_all(fail_count == 0, summary))
+
+    def _finish_apply_all(self, all_ok, message):
+        self._apply_all_btn.config(state="normal", text="⬆⬆ Apply All Updates")
+        self._log("\n=== " + message + " ===\n", "ok" if all_ok else "err")
+        self._set_status(message, "ok" if all_ok else "error")
+        self.after(800, self._refresh)
 
     # =========================================================
     # HELPERS
