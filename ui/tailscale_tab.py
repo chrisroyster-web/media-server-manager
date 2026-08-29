@@ -137,18 +137,53 @@ class TailscaleTab(tk.Frame):
         self._refresh_btn.config(state="disabled")
         threading.Thread(target=self._fetch, daemon=True).start()
 
+    # Known install locations for platforms that don't put the Tailscale
+    # CLI on the default (non-interactive) SSH PATH. Synology DSM is the
+    # main offender: Package Center apps land under /var/packages/<name>/
+    # and are never symlinked into PATH, so a bare `tailscale` gets
+    # "command not found" even though it's genuinely installed and running.
+    _ALT_BINARIES = (
+        "tailscale",
+        "/var/packages/Tailscale/target/bin/tailscale",
+        "/usr/local/bin/tailscale",
+        "/usr/bin/tailscale",
+    )
+
+    def _run_tailscale(self, ssh, args):
+        """Try `tailscale <args>` across known binary locations. Returns
+        (out, err, code) from the first one that isn't a bare
+        "command not found" (exit 127) -- or the last attempt's result if
+        every location comes back that way, so a real error (e.g. the
+        daemon itself being down) still surfaces instead of being masked."""
+        last = ("", "", 127)
+        for binary in self._ALT_BINARIES:
+            out, err, code = ssh.run("{} {} 2>&1".format(binary, args))
+            last = (out, err, code)
+            if code != 127:
+                return last
+        return last
+
     def _fetch(self):
         try:
             ssh = self.controller.ssh
-            out, err, code = ssh.run("tailscale status --json 2>/dev/null")
+            out, err, code = self._run_tailscale(ssh, "status --json")
             if code != 0 or not out.strip():
                 # Try without --json (older versions)
-                out_txt, _, code2 = ssh.run("tailscale status 2>/dev/null")
+                out_txt, _, code2 = self._run_tailscale(ssh, "status")
                 if code2 == 0:
                     self.after(0, lambda: self._populate_text(out_txt))
-                else:
+                elif code == 127:
                     self.after(0, lambda: self._status.config(
                         text="tailscale not found or not running",
+                        bg=self.theme.surface_dark, fg=self.theme.status_stopped_text))
+                else:
+                    # Installed and reachable enough to run, but it returned
+                    # a real error (e.g. daemon not listening on its
+                    # socket) -- show that instead of a misleading
+                    # "not installed".
+                    msg = (out or out_txt or "tailscale error").strip().splitlines()[0]
+                    self.after(0, lambda m=msg: self._status.config(
+                        text=m[:200],
                         bg=self.theme.surface_dark, fg=self.theme.status_stopped_text))
                 return
             try:
