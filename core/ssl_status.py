@@ -20,6 +20,22 @@ def _dq(value):
     return s.replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$").replace("`", "\\`")
 
 
+def _discover_vhost_hostname(ssh, port):
+    """Look for a Caddy site block bound to this exact port (`hostname:port
+    {`) and return its hostname, or None. Caddy won't hand back a cert for
+    a mismatched SNI -- so when the configured host/IP itself doesn't work
+    as the SNI (e.g. it's a bare LAN IP, not the vhost's public hostname),
+    this is the last resort before calling it a real error. Kept in sync
+    with ui/ssl_tab.py's identical helper -- see that file for the tab's
+    interactive version of this same check."""
+    out, _, _ = ssh.run(
+        "grep -hoE '^[A-Za-z0-9._-]+:{p}[[:space:]]*\\{{' "
+        "/etc/caddy/Caddyfile /etc/caddy/sites-enabled/* 2>/dev/null "
+        "| head -1 | cut -d: -f1".format(p=_dq(port)))
+    hostname = (out or "").strip()
+    return hostname or None
+
+
 def check_hosts_expiry(ssh, hosts) -> list:
     """
     hosts: iterable of (host, port) pairs.
@@ -46,6 +62,15 @@ def check_hosts_expiry(ssh, hosts) -> list:
             _try("localhost", "localhost") or
             None
         )
+
+        if out is None:
+            discovered = _discover_vhost_hostname(ssh, port)
+            if discovered:
+                out = (
+                    _try(host, discovered) or
+                    _try("localhost", discovered) or
+                    None
+                )
 
         if out is None:
             results.append({"host": host, "port": port, "days": None,

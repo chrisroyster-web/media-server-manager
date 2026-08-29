@@ -36,6 +36,7 @@ class SSLTab(tk.Frame):
         self.theme      = controller.theme
         self._results   = []
         self._loaded_host = None
+        self._row_keys  = {}   # tree iid -> (host, port), for Remove Selected
         self._build_ui()
 
     # =========================================================
@@ -127,6 +128,12 @@ class SSLTab(tk.Frame):
         t.style_button(add_btn)
         add_btn.pack(side="left")
 
+        self._remove_btn = tk.Button(add_frame, text="✕ Remove Selected",
+                                      command=self._remove_selected, state="disabled")
+        t.style_button(self._remove_btn)
+        self._remove_btn.pack(side="left", padx=(6, 0))
+        self._tree.bind("<<TreeviewSelect>>", self._on_tree_select)
+
         diag_btn = tk.Button(add_frame, text="🔍 Diagnose Server", command=self._diagnose)
         t.style_button(diag_btn)
         diag_btn.pack(side="left", padx=(12, 0))
@@ -194,10 +201,15 @@ class SSLTab(tk.Frame):
             return
 
         seen = set()
+        # host:port pairs the user has explicitly dismissed via "Remove
+        # Selected" (e.g. a port nothing actually serves HTTPS on for this
+        # server's architecture) -- persisted so they don't come back on
+        # every restart/host-change reseed.
+        excluded = {tuple(pair) for pair in cfg.get("ssl_excluded_hosts", [])}
 
         def _add(h, p):
             key = (h, str(p))
-            if key not in seen:
+            if key not in seen and key not in excluded:
                 seen.add(key)
                 self._results.append({"host": h, "port": str(p), "status": "pending"})
 
@@ -260,9 +272,38 @@ class SSLTab(tk.Frame):
         # Avoid duplicates
         if not any(r["host"] == h and r["port"] == p for r in self._results):
             self._results.append({"host": h, "port": p, "status": "pending"})
+        self._unexclude(h, p)   # a manual re-add overrides a past Remove
         self._host_var.set("")
         if self.controller.ssh.connected:
             self._check_single(h, p)
+
+    def _on_tree_select(self, _event=None):
+        self._remove_btn.config(
+            state="normal" if self._tree.selection() else "disabled")
+
+    def _remove_selected(self):
+        sel = self._tree.selection()
+        if not sel:
+            return
+        key = self._row_keys.get(sel[0])
+        if not key:
+            return
+        host, port = key
+        self._results = [r for r in self._results
+                         if not (r["host"] == host and r["port"] == port)]
+        cfg = self.controller.config_manager
+        excluded = cfg.get("ssl_excluded_hosts", [])
+        if [host, port] not in excluded:
+            excluded.append([host, port])
+            cfg.set("ssl_excluded_hosts", excluded)
+        self._repopulate()
+
+    def _unexclude(self, host, port):
+        cfg = self.controller.config_manager
+        excluded = cfg.get("ssl_excluded_hosts", [])
+        pruned = [pair for pair in excluded if tuple(pair) != (host, port)]
+        if len(pruned) != len(excluded):
+            cfg.set("ssl_excluded_hosts", pruned)
 
     # =========================================================
     # FETCH
@@ -284,6 +325,19 @@ class SSLTab(tk.Frame):
         if r:
             threading.Thread(target=lambda: (self._check_cert(r), self.after(0, self._repopulate)),
                              daemon=True).start()
+
+    def _discover_vhost_hostname(self, ssh, port):
+        """Look for a Caddy site block bound to this exact port
+        (`hostname:port {`) and return its hostname, or None. Caddy and
+        nginx-with-SNI-vhost setups won't hand back a cert for a mismatched
+        SNI, so this is the last resort when connecting with the
+        configured host/IP itself didn't work."""
+        out, _, _ = ssh.run(
+            "grep -hoE '^[A-Za-z0-9._-]+:{p}[[:space:]]*\\{{' "
+            "/etc/caddy/Caddyfile /etc/caddy/sites-enabled/* 2>/dev/null "
+            "| head -1 | cut -d: -f1".format(p=_dq(port)))
+        hostname = (out or "").strip()
+        return hostname or None
 
     def _check_cert(self, r):
         ssh   = self.controller.ssh
@@ -312,6 +366,22 @@ class SSLTab(tk.Frame):
             _try("localhost", "localhost") or  # loopback, no SNI
             None
         )
+
+        # host is often a bare LAN IP (what it's used for elsewhere -- API
+        # calls, SSH), not the public hostname a strict-SNI reverse proxy
+        # (Caddy in particular) actually serves that cert under. A Caddy
+        # site block with no SNI match sends no certificate at all rather
+        # than falling back to a default -- so if every host/IP-based SNI
+        # attempt above came back empty, look for a locally configured
+        # vhost for this exact port and retry with its real hostname.
+        if out is None:
+            discovered = self._discover_vhost_hostname(ssh, port)
+            if discovered:
+                out = (
+                    _try(host,        discovered) or
+                    _try("localhost", discovered) or
+                    None
+                )
 
         if out is None:
             diag, diag_err, _ = ssh.run(
@@ -429,6 +499,7 @@ class SSLTab(tk.Frame):
                               fg=self.theme.status_stopped_text if err else self.theme.text_muted)
 
         self._tree.delete(*self._tree.get_children())
+        self._row_keys = {}   # tree iid -> (host, port), for Remove Selected
         for r in sorted(self._results,
                         key=lambda x: ({"crit": 0, "warn": 1, "error": 2, "ok": 3}.get(x["status"], 4),
                                        x.get("days", 9999))):
@@ -437,12 +508,14 @@ class SSLTab(tk.Frame):
             tag    = "err" if status == "error" else (
                      status if status in ("ok", "warn", "crit") else "err")
             days_s = str(r.get("days", "--"))
-            self._tree.insert("", "end", values=(
+            iid = self._tree.insert("", "end", values=(
                 r["host"], r["port"], days_s,
                 r.get("expires", "--"),
                 r.get("issuer", r.get("error", "--")),
                 r.get("sans", "--"),
             ), tags=(tag,))
+            self._row_keys[iid] = (r["host"], r["port"])
+        self._on_tree_select()
 
         if crit:
             self._set_status("{} certificate{} expiring within {} days!".format(
